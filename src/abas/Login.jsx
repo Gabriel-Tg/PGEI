@@ -17,10 +17,22 @@ export default function Login({
   useEffect(() => {
     let active = true
     ;(async () => {
-      const { data } = await supabase.auth.getUser()
-      if (!active) return
-      setUser(data?.user ?? null)
-      setLoading(false)
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!active) return
+        if (error) {
+          setError(error.message)
+          setUser(null)
+          return
+        }
+        setUser(data?.user ?? null)
+      } catch {
+        if (!active) return
+        setError('Falha de conexão com o Supabase. Verifique a URL/chave do projeto no .env/.env.local e sua internet.')
+        setUser(null)
+      } finally {
+        if (active) setLoading(false)
+      }
     })()
     return () => { active = false }
   }, [])
@@ -28,11 +40,15 @@ export default function Login({
   async function signIn(e) {
     e.preventDefault()
     setError(null)
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) { setError(error.message); return }
-    setUser(data.user)
-    if (typeof onAuthenticated === 'function' && data?.user) {
-      onAuthenticated(data.user)
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) { setError(error.message); return }
+      setUser(data.user)
+      if (typeof onAuthenticated === 'function' && data?.user) {
+        onAuthenticated(data.user)
+      }
+    } catch {
+      setError('Falha de conexão com o Supabase. Verifique a URL/chave do projeto no .env/.env.local e sua internet.')
     }
   }
 

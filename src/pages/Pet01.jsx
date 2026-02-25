@@ -577,8 +577,6 @@ if (typeof window !== "undefined") {
 
       <h1 className="pet01-title">Apontamento — Máquina P1</h1>
 
-      <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="pet01-logo" onError={(e) => e.currentTarget.src = "/savanti-logo.png"} />
-
       {/* Buttons: keep only Refugo (we removed Apontar Produção button per your request) */}
       <div className="pet01-buttons" style={{ marginBottom: 12 }}>
         <button className="pet01-btn orange" onClick={() => setShowRefugo(true)}>Apontar Refugo</button>

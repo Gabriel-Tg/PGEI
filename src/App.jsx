@@ -9,14 +9,10 @@ import Login from './abas/Login'
 import Painel from './abas/Painel'
 import Lista from './abas/Lista'
 import NovaOrdem from './abas/NovaOrdem'
-import Registro from './abas/Registro'
-import Estoque from './abas/Estoque'
 import Rastreio from './abas/Rastreio'
 import Gestao from './abas/Gestao'
 import PainelTV from './abas/PainelTV'
 import Pet01 from './pages/Pet01'
-import Pet02 from './pages/Pet02'
-import Pet03 from './pages/Pet03'
 import Ficha from './pages/Ficha'
 import Prioridade from './pages/Prioridade'
 import useOrders from './hooks/useOrders'
@@ -58,9 +54,8 @@ export default function App(){
   const [machinePriorities, setMachinePriorities] = useState({})
   const [prioritiesLoading, setPrioritiesLoading] = useState(false)
 
-  const { authUser, authChecked, isAdmin, accessLevel, isMendes, isStockOnlyAccess } = useAuthAdmin()
-  const hasEstoqueAccess = !!authUser && (accessLevel === 2 || accessLevel === 3 || isMendes)
-  const hasGestaoAccess = !!authUser && !isMendes && !isStockOnlyAccess && (accessLevel === 1 || accessLevel === 2)
+  const { authUser, authChecked, isAdmin, isProducao, hasAccess } = useAuthAdmin()
+  const hasGestaoAccess = !!authUser && isAdmin
 
   const {
     ordens, paradas,
@@ -223,13 +218,8 @@ export default function App(){
     }
     if (!authUser) return
 
-    if (isMendes) {
-      if (tab !== 'estoque' && tab !== 'login') {
-        setTab('estoque')
-      }
-      if (tab === 'login') {
-        setTab('estoque')
-      }
+    if (!hasAccess) {
+      setTab('login')
       return
     }
 
@@ -238,15 +228,10 @@ export default function App(){
       return
     }
 
-    if (tab === 'estoque' && accessLevel !== 2 && accessLevel !== 3) {
-      setTab('painel')
-      return
-    }
-
-    if (tab === 'gestao' && isStockOnlyAccess) {
+    if (!isAdmin && !['painel', 'lista', 'apontamento', 'login'].includes(tab)) {
       setTab('painel')
     }
-  }, [authChecked, authUser, tab, isMendes, accessLevel, isStockOnlyAccess])
+  }, [authChecked, authUser, tab, hasAccess, isAdmin])
 
   async function handleSignOut() {
     try {
@@ -269,8 +254,6 @@ export default function App(){
     return (
       <div className="app">
         <div className="brand-bar">
-          <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
-               onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
           <div className="brand-titles">
             <h1 className="brand-title">Painel de Produção</h1>
             <div className="brand-sub">Savanti Plásticos • Acesso Admin</div>
@@ -285,8 +268,6 @@ export default function App(){
     return (
       <div className="app">
         <div className="brand-bar">
-          <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
-               onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
           <div className="brand-titles">
             <h1 className="brand-title">Painel de Produção</h1>
             <div className="brand-sub">Savanti Plásticos • Ficha Técnica Digital</div>
@@ -301,8 +282,6 @@ export default function App(){
     return (
       <div className="app">
         <div className="brand-bar">
-          <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
-               onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
           <div className="brand-titles">
             <h1 className="brand-title">Painel de Produção</h1>
             <div className="brand-sub">Savanti Plásticos • Indicadores por Setor</div>
@@ -376,131 +355,15 @@ export default function App(){
     )
   }
 
-    if (location && location.pathname === '/pet-02') {
-    const ativosP2 = ordens.filter(o => o.machine_id === 'P2' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
-    return (
-      <>
-        <Pet02
-          registroGrupos={registroGrupos}
-          ativosP2={ativosP2}
-          tick={tick}
-          paradas={paradas}
-          onStatusChange={handleStatusChange}
-          setStartModal={setStartModal}
-          setStopModal={setStopModal}
-          setLowEffModal={setLowEffModal}
-          setLowEffEndModal={setLowEffEndModal}
-          setResumeModal={setResumeModal}
-          setFinalizando={setFinalizando}
-          setEditando={setEditando}
-        />
-        <GlobalModals
-          editando={editando} setEditando={setEditando}
-          finalizando={finalizando} setFinalizando={setFinalizando} confirmData={confirmData} setConfirmData={setConfirmData}
-          startModal={startModal} setStartModal={setStartModal}
-          stopModal={stopModal} setStopModal={setStopModal}
-          resumeModal={resumeModal} setResumeModal={setResumeModal}
-          lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
-          lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
-          onUpdateOrder={atualizar}
-          onFinalize={finalizar}
-          onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
-          onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
-        />
-      </>
-    );
-  }
-
-    if (location && location.pathname === '/pet-03') {
-    const ativosP3 = ordens.filter(o => o.machine_id === 'P3' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
-    return (
-      <>
-        <Pet03
-          registroGrupos={registroGrupos}
-          ativosP3={ativosP3}
-          tick={tick}
-          paradas={paradas}
-          onStatusChange={handleStatusChange}
-          setStartModal={setStartModal}
-          setStopModal={setStopModal}
-          setLowEffModal={setLowEffModal}
-          setLowEffEndModal={setLowEffEndModal}
-          setResumeModal={setResumeModal}
-          setFinalizando={setFinalizando}
-          setEditando={setEditando}
-        />
-        <GlobalModals
-          editando={editando} setEditando={setEditando}
-          finalizando={finalizando} setFinalizando={setFinalizando} confirmData={confirmData} setConfirmData={setConfirmData}
-          startModal={startModal} setStartModal={setStartModal}
-          stopModal={stopModal} setStopModal={setStopModal}
-          resumeModal={resumeModal} setResumeModal={setResumeModal}
-          lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
-          lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
-          onUpdateOrder={atualizar}
-          onFinalize={finalizar}
-          onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
-          onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
-        />
-      </>
-    );
-  }
-
-      if (location && location.pathname === '/pet-04') {
-    const ativosP4 = ordens.filter(o => o.machine_id === 'p4' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
-    return (
-      <>
-        <Pet04
-          registroGrupos={registroGrupos}
-          ativosP4={ativosP4}
-          tick={tick}
-          paradas={paradas}
-          onStatusChange={handleStatusChange}
-          setStartModal={setStartModal}
-          setStopModal={setStopModal}
-          setLowEffModal={setLowEffModal}
-          setLowEffEndModal={setLowEffEndModal}
-          setResumeModal={setResumeModal}
-          setFinalizando={setFinalizando}
-          setEditando={setEditando}
-        />
-        <GlobalModals
-          editando={editando} setEditando={setEditando}
-          finalizando={finalizando} setFinalizando={setFinalizando} confirmData={confirmData} setConfirmData={setConfirmData}
-          startModal={startModal} setStartModal={setStartModal}
-          stopModal={stopModal} setStopModal={setStopModal}
-          resumeModal={resumeModal} setResumeModal={setResumeModal}
-          lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
-          lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
-          onUpdateOrder={atualizar}
-          onFinalize={finalizar}
-          onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
-          onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
-        />
-      </>
-    );
-  }
-
   // controle de abas e renderização
 
   return (
-    <div className={`app ${tab === 'painel' ? 'has-meta' : ''}`}>
+    <div className="app">
 
 
 {/* mostre a barra de marca apenas quando não estivermos no painel */}
 {tab !== 'painel' && (
   <div className="brand-bar">
-    <img src="/Logotipo Savanti.png" alt="Savanti Plásticos" className="brand-logo"
-         onError={(e)=>{ e.currentTarget.src='/savanti-logo.png'; }}/>
     <div className="brand-titles">
       <h1 className="brand-title">Painel de Produção</h1>
       <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
@@ -508,32 +371,23 @@ export default function App(){
   </div>
 )}
 
-      {authUser && tab !== 'login' && (
+      {authUser && hasAccess && tab !== 'login' && (
         <div className="tabs">
-          {isMendes ? (
-            <>
-              <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
-              <button className="tabbtn" onClick={handleSignOut}>Sair</button>
-            </>
-          ) : (
-            <>
-              <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
-              <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
-              {isAdmin && (
-                <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
-              )}
-              <button className={`tabbtn ${tab==='registro'?'active':''}`} onClick={()=>setTab('registro')}>Paradas</button>
+          <>
+            <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
+            <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
+            <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
+            {isAdmin && (
+              <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
+            )}
+            {isAdmin && (
               <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
-              {authUser && (accessLevel === 2 || accessLevel === 3) && (
-                <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
-              )}
-              <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
-              {hasGestaoAccess && (
-                <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
-              )}
-              <button className="tabbtn" onClick={handleSignOut}>Sair</button>
-            </>
-          )}
+            )}
+            {hasGestaoAccess && (
+              <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
+            )}
+            <button className="tabbtn" onClick={handleSignOut}>Sair</button>
+          </>
         </div>
       )}
 
@@ -563,7 +417,7 @@ export default function App(){
         )
       )}
 
-      {tab === 'painel' && !isMendes && (
+      {tab === 'painel' && hasAccess && (
         <Painel
           ativosPorMaquina={ativosPorMaquina}
           paradas={paradas}
@@ -578,7 +432,7 @@ export default function App(){
         />
       )}
 
-      {tab === 'lista' && !isMendes && (
+      {tab === 'lista' && hasAccess && (
         <Lista
           ativosPorMaquina={ativosPorMaquina}
           sensors={sensors}
@@ -592,7 +446,7 @@ export default function App(){
         />
       )}
 
-      {tab === 'nova' && accessLevel === 2 && !isMendes && (
+      {tab === 'nova' && isAdmin && (
         isAdmin ? (
           <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} />
         ) : (
@@ -603,27 +457,15 @@ export default function App(){
         )
       )}
 
-      {tab === 'registro' && !isMendes && (
-        <Registro registroGrupos={registroGrupos} openSet={openSet} toggleOpen={toggleOpen} isAdmin={isAdmin} />
-      )}
-
-      {tab === 'rastreio' && !isMendes && (
+      {tab === 'rastreio' && isAdmin && (
         <Rastreio />
       )}
 
-      {tab === 'estoque' && hasEstoqueAccess && (
-        <Estoque
-          readOnly={isMendes}
-          allowedClient={isMendes ? 'Mendes' : ''}
-          enableProductImagePreview={isMendes}
-        />
-      )}
-
-      {tab === 'apontamento' && !isMendes && (
+      {tab === 'apontamento' && hasAccess && (
         <Apontamento isAdmin={isAdmin} />
       )}
 
-      {tab === 'gestao' && !isMendes && (
+      {tab === 'gestao' && isAdmin && (
         hasGestaoAccess ? (
           <Gestao />
         ) : (

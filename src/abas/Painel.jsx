@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../lib/constants";
 import { statusClass, jaIniciou } from "../lib/utils";
-import "../styles/Barrademeta.css";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
 
@@ -25,14 +24,10 @@ export default function Painel({
   setStartModal,
   setFinalizando,
   lastFinalizadoPorMaquina,
-  metaPercent = 46.22,
   onScanned, // opcional: callback do pai para re-fetch geral
   authUser,
   machinePriorities = {},
 }) {
-  const pct = Math.max(0, Math.min(100, Math.round(metaPercent)));
-  const pctText = `${pct}%`;
-
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
 
@@ -285,14 +280,6 @@ export default function Painel({
 
   return (
     <div className="board-wrapper">
-      <div className="meta-banner" role="status" aria-live="polite">
-        <div className="meta-banner-inner">
-          <span className="meta-msg">🚀 Alcançamos&nbsp;</span>
-          <span className="meta-percent">{pctText}</span>
-          <span className="meta-msg">&nbsp;da meta! 🚀</span>
-        </div>
-      </div>
-
       <div className="board">
         {MAQUINAS.map((m) => {
           const lista = source[m] ?? [];
