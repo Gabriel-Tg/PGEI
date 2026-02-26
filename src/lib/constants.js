@@ -1,5 +1,5 @@
 // src/lib/constants.js
-export const ADMIN_EMAILS = ['gabrielalvesdesiqueira683@gmail.com'];
+export const ADMIN_EMAILS = ['gabrielalvesdesiqueira683@gmail.com','hadjnovan@gmail.com'];
 
 export const PRODUCAO_EMAILS = [];
 
