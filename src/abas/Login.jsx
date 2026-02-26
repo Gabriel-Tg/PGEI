@@ -8,6 +8,7 @@ export default function Login({
   authenticatedDescription,
   showAdminShortcut = true,
 }) {
+  const isMissingSessionError = (err) => String(err?.message || '').toLowerCase().includes('auth session missing')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [user, setUser] = useState(null)
@@ -21,7 +22,11 @@ export default function Login({
         const { data, error } = await supabase.auth.getUser()
         if (!active) return
         if (error) {
-          setError(error.message)
+          if (!isMissingSessionError(error)) {
+            setError(error.message)
+          } else {
+            setError(null)
+          }
           setUser(null)
           return
         }
