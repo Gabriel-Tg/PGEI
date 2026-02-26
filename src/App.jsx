@@ -365,6 +365,8 @@ export default function App(){
 {tab !== 'painel' && tab !== 'login' && (
   <div className="brand-bar">
     <div className="brand-titles">
+          <img src="/gssystem.png" alt="GS System" className="brand-logo"
+         onError={(e)=>{ e.currentTarget.src='/gssystem.png'; }}/>
       <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
       <div className="brand-sub">Controle da Produção</div>
     </div>
