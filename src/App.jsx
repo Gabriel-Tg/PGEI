@@ -141,7 +141,7 @@ export default function App(){
 
   async function handlePriorityChange(machineId, priorityValue) {
     const userEmail = String(authUser?.email || '').toLowerCase();
-    if (userEmail !== 'nfe@savantiplasticos.com.br') {
+    if (userEmail !== 'gabrielalvesdesiqueira683@gmail.com') {
       alert('Apenas o e-mail autorizado pode alterar prioridades.');
       return;
     }
@@ -255,8 +255,8 @@ export default function App(){
       <div className="app">
         <div className="brand-bar">
           <div className="brand-titles">
-            <h1 className="brand-title">Painel de Produção</h1>
-            <div className="brand-sub">Savanti Plásticos • Acesso Admin</div>
+            <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
+            <div className="brand-sub">Acesso Admin</div>
           </div>
         </div>
         <Login />
@@ -269,8 +269,8 @@ export default function App(){
       <div className="app">
         <div className="brand-bar">
           <div className="brand-titles">
-            <h1 className="brand-title">Painel de Produção</h1>
-            <div className="brand-sub">Savanti Plásticos • Ficha Técnica Digital</div>
+            <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
+            <div className="brand-sub">Ficha Técnica Digital</div>
           </div>
         </div>
         <Ficha />
@@ -283,8 +283,8 @@ export default function App(){
       <div className="app">
         <div className="brand-bar">
           <div className="brand-titles">
-            <h1 className="brand-title">Painel de Produção</h1>
-            <div className="brand-sub">Savanti Plásticos • Indicadores por Setor</div>
+            <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
+            <div className="brand-sub">Indicadores por Setor</div>
           </div>
         </div>
         <Indicadores />
@@ -362,11 +362,11 @@ export default function App(){
 
 
 {/* mostre a barra de marca apenas quando não estivermos no painel */}
-{tab !== 'painel' && (
+{tab !== 'painel' && tab !== 'login' && (
   <div className="brand-bar">
     <div className="brand-titles">
-      <h1 className="brand-title">Painel de Produção</h1>
-      <div className="brand-sub">Savanti Plásticos • Controle de Ordens</div>
+      <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
+      <div className="brand-sub">Controle da Produção</div>
     </div>
   </div>
 )}
