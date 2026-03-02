@@ -301,6 +301,10 @@ export default function Rastreio() {
                               <label>Código lido</label>
                               <strong>{sc.code || sc.op_code || 'N/A'}</strong>
                             </div>
+                            <div>
+                              <label>Operador</label>
+                              <strong>{sc.operator || 'N/A'}</strong>
+                            </div>
                           </div>
                         </div>
                       )

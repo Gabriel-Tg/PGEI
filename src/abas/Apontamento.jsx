@@ -552,6 +552,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       porTurno[turno][maq].caixas.push({
         num: b.scanned_box,
         hora: b.created_at,
+        operator: b.operator || '',
         order_id: orderId,
         order: matchedOrder || null,
         product: matchedOrder?.product || '',
@@ -874,6 +875,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                                     {caixasSorted.map((c, i) => (
                                       <li key={i}>
                                         Caixa {c.num}: {fmtDateTime(c.hora)}
+                                        {c.operator ? ` — Operador: ${c.operator}` : ''}
                                         {c.order ? ` — O.S: ${c.order.code || c.order.id} (Padrão: ${c.order.standard})` : ''}
                                       </li>
                                     ))}

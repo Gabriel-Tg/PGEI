@@ -532,3 +532,55 @@
   font-weight: 800 !important;
   font-size: 22px !important;
 }
+
+.pet01-operator-row {
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: -4px;
+  margin-bottom: 4px;
+  color: var(--pet01-subtext);
+  font-weight: 600;
+}
+
+.pet01-operator-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pet01-tablet-toggle {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 9000;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: 0;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(2, 8, 23, 0.25);
+}
+
+.pet01-tablet-toggle.on {
+  background: linear-gradient(90deg, #16a34a, #22c55e);
+  color: white;
+}
+
+.pet01-tablet-toggle.off {
+  background: linear-gradient(90deg, #6b7280, #9ca3af);
+  color: white;
+}

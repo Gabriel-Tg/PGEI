@@ -19,6 +19,17 @@
   align-items: center;
 }
 
+.gestao-view-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gestao-view-actions .btn.is-active {
+  border-color: var(--accent, #1769aa);
+  font-weight: 700;
+}
+
 .gestao-val-filters {
   display: flex;
   gap: 10px;
@@ -171,6 +182,76 @@
   font-size: 13px;
 }
 
+.gestao-monitor-wrap {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.gestao-monitor-card {
+  padding: 12px;
+  border: 1px solid #eee;
+  box-shadow: none;
+}
+
+.gestao-monitor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gestao-monitor-pill {
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.gestao-monitor-pill.online {
+  color: #1b5e20;
+  background: #e8f5e9;
+}
+
+.gestao-monitor-pill.offline {
+  color: #b71c1c;
+  background: #ffebee;
+}
+
+.gestao-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gestao-monitor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fafafa;
+}
+
+.gestao-monitor-field span {
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.gestao-monitor-field strong {
+  font-size: 14px;
+  color: #222;
+}
+
+.gestao-monitor-field small {
+  font-size: 12px;
+  color: #666;
+}
+
 @media (max-width: 900px) {
   .gestao-kpis {
     grid-template-columns: 1fr;
@@ -179,5 +260,9 @@
   .gestao-timeline-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .gestao-monitor-grid {
+    grid-template-columns: 1fr;
   }
 }

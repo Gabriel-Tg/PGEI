@@ -291,13 +291,16 @@ export default function App(){
       </div>
     )
   }
-  if (location && location.pathname === '/pet-01') {
-    const ativosP1 = ordens.filter(o => o.machine_id === 'P1' && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+  const petRouteMatch = String(location?.pathname || '').match(/^\/pet-(\d{2})$/i)
+  if (petRouteMatch) {
+    const machineId = `P${Number(petRouteMatch[1])}`
+    const ativosP1 = ordens.filter(o => o.machine_id === machineId && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (
       <>
         <Pet01
           registroGrupos={registroGrupos}
           ativosP1={ativosP1}
+          machineId={machineId}
           tick={tick}
           paradas={paradas}
           onStatusChange={handleStatusChange}

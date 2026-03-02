@@ -8,6 +8,8 @@ import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
 import { REFUGO_MOTIVOS } from "../lib/constants";
+import useTabletMonitor from "../hooks/useTabletMonitor";
+import { normalizeTabletCode } from "../lib/tabletCode";
 
 export default function Pet01({
   registroGrupos,
@@ -21,8 +23,9 @@ export default function Pet01({
   setLowEffEndModal,
   setResumeModal,
   setFinalizando,
+  machineId: machineIdProp,
 }) {
-  const machineId = "P1";
+  const machineId = String(machineIdProp || "P1").toUpperCase();
   // estados principais
   const [ativa, setAtiva] = useState(null);
   const [proximo, setProximo] = useState(null);
@@ -39,6 +42,15 @@ export default function Pet01({
   const [shiftInfo, setShiftInfo] = useState(null); // { shiftKey, start, end }
   const [responsavelKey, setResponsavelKey] = useState("");
   const [fichaModalOpen, setFichaModalOpen] = useState(false);
+  const [activationOpen, setActivationOpen] = useState(false);
+  const [activationInput, setActivationInput] = useState("");
+  const {
+    markBeep,
+    isActivated,
+    expectedCode,
+    activateDevice,
+    deactivateDevice,
+  } = useTabletMonitor({ machineId, operatorName: responsavelTurno });
 
 
   // toast de notificação superior
@@ -413,6 +425,7 @@ async function biparWithCode(code) {
     created_at: createdAtUtcIso,
     machine_id: machineId,
     shift: turnoCalc,
+    operator: (responsavelTurno || "").trim() || null,
     order_id: ativa.id,
     op_code: String(ativa.code),
     scanned_box: caixa,
@@ -432,6 +445,8 @@ async function biparWithCode(code) {
     showToast("Erro ao registrar bipagem.", "err");
     return;
   }
+
+  markBeep();
 
   // Se o insert retornou dados, logue o que o banco devolveu
   if (Array.isArray(insertData) && insertData.length) {
@@ -575,12 +590,33 @@ if (typeof window !== "undefined") {
         {toast.msg}
       </div>
 
-      <h1 className="pet01-title">Apontamento — Máquina P1</h1>
+      <h1 className="pet01-title">Apontamento — Máquina {machineId}</h1>
 
       {/* Buttons: keep only Refugo (we removed Apontar Produção button per your request) */}
       <div className="pet01-buttons" style={{ marginBottom: 12 }}>
         <button className="pet01-btn orange" onClick={() => setShowRefugo(true)}>Apontar Refugo</button>
       </div>
+
+      <div className="pet01-operator-row">
+        <span>Operador: <strong>{responsavelTurno || '—'}</strong></span>
+        <button
+          className="pet01-operator-icon"
+          onClick={() => {
+            setResponsavelInput(responsavelTurno || "");
+            setResponsavelModalOpen(true);
+          }}
+          title="Trocar operador"
+          aria-label="Trocar operador"
+        >
+          ↻
+        </button>
+      </div>
+
+      {!isActivated && (
+        <div className="pet01-no-next" style={{ marginBottom: 10 }}>
+          Conexão do monitoramento inativa. Ative com o código: <strong>{expectedCode}</strong>
+        </div>
+      )}
 
       {/* CARD PRINCIPAL */}
       <div className={`pet01-card ${pet01StatusClass(ativa?.status)}`}>
@@ -680,7 +716,7 @@ if (typeof window !== "undefined") {
     <div className="pet01-modal">
       <h3>Responsável do Turno</h3>
       <p style={{ marginTop: 4, color: '#444' }}>
-        Informe o operador responsável da P1 para o Turno {shiftInfo?.shiftKey || ""}. Este passo é obrigatório no início do turno.
+        Informe o operador responsável da {machineId} para o Turno {shiftInfo?.shiftKey || ""}. Este passo é obrigatório no início do turno.
       </p>
 
       <label style={{ marginTop: 12 }}>Operador *</label>
@@ -699,6 +735,59 @@ if (typeof window !== "undefined") {
           disabled={!responsavelInput.trim()}
         >
           Confirmar
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{activationOpen && (
+  <div className="pet01-modal-bg" role="dialog" aria-modal>
+    <div className="pet01-modal">
+      <h3>Ativar dispositivo</h3>
+      <p style={{ marginTop: 4, color: '#444' }}>
+        Informe o código de ativação do tablet da máquina {machineId}.
+      </p>
+
+      <label style={{ marginTop: 12 }}>Código de ativação *</label>
+      <input
+        className="input"
+        value={activationInput}
+        onChange={(e) => setActivationInput(normalizeTabletCode(e.target.value))}
+        placeholder={expectedCode}
+        autoFocus
+      />
+
+      <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+        Código esperado: <strong>{expectedCode}</strong>
+      </div>
+
+      <div className="pet01-modal-buttons" style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          className="gray"
+          onClick={() => {
+            setActivationOpen(false);
+            setActivationInput("");
+          }}
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="orange"
+          onClick={() => {
+            const res = activateDevice(activationInput);
+            if (!res?.ok) {
+              showToast(res?.message || 'Falha ao ativar tablet.', 'err');
+              return;
+            }
+            showToast(res.message || 'Tablet ativado.', 'ok');
+            setActivationOpen(false);
+            setActivationInput("");
+          }}
+        >
+          Ativar
         </button>
       </div>
     </div>
@@ -824,6 +913,23 @@ if (typeof window !== "undefined") {
         machineId={machineId}
         itemCode={(ativa?.product || '').split('-')[0]?.trim() || ''}
       />
+
+      <button
+        className={`pet01-tablet-toggle ${isActivated ? 'on' : 'off'}`}
+        onClick={() => {
+          if (isActivated) {
+            deactivateDevice().then((res) => {
+              showToast(res?.message || 'Tablet desativado.', res?.ok ? 'ok' : 'err');
+            });
+            return;
+          }
+          setActivationOpen(true);
+        }}
+        title={isActivated ? 'Desativar conexão do tablet' : 'Ativar conexão do tablet'}
+        aria-label={isActivated ? 'Tablet ON' : 'Tablet OFF'}
+      >
+        {isActivated ? 'ON' : 'OFF'}
+      </button>
 
     </div>
   );

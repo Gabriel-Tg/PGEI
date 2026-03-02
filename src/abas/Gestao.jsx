@@ -4,7 +4,10 @@ import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS } from '../lib/constants';
 import { formatMsToHHmm } from '../lib/paradasPorTurno';
 import { getTurnoAtual } from '../lib/utils';
+import { machineToTabletCode } from '../lib/tabletCode';
 import '../styles/Gestao.css';
+
+const OFFLINE_TIMEOUT_MS = 90000;
 
 const parsePiecesPerBox = (val) => {
   if (val == null) return 0;
@@ -48,6 +51,24 @@ const formatKg = (val) => {
 };
 
 const formatInt = (val) => (Number(val) || 0).toLocaleString('pt-BR');
+
+const formatDateTimeBR = (iso) => {
+  if (!iso) return '—';
+  const dt = DateTime.fromISO(String(iso), { zone: 'utc' }).setZone('America/Sao_Paulo');
+  if (!dt.isValid) return '—';
+  return dt.toFormat('dd/LL/yyyy HH:mm:ss');
+};
+
+const formatElapsed = (ms) => {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s atrás`;
+  const min = Math.floor(totalSec / 60);
+  if (min < 60) return `${min}min atrás`;
+  const h = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 ? `${h}h ${remMin}min atrás` : `${h}h atrás`;
+};
 
 const extractItemCodeFromOrderProduct = (product) => {
   if (!product) return null;
@@ -116,6 +137,7 @@ export default function Gestao() {
   const [periodo, setPeriodo] = useState('hoje');
   const [selectedDate, setSelectedDate] = useState('');
   const [viewMode, setViewMode] = useState('resumo');
+  const [monitorTick, setMonitorTick] = useState(Date.now());
 
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
@@ -127,6 +149,8 @@ export default function Gestao() {
   const [valorViewType, setValorViewType] = useState('setor');
   const [valorSetorFiltro, setValorSetorFiltro] = useState('pet');
   const [valorMachineFiltro, setValorMachineFiltro] = useState(MAQUINAS[0] || '');
+  const [tabletStatusRows, setTabletStatusRows] = useState([]);
+  const [monitorLoading, setMonitorLoading] = useState(false);
 
   const periodoRange = useMemo(() => getPeriodoRange(periodo, selectedDate), [periodo, selectedDate]);
   const filtroStart = periodoRange.start;
@@ -166,6 +190,11 @@ export default function Gestao() {
       '3': (resMs['3'] || 0) / (1000 * 60 * 60),
     };
   }, [filtroStart, filtroEnd]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setMonitorTick(Date.now()), 15000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -342,6 +371,46 @@ export default function Gestao() {
 
     return () => { active = false; };
   }, [orders, openOrders, apontamentos]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchTabletStatus() {
+      setMonitorLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('tablet_status')
+          .select('machine_id, device_id, route_path, last_seen_at, last_beep_at, operator_name, battery_level, is_charging, is_online, app_commit, updated_at')
+          .order('machine_id', { ascending: true });
+        if (error) throw error;
+        if (!active) return;
+        setTabletStatusRows(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.warn('Falha ao buscar status dos tablets:', err);
+        if (active) setTabletStatusRows([]);
+      } finally {
+        if (active) setMonitorLoading(false);
+      }
+    }
+
+    fetchTabletStatus();
+
+    const channel = supabase
+      .channel('gestao-tablet-status')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tablet_status' }, () => {
+        fetchTabletStatus();
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      try {
+        supabase.removeChannel(channel);
+      } catch (err) {
+        console.warn('Falha ao encerrar canal de monitoramento:', err);
+      }
+    };
+  }, []);
 
   const ordersMap = useMemo(() => {
     const map = {};
@@ -591,6 +660,45 @@ export default function Gestao() {
     });
   }, [openOrders, itemsMap, maquinasFiltradas]);
 
+  const monitorRows = useMemo(() => {
+    const nowMs = monitorTick;
+    const byMachine = {};
+    (tabletStatusRows || []).forEach((row) => {
+      const machine = String(row.machine_id || '').toUpperCase();
+      if (!machine) return;
+      byMachine[machine] = row;
+    });
+
+    return MAQUINAS.map((machine) => {
+      const row = byMachine[machine] || null;
+      const lastSeenMs = row?.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN;
+      const sinceLastSeen = Number.isFinite(lastSeenMs) ? Math.max(0, nowMs - lastSeenMs) : Number.POSITIVE_INFINITY;
+      const onlineBySeen = Number.isFinite(lastSeenMs) && sinceLastSeen <= OFFLINE_TIMEOUT_MS;
+      const onlineByClientFlag = row?.is_online !== false;
+      const isOnline = Boolean(row) && onlineBySeen && onlineByClientFlag;
+
+      const batteryValue = Number(row?.battery_level);
+      const batteryLabel = Number.isFinite(batteryValue)
+        ? `${Math.max(0, Math.min(100, Math.round(batteryValue)))}%${row?.is_charging === true ? ' • carregando' : row?.is_charging === false ? ' • descarregando' : ''}`
+        : 'Indisponível';
+
+      return {
+        machine,
+        isOnline,
+        activationCode: machineToTabletCode(machine),
+        activationStatus: row ? 'Ativado' : 'Pendente',
+        lastSeenLabel: formatDateTimeBR(row?.last_seen_at),
+        lastSeenRelative: formatElapsed(sinceLastSeen),
+        lastBeepLabel: formatDateTimeBR(row?.last_beep_at),
+        operatorName: row?.operator_name || '—',
+        batteryLabel,
+        appCommit: row?.app_commit || '—',
+        routePath: row?.route_path || '—',
+        deviceId: row?.device_id || '—',
+      };
+    });
+  }, [monitorTick, tabletStatusRows]);
+
   const renderScrapRows = (summary) => {
     const rows = Object.keys(summary.scrapByReason || {}).map(reason => {
       const pieces = summary.scrapByReason[reason] || 0;
@@ -712,44 +820,48 @@ export default function Gestao() {
         <div className="gestao-title label">Gestão de Produção</div>
 
         <div className="gestao-filtros">
-          <div className="select-wrap">
-            <select
-              className="period-select"
-              aria-label="Selecionar periodo"
-              value={periodo}
-              onChange={e => setPeriodo(e.target.value)}
-            >
-              <option value="hoje">Hoje</option>
-              <option value="ontem">Ontem</option>
-              <option value="semana">Esta Semana</option>
-              <option value="mes">Este Mês</option>
-              <option value="mespassado">Mês Passado</option>
-              <option value="custom">Intervalo personalizado</option>
-            </select>
-          </div>
+          {viewMode !== 'monitor' && (
+            <>
+              <div className="select-wrap">
+                <select
+                  className="period-select"
+                  aria-label="Selecionar periodo"
+                  value={periodo}
+                  onChange={e => setPeriodo(e.target.value)}
+                >
+                  <option value="hoje">Hoje</option>
+                  <option value="ontem">Ontem</option>
+                  <option value="semana">Esta Semana</option>
+                  <option value="mes">Este Mês</option>
+                  <option value="mespassado">Mês Passado</option>
+                  <option value="custom">Intervalo personalizado</option>
+                </select>
+              </div>
 
-          {periodo === 'custom' && (
-            <div className="custom-dates">
-              <input
-                className="date-input"
-                type="date"
-                value={selectedDate}
-                onChange={e => setSelectedDate(e.target.value)}
-              />
-            </div>
+              {periodo === 'custom' && (
+                <div className="custom-dates">
+                  <input
+                    className="date-input"
+                    type="date"
+                    value={selectedDate}
+                    onChange={e => setSelectedDate(e.target.value)}
+                  />
+                </div>
+              )}
+            </>
           )}
 
-          <button
-            className="btn"
-            onClick={() => setViewMode(v => (v === 'resumo' ? 'timeline' : 'resumo'))}
-          >
-            {viewMode === 'resumo' ? 'Entrar em linha do tempo' : 'Voltar para gestão'}
-          </button>
+          <div className="gestao-view-actions">
+            <button className={`btn ${viewMode === 'resumo' ? 'is-active' : ''}`} onClick={() => setViewMode('resumo')}>Gestão</button>
+            <button className={`btn ${viewMode === 'timeline' ? 'is-active' : ''}`} onClick={() => setViewMode('timeline')}>Linha do tempo</button>
+            <button className={`btn ${viewMode === 'monitor' ? 'is-active' : ''}`} onClick={() => setViewMode('monitor')}>Monitoramento</button>
+          </div>
         </div>
 
-        <div className="gestao-table card" style={{ marginBottom: 12 }}>
-          <div className="gestao-table-title">Valorização por Turno</div>
-          <div className="gestao-val-filters">
+        {viewMode !== 'monitor' && (
+          <div className="gestao-table card" style={{ marginBottom: 12 }}>
+            <div className="gestao-table-title">Valorização por Turno</div>
+            <div className="gestao-val-filters">
             <div className="select-wrap">
               <select
                 className="period-select"
@@ -785,33 +897,91 @@ export default function Gestao() {
                 </select>
               </div>
             )}
-          </div>
+            </div>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Turno</th>
-                <th>Produção</th>
-                <th>Meta (peças)</th>
-                <th>Valorização</th>
-                <th>Meta (R$)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {valorizacaoPorTurno.rows.map((row) => (
-                <tr key={row.shift}>
-                  <td>Turno {row.shift}</td>
-                  <td>{formatInt(row.producedPieces)} peças</td>
-                  <td>{row.metaPecas > 0 ? `${formatInt(row.metaPecas)} peças` : '—'}</td>
-                  <td>{formatBRL(row.valorAtual)}</td>
-                  <td>{row.metaValor > 0 ? formatBRL(row.metaValor) : '—'}</td>
+            <table>
+              <thead>
+                <tr>
+                  <th>Turno</th>
+                  <th>Produção</th>
+                  <th>Meta (peças)</th>
+                  <th>Valorização</th>
+                  <th>Meta (R$)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {valorizacaoPorTurno.rows.map((row) => (
+                  <tr key={row.shift}>
+                    <td>Turno {row.shift}</td>
+                    <td>{formatInt(row.producedPieces)} peças</td>
+                    <td>{row.metaPecas > 0 ? `${formatInt(row.metaPecas)} peças` : '—'}</td>
+                    <td>{formatBRL(row.valorAtual)}</td>
+                    <td>{row.metaValor > 0 ? formatBRL(row.metaValor) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        {viewMode === 'resumo' ? (
+        {viewMode === 'monitor' ? (
+          <div className="gestao-monitor-wrap">
+            {monitorLoading && monitorRows.length === 0 ? (
+              <div className="gestao-empty">Carregando monitoramento dos tablets...</div>
+            ) : (
+              monitorRows.map((entry) => (
+                <div key={entry.machine} className="gestao-monitor-card card">
+                  <div className="gestao-monitor-head">
+                    <div className="gestao-table-title">Máquina {entry.machine}</div>
+                    <span className={`gestao-monitor-pill ${entry.isOnline ? 'online' : 'offline'}`}>
+                      {entry.isOnline ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+
+                  <div className="gestao-monitor-grid">
+                    <div className="gestao-monitor-field">
+                      <span>Código do tablet</span>
+                      <strong>{entry.activationCode}</strong>
+                      <small>{entry.activationStatus}</small>
+                    </div>
+
+                    <div className="gestao-monitor-field">
+                      <span>Última comunicação</span>
+                      <strong>{entry.lastSeenLabel}</strong>
+                      <small>{entry.lastSeenRelative}</small>
+                    </div>
+
+                    <div className="gestao-monitor-field">
+                      <span>Última bipagem</span>
+                      <strong>{entry.lastBeepLabel}</strong>
+                    </div>
+
+                    <div className="gestao-monitor-field">
+                      <span>Sessão ativa</span>
+                      <strong>{entry.operatorName}</strong>
+                    </div>
+
+                    <div className="gestao-monitor-field">
+                      <span>Bateria</span>
+                      <strong>{entry.batteryLabel}</strong>
+                    </div>
+
+                    <div className="gestao-monitor-field">
+                      <span>Versão (commit)</span>
+                      <strong>{entry.appCommit}</strong>
+                    </div>
+
+                    <div className="gestao-monitor-field">
+                      <span>Rota / Dispositivo</span>
+                      <strong>{entry.routePath}</strong>
+                      <small>{entry.deviceId}</small>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        ) : viewMode === 'resumo' ? (
           <div className="gestao-sectors">
             {renderSetor(
               valorViewType === 'setor'
