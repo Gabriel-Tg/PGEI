@@ -584,7 +584,7 @@ if (typeof window !== "undefined") {
 
   // ---------- render ----------
   return (
-    <div className="pet01-wrapper">
+    <div className={`pet01-wrapper ${machineId === 'P1' ? 'pet01-wrapper--p1' : ''}`}>
       {/* Top toast notification */}
       <div className={`pet01-toast ${toast.type === "ok" ? "ok" : "err"} ${toast.visible ? "show" : ""}`} role="status" aria-live="polite">
         {toast.msg}

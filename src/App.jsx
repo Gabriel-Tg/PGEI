@@ -248,17 +248,29 @@ export default function App(){
     setTab('painel')
   }
 
+  function renderBrandBar(subtitle) {
+    return (
+      <div className="brand-bar">
+        <img
+          src="/Argos sem fundo.png"
+          alt="ARGOS"
+          className="brand-logo"
+          onError={(e)=>{ e.currentTarget.src='/ARGOS.png' }}
+        />
+        <div className="brand-titles">
+          <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
+          <div className="brand-sub">{subtitle}</div>
+        </div>
+      </div>
+    )
+  }
+
   // pet pages quick-return (mantive comportamento)
   // rota de login para acesso via celular (/login)
   if (location && location.pathname === '/login') {
     return (
       <div className="app">
-        <div className="brand-bar">
-          <div className="brand-titles">
-            <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
-            <div className="brand-sub">Acesso Admin</div>
-          </div>
-        </div>
+        {renderBrandBar('Acesso Admin')}
         <Login />
       </div>
     )
@@ -267,12 +279,7 @@ export default function App(){
   if (location && location.pathname === '/ficha') {
     return (
       <div className="app">
-        <div className="brand-bar">
-          <div className="brand-titles">
-            <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
-            <div className="brand-sub">Ficha Técnica Digital</div>
-          </div>
-        </div>
+        {renderBrandBar('Ficha Técnica Digital')}
         <Ficha />
       </div>
     )
@@ -281,12 +288,7 @@ export default function App(){
   if (location && location.pathname === '/indicadores') {
     return (
       <div className="app">
-        <div className="brand-bar">
-          <div className="brand-titles">
-            <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
-            <div className="brand-sub">Indicadores por Setor</div>
-          </div>
-        </div>
+        {renderBrandBar('Indicadores por Setor')}
         <Indicadores />
       </div>
     )
@@ -366,14 +368,7 @@ export default function App(){
 
 {/* mostre a barra de marca apenas quando não estivermos no painel */}
 {tab !== 'painel' && tab !== 'login' && (
-  <div className="brand-bar">
-    <div className="brand-titles">
-          <img src="/gssystem.png" alt="GS System" className="brand-logo"
-         onError={(e)=>{ e.currentTarget.src='/gssystem.png'; }}/>
-      <h1 className="brand-title">Gestão de Eficiência Industrial</h1>
-      <div className="brand-sub">Controle da Produção</div>
-    </div>
-  </div>
+  renderBrandBar('Controle da Produção')
 )}
 
       {authUser && hasAccess && tab !== 'login' && (

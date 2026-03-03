@@ -68,8 +68,8 @@
 @media (max-width: 768px){
   .app { padding: 12px; }
 
-  .brand-bar{ flex-direction: column; gap: 10px; align-items: center; text-align: center; }
-  .brand-logo{ height: 80px; }
+  .brand-bar{ flex-direction: row; gap: 14px; align-items: center; text-align: left; }
+  .brand-logo{ height: 92px; }
   .brand-title{ font-size: 28px; }
   .brand-sub{ font-size: 14px; }
 

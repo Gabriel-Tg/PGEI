@@ -4,23 +4,28 @@
 .brand-bar{
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  margin: 6px 0 18px;
-  text-align: center;
+  justify-content: flex-start;
+  gap: 22px;
+  margin: 8px 0 18px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-700) 100%);
+  border: 1px solid rgba(var(--secondary-rgb), .35);
+  border-radius: 14px;
+  box-shadow: 0 14px 28px rgba(var(--primary-rgb), .22);
+  text-align: left;
 }
 
 .brand-logo{
-  height: 80px;
+  height: 120px;
   width: auto;
   display: block;
-  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.25));
+  filter: drop-shadow(0 8px 20px rgba(var(--primary-rgb), .5));
 }
 .brand-titles{
   display:flex;
   flex-direction:column;
   gap:4px;
-  align-items: center;
+  align-items: flex-start;
 }
 .brand-title{
   margin:0;
@@ -28,9 +33,10 @@
   line-height: 1.15;
   font-weight: 800;
   letter-spacing:.2px;
-  color: var(--text);
+  color: var(--panel);
 }
 .brand-sub{
   font-size: 15px;
-  color: var(--muted);
+  color: var(--card-2);
+  font-weight: 600;
 }

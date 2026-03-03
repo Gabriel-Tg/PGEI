@@ -1,6 +1,6 @@
 /* Botões */
 .btn{
-  background: #ffffff;
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -9,7 +9,7 @@
   font-weight: 700;
   transition: transform .05s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
-.btn:hover{ border-color: var(--secondary); box-shadow: 0 4px 10px rgba(2,119,189,.12); }
+.btn:hover{ border-color: var(--secondary); box-shadow: 0 6px 14px rgba(var(--secondary-rgb),.18); }
 .btn:active{ transform: translateY(1px); }
 .btn.primary{
   background: linear-gradient(90deg, var(--primary), var(--secondary));

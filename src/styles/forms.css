@@ -9,9 +9,9 @@
   outline: none;
   transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
-.input::placeholder{ color: #8aa0ad; }
+.input::placeholder{ color: #8AA0B6; }
 .input:focus, .select:focus{
   border-color: var(--secondary);
-  box-shadow: 0 0 0 3px rgba(2,119,189,.18);
-  background: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(var(--secondary-rgb),.20);
+  background: var(--panel);
 }
