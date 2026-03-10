@@ -133,7 +133,7 @@ function getTurnoIntervalsDiaLocal(date) {
   return [];
 }
 
-export default function Gestao() {
+export default function Gestao({ clientId = null, machineIds = MAQUINAS }) {
   const [periodo, setPeriodo] = useState('hoje');
   const [selectedDate, setSelectedDate] = useState('');
   const [viewMode, setViewMode] = useState('resumo');
@@ -148,16 +148,33 @@ export default function Gestao() {
   const [itemsMap, setItemsMap] = useState({});
   const [valorViewType, setValorViewType] = useState('setor');
   const [valorSetorFiltro, setValorSetorFiltro] = useState('pet');
-  const [valorMachineFiltro, setValorMachineFiltro] = useState(MAQUINAS[0] || '');
+  const availableMachines = useMemo(() => {
+    const src = Array.isArray(machineIds) && machineIds.length ? machineIds : MAQUINAS;
+    return src
+      .map((m) => String(m || '').trim().toUpperCase())
+      .filter(Boolean);
+  }, [machineIds]);
+
+  const [valorMachineFiltro, setValorMachineFiltro] = useState('');
   const [tabletStatusRows, setTabletStatusRows] = useState([]);
   const [monitorLoading, setMonitorLoading] = useState(false);
+  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
 
   const periodoRange = useMemo(() => getPeriodoRange(periodo, selectedDate), [periodo, selectedDate]);
   const filtroStart = periodoRange.start;
   const filtroEnd = periodoRange.end;
 
-  const grupoPET = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('P')), []);
-  const grupoINJ = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('I')), []);
+  const grupoPET = useMemo(() => availableMachines.filter(m => String(m).toUpperCase().startsWith('P')), [availableMachines]);
+  const grupoINJ = useMemo(() => availableMachines.filter(m => String(m).toUpperCase().startsWith('I')), [availableMachines]);
+
+  useEffect(() => {
+    if (!availableMachines.length) {
+      setValorMachineFiltro('');
+      return;
+    }
+    if (valorMachineFiltro && availableMachines.includes(valorMachineFiltro)) return;
+    setValorMachineFiltro(availableMachines[0]);
+  }, [availableMachines, valorMachineFiltro]);
   const maquinasFiltradas = useMemo(() => {
     if (valorViewType === 'maquina') {
       return valorMachineFiltro ? [valorMachineFiltro] : [];
@@ -211,29 +228,29 @@ export default function Gestao() {
       }
 
       try {
-        const bipQuery = supabase
+        const bipQuery = withClient(supabase
           .from('production_scans')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const refQuery = supabase
+        const refQuery = withClient(supabase
           .from('scrap_logs')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const paradaQuery = supabase
+        const paradaQuery = withClient(supabase
           .from('machine_stops')
           .select('*')
           .lte('started_at', filtroEnd.toISOString())
-          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
+          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
 
-        const apontQuery = supabase
+        const apontQuery = withClient(supabase
           .from('injection_production_entries')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
         const [bipRes, refRes, parRes, apRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery]);
         if (!mounted) return;
@@ -255,9 +272,9 @@ export default function Gestao() {
 
         const orderIds = Array.from(orderIdsSet);
         if (orderIds.length > 0) {
-          const { data: ords } = await supabase
+          const { data: ords } = await withClient(supabase
             .from('orders')
-            .select('id, code, product, standard, created_at')
+            .select('id, code, product, standard, created_at'))
             .in('id', orderIds);
           if (!mounted) return;
           setOrders(ords || []);
@@ -278,14 +295,14 @@ export default function Gestao() {
 
     fetchData();
     return () => { mounted = false; };
-  }, [filtroStart, filtroEnd]);
+  }, [filtroStart, filtroEnd, clientId]);
 
   useEffect(() => {
     let active = true;
 
     async function fetchOpenOrders() {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withClient(supabase
           .from('orders')
           .select(`
             id,
@@ -297,7 +314,7 @@ export default function Gestao() {
             boxes,
             standard,
             scanned_count:production_scans(count)
-          `)
+          `))
           .eq('finalized', false)
           .order('machine_id', { ascending: true })
           .order('pos', { ascending: true });
@@ -326,7 +343,7 @@ export default function Gestao() {
     fetchOpenOrders();
 
     return () => { active = false; };
-  }, []);
+  }, [clientId]);
 
   useEffect(() => {
     const codes = new Set();
@@ -350,9 +367,9 @@ export default function Gestao() {
     let active = true;
     (async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withClient(supabase
           .from('items')
-          .select('code, unit_value, part_weight_g, cycle_seconds, cavities')
+          .select('code, unit_value, part_weight_g, cycle_seconds, cavities'))
           .in('code', Array.from(codes));
         if (error) throw error;
         if (!active) return;
@@ -370,7 +387,7 @@ export default function Gestao() {
     })();
 
     return () => { active = false; };
-  }, [orders, openOrders, apontamentos]);
+  }, [orders, openOrders, apontamentos, clientId]);
 
   useEffect(() => {
     let active = true;
@@ -378,9 +395,9 @@ export default function Gestao() {
     async function fetchTabletStatus() {
       setMonitorLoading(true);
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withClient(supabase
           .from('tablet_status')
-          .select('machine_id, device_id, route_path, last_seen_at, last_beep_at, operator_name, battery_level, is_charging, is_online, app_commit, updated_at')
+          .select('machine_id, device_id, route_path, last_seen_at, last_beep_at, operator_name, battery_level, is_charging, is_online, app_commit, updated_at'))
           .order('machine_id', { ascending: true });
         if (error) throw error;
         if (!active) return;
@@ -410,7 +427,7 @@ export default function Gestao() {
         console.warn('Falha ao encerrar canal de monitoramento:', err);
       }
     };
-  }, []);
+  }, [clientId]);
 
   const ordersMap = useMemo(() => {
     const map = {};
@@ -669,7 +686,7 @@ export default function Gestao() {
       byMachine[machine] = row;
     });
 
-    return MAQUINAS.map((machine) => {
+    return availableMachines.map((machine) => {
       const row = byMachine[machine] || null;
       const lastSeenMs = row?.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN;
       const sinceLastSeen = Number.isFinite(lastSeenMs) ? Math.max(0, nowMs - lastSeenMs) : Number.POSITIVE_INFINITY;
@@ -697,7 +714,7 @@ export default function Gestao() {
         deviceId: row?.device_id || '—',
       };
     });
-  }, [monitorTick, tabletStatusRows]);
+  }, [monitorTick, tabletStatusRows, availableMachines]);
 
   const renderScrapRows = (summary) => {
     const rows = Object.keys(summary.scrapByReason || {}).map(reason => {
@@ -891,7 +908,7 @@ export default function Gestao() {
                   value={valorMachineFiltro}
                   onChange={(e) => setValorMachineFiltro(e.target.value)}
                 >
-                  {MAQUINAS.map((m) => (
+                  {availableMachines.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>

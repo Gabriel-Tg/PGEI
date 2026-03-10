@@ -9,7 +9,7 @@ import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorT
 import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
 
-export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
+export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clientId = null, machineIds = MAQUINAS }) {
   const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false, authUser: null };
   const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
   const [bipagens, setBipagens] = useState([]);
@@ -38,6 +38,23 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     goodQty: '',
     scrapEntries: [{ qty: '', reason: '' }],
   });
+  const availableMachines = useMemo(() => {
+    const src = Array.isArray(machineIds) && machineIds.length ? machineIds : MAQUINAS;
+    return src
+      .map((m) => String(m || '').trim().toUpperCase())
+      .filter(Boolean);
+  }, [machineIds]);
+  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
+
+  useEffect(() => {
+    if (!availableMachines.length) {
+      if (manualForm.machine) setManualForm((f) => ({ ...f, machine: '' }));
+      return;
+    }
+    const current = String(manualForm.machine || '').trim().toUpperCase();
+    if (current && availableMachines.includes(current)) return;
+    setManualForm((f) => ({ ...f, machine: availableMachines[0] }));
+  }, [availableMachines, manualForm.machine]);
 
   // Helpers locais para fatiar paradas por turno (clipping por turno)
   function getTurnoIntervalsDiaLocal(date) {
@@ -256,35 +273,35 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     }
 
     try {
-      const bipQuery = supabase
+      const bipQuery = withClient(supabase
         .from('production_scans')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
-      const refQuery = supabase
+      const refQuery = withClient(supabase
         .from('scrap_logs')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
-      const paradaQuery = supabase
+      const paradaQuery = withClient(supabase
         .from('machine_stops')
         .select('*')
         .lte('started_at', filtroEnd.toISOString())
-        .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
+        .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
 
-      const apontQuery = supabase
+      const apontQuery = withClient(supabase
         .from('injection_production_entries')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
-      const shiftRespQuery = supabase
+      const shiftRespQuery = withClient(supabase
         .from('shift_responsibles')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
       const [bipRes, refRes, parRes, apRes, respRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
       const { data: bip } = bipRes || {}; const { data: ref } = refRes || {}; const { data: par } = parRes || {}; const { data: aps } = apRes || {}; const { data: resp } = respRes || {};
@@ -302,9 +319,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       (aps || []).forEach(a => { if (a.order_id != null) orderIdsSet.add(String(a.order_id)); });
       const orderIds = Array.from(orderIdsSet);
       if (orderIds.length > 0) {
-        const { data: ords } = await supabase
+        const { data: ords } = await withClient(supabase
           .from('orders')
-          .select('id,code,product,standard,created_at,boxes')
+          .select('id,code,product,standard,created_at,boxes'))
           .in('id', orderIds);
         setOrders(ords || []);
       } else {
@@ -331,36 +348,36 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       }
 
       try {
-        const bipQuery = supabase
+        const bipQuery = withClient(supabase
           .from('production_scans')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const refQuery = supabase
+        const refQuery = withClient(supabase
           .from('scrap_logs')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const paradaQuery = supabase
+        const paradaQuery = withClient(supabase
           .from('machine_stops')
           .select('*')
           .lte('started_at', filtroEnd.toISOString())
-          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
+          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
 
         // produção manual das injetoras
-        const apontQuery = supabase
+        const apontQuery = withClient(supabase
           .from('injection_production_entries')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const shiftRespQuery = supabase
+        const shiftRespQuery = withClient(supabase
           .from('shift_responsibles')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
         // fetch bipagens, refugos e paradas
         const [{ data: bip }, { data: ref }, { data: par }, { data: aps }, { data: resp }] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
@@ -388,9 +405,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
         let ordersData = [];
         if (orderIds.length > 0) {
           // consultar apenas orders relevantes
-          const { data: ords, error } = await supabase
+          const { data: ords, error } = await withClient(supabase
             .from('orders')
-            .select('id,code,product,standard,created_at,boxes') // traga campos úteis
+            .select('id,code,product,standard,created_at,boxes')) // traga campos úteis
             .in('id', orderIds);
           if (error) {
             console.warn('Erro ao buscar orders por ids:', error);
@@ -421,9 +438,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     // Busca todas as O.S registradas (independente de bipagens/refugos no período)
     async function fetchAllOrders() {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withClient(supabase
           .from('orders')
-          .select('id, code, product, standard, created_at, boxes')
+          .select('id, code, product, standard, created_at, boxes'))
           .order('created_at', { ascending: false });
         if (error) {
           console.warn('Erro ao buscar todas as orders:', error);
@@ -438,7 +455,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     }
     fetchAllOrders();
     return () => { mounted = false; };
-  }, [filtroStart, filtroEnd]);
+  }, [filtroStart, filtroEnd, clientId]);
 
   // Busca valores unitários dos itens usados nos pedidos/apontamentos do período
   useEffect(() => {
@@ -459,9 +476,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     let active = true;
     (async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withClient(supabase
           .from('items')
-          .select('code, unit_value, cycle_seconds, cavities')
+          .select('code, unit_value, cycle_seconds, cavities'))
           .in('code', Array.from(codes));
         if (error) throw error;
         if (!active) return;
@@ -479,19 +496,19 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     })();
 
     return () => { active = false; };
-  }, [orders, apontamentos]);
+  }, [orders, apontamentos, clientId]);
   // Calcular horas paradas por turno/máquina
   const horasParadasPorTurno = useMemo(() => calcularHorasParadasPorTurno(paradas, TURNOS, filtroStart, filtroEnd), [paradas, filtroStart, filtroEnd]);
   // Listas de máquinas por setor, como em Registro.jsx
-  const grupoPET = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('P')), []);
-  const grupoINJ = useMemo(() => MAQUINAS.filter(m => String(m).toUpperCase().startsWith('I')), []);
+  const grupoPET = useMemo(() => availableMachines.filter(m => String(m).toUpperCase().startsWith('P')), [availableMachines]);
+  const grupoINJ = useMemo(() => availableMachines.filter(m => String(m).toUpperCase().startsWith('I')), [availableMachines]);
   let maquinasConsideradas = useMemo(() => {
-    if (filtroMaquina === 'todas') return MAQUINAS;
+    if (filtroMaquina === 'todas') return availableMachines;
     if (filtroMaquina === 'pet') return grupoPET;
     if (filtroMaquina === 'injecao') return grupoINJ;
-    return MAQUINAS.filter(m => String(m) === String(filtroMaquina));
-  }, [filtroMaquina]);
-  maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
+    return availableMachines.filter(m => String(m) === String(filtroMaquina));
+  }, [availableMachines, filtroMaquina, grupoINJ, grupoPET]);
+  maquinasConsideradas = maquinasConsideradas.filter(m => availableMachines.includes(m));
 
   // mapa por id para lookup rápido
   const ordersMap = useMemo(() => {
@@ -520,7 +537,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     const porTurno = {};
     TURNOS.forEach(t => {
       porTurno[t.key] = {};
-      MAQUINAS.forEach(maq => {
+      availableMachines.forEach(maq => {
         porTurno[t.key][maq] = {
           bipadas: 0,
           refugo: 0,
@@ -613,8 +630,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
 
         // Determinar produção considerando o padrão de cada caixa individualmente.
         // Quando não houver padrão na O.S da caixa, usa o padrão da máquina como fallback.
-        const maqDef = MAQUINAS && MAQUINAS[maq];
-        const padraoFromConstRaw = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? 0;
+        const padraoFromConstRaw = 0;
         const parsePiecesPerBox = (val) => {
           if (val == null) return 0;
           const s = String(val).trim();
@@ -688,7 +704,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     });
 
     return porTurno;
-  }, [bipagens, refugos, ordersMap, apontamentos, itemsMap, duracaoTurnoPorPeriodo]);
+  }, [bipagens, refugos, ordersMap, apontamentos, itemsMap, duracaoTurnoPorPeriodo, availableMachines]);
 
   // RENDER
   return (
@@ -755,7 +771,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
               <option value="todas">Todas as máquinas</option>
               <option value="pet">PET</option>
               <option value="injecao">Injeção</option>
-              {MAQUINAS.map(m => (
+              {availableMachines.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
@@ -1006,7 +1022,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                 onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value }))}
               >
                 <option value="">Selecione...</option>
-                {MAQUINAS.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
+                {availableMachines.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>
@@ -1136,12 +1152,13 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                   // Resolve O.S -> order_id + product
                   let ordSel = null;
                   {
-                    const q = supabase
+                    let q = supabase
                       .from('orders')
                       .select('id, code, product, machine_id, created_at')
                       .eq('code', payload.osCode)
                       .order('created_at', { ascending: false })
                       .limit(1);
+                    if (clientId) q = q.eq('client_id', clientId);
                     const { data: ordData, error: ordErr } = await q;
                     if (ordErr || !ordData || !ordData[0]) {
                       showToast('O.S não encontrada.', 'err');
@@ -1156,6 +1173,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
 
                   // 1) Inserir produção manual
                   const prodIns = {
+                    ...(clientId ? { client_id: clientId } : {}),
                     entry_date: diaZ.toISODate(),
                     created_at: createdAtUtcIso,
                     machine_id: payload.machine,
@@ -1175,6 +1193,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                   // 2) Inserir refugos (scrap_logs), se houver
                   if (payload.scrapEntries.length > 0) {
                     const scrapRows = payload.scrapEntries.map((s) => ({
+                      ...(clientId ? { client_id: clientId } : {}),
                       created_at: createdAtUtcIso,
                       machine_id: payload.machine,
                       shift: String(payload.turno),

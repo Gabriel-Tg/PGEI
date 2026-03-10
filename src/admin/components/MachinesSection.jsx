@@ -1,14 +1,10 @@
 import React from 'react'
 
-function statusLabel(status) {
-  if (status === 'running') return 'Rodando'
-  if (status === 'idle') return 'Parada'
-  if (status === 'maintenance') return 'Manutencao'
-  if (status === 'offline') return 'Offline'
-  return status
+function statusLabel(active) {
+  return active ? 'Ativa' : 'Inativa'
 }
 
-export default function MachinesSection({ machines }) {
+export default function MachinesSection({ machines, onEditMachine, onDeleteMachine }) {
   return (
     <section className="admin-section-card">
       <div className="admin-section-head">
@@ -21,17 +17,32 @@ export default function MachinesSection({ machines }) {
           <thead>
             <tr>
               <th>Empresa</th>
-              <th>Maquina</th>
+              <th>Codigo</th>
+              <th>Nome</th>
+              <th>Rota</th>
               <th>Status</th>
+              <th>Acoes</th>
             </tr>
           </thead>
           <tbody>
             {machines.map((machine) => (
               <tr key={machine.id}>
-                <td>{machine.companyName}</td>
-                <td>{machine.code}</td>
+                <td>{machine.client_name || '-'}</td>
+                <td>{machine.machine_code}</td>
+                <td>{machine.machine_name || '-'}</td>
+                <td>{machine.route_slug ? `/${machine.route_slug}` : '-'}</td>
                 <td>
-                  <span className={`badge machine-${machine.status}`}>{statusLabel(machine.status)}</span>
+                  <span className={`badge ${machine.active ? 'active' : 'inactive'}`}>{statusLabel(machine.active)}</span>
+                </td>
+                <td>
+                  <div className="admin-action-row">
+                    <button type="button" className="btn-secondary" onClick={() => onEditMachine(machine)}>
+                      Editar
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => onDeleteMachine(machine.id)}>
+                      Excluir
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

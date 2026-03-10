@@ -1,7 +1,7 @@
 // src/App.jsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { MAQUINAS } from '../lib/constants'
 import CadastroItens from '../abas/CadastroItens'
@@ -12,7 +12,7 @@ import NovaOrdem from '../abas/NovaOrdem'
 import Rastreio from '../abas/Rastreio'
 import Gestao from '../abas/Gestao'
 import PainelTV from '../abas/PainelTV'
-import Pet01 from '../pages/Pet01'
+import Tablets from '../pages/Tablets'
 import Ficha from '../pages/Ficha'
 import Prioridade from '../pages/Prioridade'
 import useOrders from '../hooks/useOrders'
@@ -23,7 +23,7 @@ import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient'
 
 
-export default function DemoApp(){
+export default function DemoApp({ tenantClient = null }){
   const [tab,setTab] = useState('login')
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
@@ -53,8 +53,19 @@ export default function DemoApp(){
   // prioridades por máquina (persistidas no Supabase)
   const [machinePriorities, setMachinePriorities] = useState({})
   const [prioritiesLoading, setPrioritiesLoading] = useState(false)
+  const [tenantMachines, setTenantMachines] = useState([])
+  const [machinesLoading, setMachinesLoading] = useState(false)
+  const [machinesResolved, setMachinesResolved] = useState(false)
+  const tenantClientId = tenantClient?.id || null
+  const machineIds = useMemo(() => {
+    if (!tenantClientId) return MAQUINAS
+    return tenantMachines
+      .map((m) => String(m.machine_code || '').toUpperCase())
+      .filter(Boolean)
+  }, [tenantClientId, tenantMachines])
+  const tenantMachinesReady = !tenantClientId || machinesResolved
 
-  const { authUser, authChecked, isAdmin, isProducao, hasAccess } = useAuthAdmin()
+  const { authUser, authChecked, isAdmin, isProducao, hasAccess, tenantAccessChecked } = useAuthAdmin(tenantClientId)
   const hasGestaoAccess = !!authUser && isAdmin
 
   const {
@@ -63,7 +74,7 @@ export default function DemoApp(){
     criarOrdem, atualizar, enviarParaFila, finalizar,
     confirmarInicio, confirmarParada, confirmarRetomada, confirmarBaixaEf, confirmarEncerrarBaixaEf,
     ativosPorMaquina, registroGrupos, lastFinalizadoPorMaquina, onStatusChange
-  } = useOrders()
+  } = useOrders(tenantClientId)
 
   useEffect(()=>{
      const nowBR = DateTime.now().setZone('America/Sao_Paulo')
@@ -75,16 +86,69 @@ export default function DemoApp(){
   }, [finalizando?.id])
 
   const location = useLocation();
+  const navigate = useNavigate()
+
+  function getDefaultRouteSlug(machineCode) {
+    const m = String(machineCode || '').toUpperCase().match(/^P(\d+)$/)
+    if (m) return `pet-${String(Number(m[1])).padStart(2, '0')}`
+    return String(machineCode || '').trim().toLowerCase()
+  }
+
+  function normalizeRouteSlug(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^\/+/, '')
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTenantMachines() {
+      setMachinesResolved(false)
+      if (!tenantClientId) {
+        setTenantMachines([])
+        setMachinesResolved(true)
+        return
+      }
+
+      setMachinesLoading(true)
+      const { data, error } = await supabase
+        .from('machines')
+        .select('id, client_id, machine_code, route_slug, active')
+        .eq('client_id', tenantClientId)
+        .eq('active', true)
+        .order('machine_code', { ascending: true })
+
+      if (cancelled) return
+
+      if (error) {
+        console.warn('Falha ao carregar máquinas do cliente:', error)
+        setTenantMachines([])
+      } else {
+        setTenantMachines(Array.isArray(data) ? data : [])
+      }
+      setMachinesLoading(false)
+      setMachinesResolved(true)
+    }
+
+    loadTenantMachines()
+    return () => { cancelled = true }
+  }, [tenantClientId])
 
   // Busca prioridades do Supabase
   useEffect(() => {
     async function loadPriorities() {
       setPrioritiesLoading(true)
       try {
-        const { data, error } = await supabase
+        let q = supabase
           .from('machine_priorities')
           .select('machine_id, priority')
           .order('machine_id', { ascending: true })
+
+        if (tenantClientId) q = q.eq('client_id', tenantClientId)
+
+        const { data, error } = await q
 
         if (!error && Array.isArray(data)) {
           const mapped = {}
@@ -115,6 +179,7 @@ export default function DemoApp(){
         (payload) => {
           const row = payload.new || payload.old
           if (!row) return
+          if (tenantClientId && row.client_id !== tenantClientId) return
           setMachinePriorities((prev) => {
             const next = { ...prev }
             if (payload.eventType === 'DELETE') {
@@ -137,7 +202,7 @@ export default function DemoApp(){
         console.warn('Falha ao remover canal de prioridades:', err)
       }
     }
-  }, [])
+  }, [tenantClientId])
 
   async function handlePriorityChange(machineId, priorityValue) {
     const userEmail = String(authUser?.email || '').toLowerCase();
@@ -148,6 +213,7 @@ export default function DemoApp(){
     try {
       const val = priorityValue === '' || priorityValue == null ? null : Number(priorityValue)
       const payload = {
+        ...(tenantClientId ? { client_id: tenantClientId } : {}),
         machine_id: machineId,
         priority: val,
         updated_by: authUser?.email || null,
@@ -265,7 +331,7 @@ export default function DemoApp(){
     )
   }
 
-  // pet pages quick-return (mantive comportamento)
+  // rotas rápidas
   // rota de login para acesso via celular (/login)
   if (location && location.pathname === '/login') {
     return (
@@ -293,16 +359,43 @@ export default function DemoApp(){
       </div>
     )
   }
-  const petRouteMatch = String(location?.pathname || '').match(/^\/pet-(\d{2})$/i)
-  if (petRouteMatch) {
-    const machineId = `P${Number(petRouteMatch[1])}`
-    const ativosP1 = ordens.filter(o => o.machine_id === machineId && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+  const pathName = String(location?.pathname || '').toLowerCase()
+  const machineSlug = pathName.match(/^\/([a-z0-9-]+)$/)?.[1] || null
+  const reservedRoutes = new Set(['login', 'ficha', 'indicadores', 'prioridade', 'tv'])
+  const isMachineRoute = !!machineSlug && !reservedRoutes.has(machineSlug)
+
+  const resolvedMachine = isMachineRoute
+    ? tenantMachines.find((m) => {
+        const slug = normalizeRouteSlug(m.route_slug) || normalizeRouteSlug(getDefaultRouteSlug(m.machine_code))
+        return slug === normalizeRouteSlug(machineSlug)
+      })
+    : null
+
+  const invalidMachineRoute = isMachineRoute && machinesResolved && !resolvedMachine
+
+  useEffect(() => {
+    if (!invalidMachineRoute) return
+    setTab('painel')
+    navigate('/', { replace: true })
+  }, [invalidMachineRoute, navigate])
+
+  if (isMachineRoute) {
+    if (machinesLoading) {
+      return <div className="app" style={{ padding: 24 }}>Carregando máquina...</div>
+    }
+    if (!resolvedMachine) {
+      return null
+    }
+
+    const machineId = String(resolvedMachine.machine_code || '').toUpperCase()
+    const ativosMaquina = ordens.filter(o => o.machine_id === machineId && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (
       <>
-        <Pet01
+        <Tablets
           registroGrupos={registroGrupos}
-          ativosP1={ativosP1}
+          ativosP1={ativosMaquina}
           machineId={machineId}
+          clientId={tenantClientId}
           tick={tick}
           paradas={paradas}
           onStatusChange={handleStatusChange}
@@ -348,10 +441,15 @@ export default function DemoApp(){
   }
 
   if (location && String(location.pathname || '').toLowerCase() === '/tv') {
+    if (!tenantMachinesReady) {
+      return <div className="app" style={{ padding: 24 }}>Carregando maquinas...</div>
+    }
+
     return (
       <div className="app" style={{ padding: 0 }}>
         <PainelTV
           ativosPorMaquina={ativosPorMaquina}
+          machineIds={machineIds}
           paradas={paradas}
           tick={tick}
           lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
@@ -371,7 +469,7 @@ export default function DemoApp(){
   renderBrandBar('Controle da Produção')
 )}
 
-      {authUser && hasAccess && tab !== 'login' && (
+      {authUser && tenantAccessChecked && hasAccess && tab !== 'login' && (
         <div className="tabs">
           <>
             <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
@@ -403,7 +501,7 @@ export default function DemoApp(){
       {tab === 'admin-itens' && (
         authChecked ? (
           isAdmin ? (
-            <CadastroItens />
+            <CadastroItens clientId={tenantClientId} />
           ) : (
             <div style={{ padding: 24 }}>
               <h2>Acesso Negado</h2>
@@ -417,38 +515,51 @@ export default function DemoApp(){
         )
       )}
 
-      {tab === 'painel' && hasAccess && (
-        <Painel
-          ativosPorMaquina={ativosPorMaquina}
-          paradas={paradas}
-          tick={tick}
-          onStatusChange={handleStatusChange}
-          setStartModal={setStartModal}
-          setFinalizando={setFinalizando}
-          lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
-          onScanned={fetchOrdensAbertas}
-          authUser={authUser}
-          machinePriorities={machinePriorities}
-        />
+      {tab === 'painel' && tenantAccessChecked && hasAccess && (
+        tenantMachinesReady ? (
+          <Painel
+            ativosPorMaquina={ativosPorMaquina}
+            machineIds={machineIds}
+            paradas={paradas}
+            tick={tick}
+            onStatusChange={handleStatusChange}
+            setStartModal={setStartModal}
+            setFinalizando={setFinalizando}
+            lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
+            onScanned={fetchOrdensAbertas}
+            authUser={authUser}
+            machinePriorities={machinePriorities}
+          />
+        ) : (
+          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+        )
       )}
 
-      {tab === 'lista' && hasAccess && (
-        <Lista
-          ativosPorMaquina={ativosPorMaquina}
-          sensors={sensors}
-          onStatusChange={handleStatusChange}
-          setStartModal={setStartModal}
-          setEditando={setEditando}
-          setFinalizando={setFinalizando}
-          enviarParaFila={enviarParaFila}
-          refreshOrdens={fetchOrdensAbertas}
-          isAdmin={isAdmin}
-        />
+      {tab === 'lista' && tenantAccessChecked && hasAccess && (
+        tenantMachinesReady ? (
+          <Lista
+            ativosPorMaquina={ativosPorMaquina}
+            machineIds={machineIds}
+            sensors={sensors}
+            onStatusChange={handleStatusChange}
+            setStartModal={setStartModal}
+            setEditando={setEditando}
+            setFinalizando={setFinalizando}
+            enviarParaFila={enviarParaFila}
+            refreshOrdens={fetchOrdensAbertas}
+            isAdmin={isAdmin}
+            clientId={tenantClientId}
+          />
+        ) : (
+          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+        )
       )}
 
       {tab === 'nova' && isAdmin && (
-        isAdmin ? (
-          <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} />
+        isAdmin && tenantMachinesReady ? (
+          <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} clientId={tenantClientId} machineIds={machineIds} />
+        ) : isAdmin ? (
+          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
         ) : (
           <div style={{ padding: 24 }}>
             <h2>Acesso Negado</h2>
@@ -458,16 +569,22 @@ export default function DemoApp(){
       )}
 
       {tab === 'rastreio' && isAdmin && (
-        <Rastreio />
+        <Rastreio clientId={tenantClientId} />
       )}
 
-      {tab === 'apontamento' && hasAccess && (
-        <Apontamento isAdmin={isAdmin} />
+      {tab === 'apontamento' && tenantAccessChecked && hasAccess && (
+        tenantMachinesReady ? (
+          <Apontamento isAdmin={isAdmin} clientId={tenantClientId} machineIds={machineIds} />
+        ) : (
+          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+        )
       )}
 
       {tab === 'gestao' && isAdmin && (
-        hasGestaoAccess ? (
-          <Gestao />
+        hasGestaoAccess && tenantMachinesReady ? (
+          <Gestao clientId={tenantClientId} machineIds={machineIds} />
+        ) : hasGestaoAccess ? (
+          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
         ) : (
           <div style={{ padding: 24 }}>
             <h2>Acesso Negado</h2>

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 
-export default function useOrders(){
+export default function useOrders(clientId = null){
   const [ordens,setOrdens] = useState([])
   const [finalizadas, setFinalizadas] = useState([])
   const [paradas, setParadas] = useState([])
@@ -12,10 +12,12 @@ export default function useOrders(){
   // map local para guardar session id dos logs de baixa eficiência (key = `order_<order_id>`)
   const [lowEffSessions, setLowEffSessions] = useState({})
 
+  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query)
+
   // basic fetchers
   async function fetchOrdensAbertas(){
     // NOTE: scanned_count:production_scans(count) -> agrega o count de production_scans por order_id
-    const res = await supabase
+    const res = await withClient(supabase
       .from('orders')
       .select(`
         *,
@@ -23,7 +25,7 @@ export default function useOrders(){
       `)
       .eq('finalized', false)
       .order('pos',{ascending:true})
-      .order('created_at',{ascending:true})
+      .order('created_at',{ascending:true}))
 
     if(!res.error) {
       const normalized = (res.data || []).map(row => {
@@ -42,11 +44,11 @@ export default function useOrders(){
   }
 
   async function fetchOrdensFinalizadas(){
-    const res = await supabase.from('orders').select('*').eq('finalized', true).order('finalized_at',{ascending:false}).limit(500)
+    const res = await withClient(supabase.from('orders').select('*')).eq('finalized', true).order('finalized_at',{ascending:false}).limit(500)
     if(!res.error) setFinalizadas(res.data||[])
   }
   async function fetchParadas(){
-    const res = await supabase.from('machine_stops').select('*').order('started_at',{ascending:false}).limit(1000)
+    const res = await withClient(supabase.from('machine_stops').select('*')).order('started_at',{ascending:false}).limit(1000)
     if(!res.error) setParadas(res.data||[])
   }
 
@@ -55,6 +57,7 @@ export default function useOrders(){
     const chOrders = supabase.channel('orders-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, (p)=>{
         const r = p.new; if(!r) return;
+        if (clientId && r.client_id !== clientId) return
 
         setOrdens(prev=>{
           const i=prev.findIndex(o=>o.id===r.id)
@@ -74,6 +77,7 @@ export default function useOrders(){
     const chStops = supabase.channel('stops-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'machine_stops' }, (p)=>{
         const r = p.new; if(!r) return;
+        if (clientId && r.client_id !== clientId) return
         setParadas(prev=>{
           const i=prev.findIndex(x=>x.id===r.id)
           if(i>=0){const cp=[...prev]; cp[i]=r; return cp}
@@ -81,7 +85,7 @@ export default function useOrders(){
         })
       }).subscribe()
     return ()=>{ supabase.removeChannel(chOrders); supabase.removeChannel(chStops) }
-  },[])
+  },[clientId])
 
   // helpers
   function patchOrdemLocal(id, patch) { setOrdens(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o)); }
@@ -131,10 +135,10 @@ export default function useOrders(){
 
   async function criarOrdem(form, setForm, setTab){
     if(!form.code.trim()) return
-    const { data: last, error: maxErr } = await supabase.from('orders').select('pos').eq('machine_id', form.machine_id).eq('finalized', false).order('pos',{ascending:false}).limit(1).maybeSingle()
+    const { data: last, error: maxErr } = await withClient(supabase.from('orders').select('pos')).eq('machine_id', form.machine_id).eq('finalized', false).order('pos',{ascending:false}).limit(1).maybeSingle()
     if (maxErr) { alert('Erro ao obter posição: ' + maxErr.message); return; }
     const nextPos = (last?.pos ?? -1) + 1
-    const novo = { machine_id: form.machine_id, code: form.code, customer: form.customer, product: form.product, color: form.color, qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes, status: 'AGUARDANDO', pos: nextPos, finalized:false, started_at:null, started_by:null, restarted_at:null, restarted_by:null, interrupted_at:null, interrupted_by:null }
+    const novo = { client_id: clientId, machine_id: form.machine_id, code: form.code, customer: form.customer, product: form.product, color: form.color, qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes, status: 'AGUARDANDO', pos: nextPos, finalized:false, started_at:null, started_by:null, restarted_at:null, restarted_by:null, interrupted_at:null, interrupted_by:null }
     const tempId = `tmp-${crypto.randomUUID()}`
     setOrdens(prev=>[...prev,{id:tempId, ...novo}])
     const res = await supabase.from('orders').insert([novo]).select('*').maybeSingle()
@@ -446,7 +450,7 @@ export default function useOrders(){
 
     // 2) Registra parada
     const ins = await supabase.from('machine_stops')
-      .insert([{ order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: String(motivo).trim(), notes: obs }])
+      .insert([{ client_id: clientId, order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: String(motivo).trim(), notes: obs }])
       .select('*').maybeSingle()
     if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return }
 
@@ -491,6 +495,7 @@ export default function useOrders(){
     // 1) Inserir registro na tabela nova low_efficiency_logs
     try {
       const payload = {
+        client_id: clientId,
         order_id: ordem.id,
         machine_id: ordem.machine_id,
         started_at,

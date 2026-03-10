@@ -1,6 +1,6 @@
 import React from 'react'
 
-export default function Topbar({ adminName, hostLabel, quickStats }) {
+export default function Topbar({ adminName, hostLabel, quickStats, onOpenNewClient }) {
   return (
     <header className="admin-topbar">
       <div>
@@ -20,7 +20,7 @@ export default function Topbar({ adminName, hostLabel, quickStats }) {
             <span>alertas abertos</span>
           </div>
         </div>
-        <button type="button" className="btn-quick">Novo cliente</button>
+        <button type="button" className="btn-quick" onClick={onOpenNewClient}>Novo cliente</button>
         <div className="admin-user-pill">
           <span>{adminName}</span>
           <small>Administrador</small>

@@ -68,6 +68,7 @@ export default function PainelTV({
   paradas,
   tick,
   lastFinalizadoPorMaquina,
+  machineIds = MAQUINAS,
 }) {
   const source = ativosPorMaquina || {};
   const [lowEffStartedAt, setLowEffStartedAt] = useState({});
@@ -75,7 +76,7 @@ export default function PainelTV({
   useEffect(() => {
     async function fetchLowEffLogs() {
       const result = {};
-      for (const m of MAQUINAS) {
+      for (const m of machineIds) {
         const lista = (source && source[m]) || [];
         const ativa = lista[0] || null;
         if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
@@ -95,7 +96,7 @@ export default function PainelTV({
     }
 
     fetchLowEffLogs();
-  }, [ativosPorMaquina]);
+  }, [ativosPorMaquina, machineIds]);
 
   return (
     <div className="tv-wrapper">
@@ -104,7 +105,7 @@ export default function PainelTV({
       </div>
 
       <div className="tv-board">
-        {MAQUINAS.map((machineId) => {
+        {machineIds.map((machineId) => {
           const lista = source[machineId] || [];
           const atual = lista[0] || null;
           const proximo = lista[1] || null;

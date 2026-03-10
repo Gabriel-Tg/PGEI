@@ -20,6 +20,8 @@ export default function Lista({
   enviarParaFila,     // agora vamos chamar com { operador, data, hora }
   refreshOrdens,      // opcional
   isAdmin = false,
+  clientId = null,
+  machineIds = MAQUINAS,
 }) {
   const [itemTechByCode, setItemTechByCode] = useState({})
 
@@ -46,7 +48,7 @@ export default function Lista({
   const activeItemCodes = useMemo(() => {
     const codes = new Set()
 
-    MAQUINAS.forEach((m) => {
+    machineIds.forEach((m) => {
       const ativa = (ativosPorMaquina[m] || [])[0]
       const productRaw = String(ativa?.product || '').trim()
       if (!productRaw) return
@@ -56,7 +58,7 @@ export default function Lista({
     })
 
     return Array.from(codes)
-  }, [ativosPorMaquina])
+  }, [ativosPorMaquina, machineIds])
 
   useEffect(() => {
     let cancelled = false
@@ -67,10 +69,14 @@ export default function Lista({
         return
       }
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('items')
         .select('code, cycle_seconds, cavities')
         .in('code', activeItemCodes)
+
+      if (clientId) query = query.eq('client_id', clientId)
+
+      const { data, error } = await query
 
       if (error) {
         console.warn('Falha ao carregar ciclo/cavidades dos itens:', error)
@@ -97,7 +103,7 @@ export default function Lista({
     return () => {
       cancelled = true
     }
-  }, [activeItemCodes])
+  }, [activeItemCodes, clientId])
 
   const abrirModalInterromper = (ordem) => {
     const nowBr = DateTime.now().setZone("America/Sao_Paulo");
@@ -168,7 +174,7 @@ await supabase.rpc('reorder_machine_queue', {
       <div className="grid">
         <div className="tablehead"><div>MÁQUINA</div><div>PAINEL</div><div>FILA</div></div>
 
-        {MAQUINAS .map((m) => {
+        {machineIds.map((m) => {
           const lista = ativosPorMaquina[m] || []
           const ativa = lista[0] || null
           const fila  = lista.slice(1)

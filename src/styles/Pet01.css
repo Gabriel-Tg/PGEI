@@ -249,13 +249,15 @@
   padding: 18px;
   box-shadow: 0 24px 60px rgba(2,8,23,0.45);
   box-sizing: border-box;
+  color: #1b2a36;
 }
 
 /* modal inputs e labels, seguindo painel */
-.pet01-modal h3{ margin:0 0 10px 0; font-size:18px; font-weight:800; color:var(--pet01-text); }
-.pet01-modal label{ display:block; font-weight:700; margin-top:8px; color:var(--pet01-subtext); }
+.pet01-modal h3{ margin:0 0 10px 0; font-size:18px; font-weight:800; color:#12202c; }
+.pet01-modal p{ color:#3b4f5f; }
+.pet01-modal label{ display:block; font-weight:700; margin-top:8px; color:#2b3e4d; }
 .pet01-modal input, .pet01-modal select{
-  width:100%; padding:10px 12px; border-radius:8px; border:1px solid #d7e6ef; margin-top:6px; box-sizing:border-box;
+  width:100%; padding:10px 12px; border-radius:8px; border:1px solid #d7e6ef; margin-top:6px; box-sizing:border-box; color:#1b2a36; background:#fff;
 }
 
 /* modal actions */

@@ -1,6 +1,15 @@
 import React from 'react'
 
-export default function ClientsTable({ clients, onToggleStatus, onEdit }) {
+function formatDate(iso) {
+  if (!iso) return '-'
+  try {
+    return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+  } catch {
+    return '-'
+  }
+}
+
+export default function ClientsTable({ clients, onToggleStatus, onOpenAddMachine, onEditClient, onDeleteClient }) {
   return (
     <section className="admin-section-card">
       <div className="admin-section-head">
@@ -13,10 +22,10 @@ export default function ClientsTable({ clients, onToggleStatus, onEdit }) {
           <thead>
             <tr>
               <th>Empresa</th>
+              <th>Subdominio</th>
               <th>Status</th>
-              <th>Plano</th>
               <th>Maquinas</th>
-              <th>Ultimo acesso</th>
+              <th>Criado em</th>
               <th>Acoes</th>
             </tr>
           </thead>
@@ -24,22 +33,28 @@ export default function ClientsTable({ clients, onToggleStatus, onEdit }) {
             {clients.map((client) => (
               <tr key={client.id}>
                 <td>
-                  <strong>{client.companyName}</strong>
-                  <small>{client.email}</small>
+                  <strong>{client.name}</strong>
+                  <small>{client.slug}</small>
                 </td>
+                <td>{client.subdomain}.techargos.com.br</td>
                 <td>
-                  <span className={`badge ${client.status}`}>{client.status === 'active' ? 'Ativa' : 'Inativa'}</span>
+                  <span className={`badge ${client.active ? 'active' : 'inactive'}`}>{client.active ? 'Ativa' : 'Inativa'}</span>
                 </td>
-                <td>{client.plan}</td>
-                <td>{client.machines}</td>
-                <td>{client.lastAccess}</td>
+                <td>{client.machine_count || 0}</td>
+                <td>{formatDate(client.created_at)}</td>
                 <td>
                   <div className="admin-action-row">
-                    <button type="button" className="btn-secondary" onClick={() => onEdit(client.id)}>
+                    <button type="button" className="btn-secondary" onClick={() => onOpenAddMachine(client)}>
+                      Nova maquina
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => onEditClient(client)}>
                       Editar
                     </button>
                     <button type="button" className="btn-secondary" onClick={() => onToggleStatus(client.id)}>
-                      {client.status === 'active' ? 'Desativar' : 'Ativar'}
+                      {client.active ? 'Desativar' : 'Ativar'}
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => onDeleteClient(client.id)}>
+                      Excluir
                     </button>
                   </div>
                 </td>

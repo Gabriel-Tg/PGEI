@@ -24,8 +24,10 @@ export default function Pet01({
   setResumeModal,
   setFinalizando,
   machineId: machineIdProp,
+  clientId = null,
 }) {
   const machineId = String(machineIdProp || "P1").toUpperCase();
+  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
   // estados principais
   const [ativa, setAtiva] = useState(null);
   const [proximo, setProximo] = useState(null);
@@ -80,9 +82,9 @@ const [currentShift, setCurrentShift] = useState(() => {
       setScans([]);
       return;
     }
-    const { data } = await supabase
+    const { data } = await withClient(supabase
       .from("production_scans")
-      .select("*")
+      .select("*"))
       .eq("order_id", id)
       .order("scanned_box", { ascending: true });
     setScans(data || []);
@@ -198,24 +200,24 @@ const [currentShift, setCurrentShift] = useState(() => {
 
     try {
       const [bipRes, scrapRes, manualRes] = await Promise.all([
-        supabase
+        withClient(supabase
           .from("production_scans")
           .select("order_id, machine_id, created_at")
           .eq("machine_id", machineId)
           .gte("created_at", startIso)
-          .lt("created_at", endIso),
-        supabase
+          .lt("created_at", endIso)),
+        withClient(supabase
           .from("scrap_logs")
           .select("order_id, qty, machine_id, created_at")
           .eq("machine_id", machineId)
           .gte("created_at", startIso)
-          .lt("created_at", endIso),
-        supabase
+          .lt("created_at", endIso)),
+        withClient(supabase
           .from("injection_production_entries")
           .select("order_id, good_qty, machine_id, created_at")
           .eq("machine_id", machineId)
           .gte("created_at", startIso)
-          .lt("created_at", endIso),
+          .lt("created_at", endIso)),
       ]);
 
       if (bipRes.error) throw bipRes.error;
@@ -232,9 +234,9 @@ const [currentShift, setCurrentShift] = useState(() => {
 
       let ordersMap = {};
       if (orderIds.size > 0) {
-        const { data: ords, error: ordErr } = await supabase
+        const { data: ords, error: ordErr } = await withClient(supabase
           .from("orders")
-          .select("id, standard")
+          .select("id, standard"))
           .in("id", Array.from(orderIds));
         if (ordErr) throw ordErr;
         (ords || []).forEach((o) => { ordersMap[String(o.id)] = o; });
@@ -260,7 +262,7 @@ const [currentShift, setCurrentShift] = useState(() => {
 
   const fetchShiftResponsible = useCallback(async (info, key) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await withClient(supabase
         .from("shift_responsibles")
         .select("id, operator, responsible, responsavel, shift, machine_id, effective_date, created_at")
         .eq("machine_id", machineId)
@@ -268,7 +270,7 @@ const [currentShift, setCurrentShift] = useState(() => {
         .gte("created_at", info.start.toUTC().toISO())
         .lt("created_at", info.end.toUTC().toISO())
         .order("created_at", { ascending: false })
-        .limit(1);
+        .limit(1));
 
       if (error) throw error;
       const row = data && data[0];
@@ -332,6 +334,7 @@ const [currentShift, setCurrentShift] = useState(() => {
     try {
       const nowBr = DateTime.now().setZone("America/Sao_Paulo");
       const payload = {
+        ...(clientId ? { client_id: clientId } : {}),
         machine_id: machineId,
         shift: String(shiftInfo.shiftKey),
         operator: nome,
@@ -382,6 +385,7 @@ async function biparWithCode(code) {
   const { data: dup, error: dupErr } = await supabase
     .from("production_scans")
     .select("id")
+    .eq("client_id", ativa?.client_id || clientId)
     .eq("order_id", ativa.id)
     .eq("scanned_box", caixa)
     .maybeSingle();
@@ -422,6 +426,7 @@ async function biparWithCode(code) {
   console.info("[biparWithCode] turnoCalc (getTurnoAtual):", turnoCalc);
 
   const payload = {
+    ...(clientId ? { client_id: clientId } : {}),
     created_at: createdAtUtcIso,
     machine_id: machineId,
     shift: turnoCalc,
@@ -584,7 +589,7 @@ if (typeof window !== "undefined") {
 
   // ---------- render ----------
   return (
-    <div className={`pet01-wrapper ${machineId === 'P1' ? 'pet01-wrapper--p1' : ''}`}>
+    <div className="pet01-wrapper pet01-wrapper--p1">
       {/* Top toast notification */}
       <div className={`pet01-toast ${toast.type === "ok" ? "ok" : "err"} ${toast.visible ? "show" : ""}`} role="status" aria-live="polite">
         {toast.msg}
@@ -826,7 +831,8 @@ if (typeof window !== "undefined") {
           const turnoCalc = String(getTurnoAtual(nowBr) || "Hora Extra");
 
           // payload final compatível com scrap_logs
-        const payload = {
+            const payload = {
+          ...(clientId ? { client_id: clientId } : {}),
     created_at: createdAtUtcIso,           // grava o UTC correspondente ao horário BR
     machine_id: ativa.machine_id,
     shift: turnoCalc,

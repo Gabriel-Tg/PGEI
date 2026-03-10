@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { MAQUINAS } from '../lib/constants'
 import Modal from '../components/Modal'
 
-export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
+export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId = null, machineIds = MAQUINAS }) {
   // ====== Busca de itens ligada ao campo "Produto" ======
   const [qProd, setQProd] = useState(form.product || '') // espelho do campo Produto
   const [suggestions, setSuggestions] = useState([])
@@ -16,6 +16,19 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   const [missingItemModal, setMissingItemModal] = useState({ open: false, code: '' })
   const debRef = useRef(null)
   const listRef = useRef(null)
+  const availableMachines = useMemo(() => {
+    const src = Array.isArray(machineIds) && machineIds.length ? machineIds : MAQUINAS
+    return src
+      .map((m) => String(m || '').trim().toUpperCase())
+      .filter(Boolean)
+  }, [machineIds])
+
+  useEffect(() => {
+    if (!availableMachines.length) return
+    const current = String(form.machine_id || '').trim().toUpperCase()
+    if (current && availableMachines.includes(current)) return
+    setForm((f) => ({ ...f, machine_id: availableMachines[0] }))
+  }, [availableMachines, form.machine_id, setForm])
 
   // mantém qProd sincronizado quando a tela monta
   useEffect(() => { setQProd(form.product || '') }, []) // ao montar
@@ -56,12 +69,16 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
       ors.unshift(`code.ilike.%${escapeLike(codeGuess)}%`)
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('items')
       .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin')
       .or(ors.join(','))
       .order('code', { ascending: true })
       .limit(12)
+
+    if (clientId) query = query.eq('client_id', clientId)
+
+    const { data, error } = await query
 
     setLoading(false)
     if (error) { setErr(error.message); setSuggestions([]); setOpenList(false); return }
@@ -122,11 +139,14 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
 
     setCheckingItemCode(true)
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('items')
         .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin')
         .eq('code', codeGuess)
-        .maybeSingle()
+
+      if (clientId) query = query.eq('client_id', clientId)
+
+      const { data, error } = await query.maybeSingle()
 
       if (error) {
         setErr(error.message || 'Não foi possível validar o código do item.')
@@ -203,7 +223,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
               value={form.machine_id}
               onChange={e=>setForm(f=>({...f, machine_id:e.target.value}))}
             >
-              {MAQUINAS.map(m=><option key={m} value={m}>{m}</option>)}
+              {availableMachines.map(m=><option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 

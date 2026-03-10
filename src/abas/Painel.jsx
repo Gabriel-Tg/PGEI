@@ -27,6 +27,7 @@ export default function Painel({
   onScanned, // opcional: callback do pai para re-fetch geral
   authUser,
   machinePriorities = {},
+  machineIds = MAQUINAS,
 }) {
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
@@ -201,7 +202,7 @@ export default function Painel({
   useEffect(() => {
     async function fetchLowEffLogs() {
       const result = {};
-      for (const m of MAQUINAS) {
+      for (const m of machineIds) {
         const lista = (localAtivos && localAtivos[m]) || [];
         const ativa = lista[0] || null;
         if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
@@ -222,7 +223,7 @@ export default function Painel({
     }
     fetchLowEffLogs();
     // Executa sempre que localAtivos ou status mudam
-  }, [localAtivos, tick]);
+  }, [localAtivos, tick, machineIds]);
   
   async function insertLowEfficiencyLog({ order_id = null, machine_id, started_by = null, notes = null }) {
     try {
@@ -281,7 +282,7 @@ export default function Painel({
   return (
     <div className="board-wrapper">
       <div className="board">
-        {MAQUINAS.map((m) => {
+        {machineIds.map((m) => {
           const lista = source[m] ?? [];
           const ativa = lista[0] || null;
 

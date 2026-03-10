@@ -17,7 +17,7 @@ const formatMs = (ms) => {
   return `${h}h ${String(m).padStart(2, '0')}min`
 }
 
-export default function Rastreio() {
+export default function Rastreio({ clientId = null }) {
   const [osCode, setOsCode] = useState('')
   const [order, setOrder] = useState(null)
   const [scans, setScans] = useState([])
@@ -44,11 +44,14 @@ export default function Rastreio() {
     setManualEntries([])
 
     try {
-      const { data: ord, error: ordErr } = await supabase
+      let ordQuery = supabase
         .from('orders')
         .select('*')
         .eq('code', code)
-        .maybeSingle()
+
+      if (clientId) ordQuery = ordQuery.eq('client_id', clientId)
+
+      const { data: ord, error: ordErr } = await ordQuery.maybeSingle()
 
       if (ordErr) {
         throw ordErr
@@ -65,21 +68,25 @@ export default function Rastreio() {
         supabase
           .from('production_scans')
           .select('*')
+          .eq('client_id', ord.client_id || clientId)
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
         supabase
           .from('scrap_logs')
           .select('*')
+          .eq('client_id', ord.client_id || clientId)
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
         supabase
           .from('machine_stops')
           .select('*')
+          .eq('client_id', ord.client_id || clientId)
           .eq('order_id', ord.id)
           .order('started_at', { ascending: true }),
         supabase
           .from('injection_production_entries')
           .select('*')
+          .eq('client_id', ord.client_id || clientId)
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
       ])

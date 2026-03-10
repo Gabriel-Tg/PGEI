@@ -67,7 +67,7 @@ const getFileExtension = (fileName = '') => {
 
 const sanitizeCodeForPath = (value) => String(value ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
 
-export default function CadastroItens() {
+export default function CadastroItens({ clientId = null }) {
   // ============== AUTH / ADMIN ONLY GATE ==============
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -90,14 +90,17 @@ export default function CadastroItens() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query)
 
   const fetchItems = async () => {
     setLoading(true)
     setError(null)
-    const { data, error } = await supabase
-      .from('items')
-      .select('*')
-      .order('code', { ascending: true })
+    const { data, error } = await withClient(
+      supabase
+        .from('items')
+        .select('*')
+        .order('code', { ascending: true })
+    )
     if (error) {
       setError(error.message)
       setItems([])
@@ -111,7 +114,7 @@ export default function CadastroItens() {
     if (!authChecked || !isAdmin) return
     fetchItems()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authChecked, isAdmin])
+  }, [authChecked, isAdmin, clientId])
 
   const isProdutoAcabado = (item) => {
     const type = String(item?.item_type || '').trim().toLowerCase()
@@ -423,6 +426,7 @@ export default function CadastroItens() {
       code,
       description: cleanText(form.description),
       item_type: cleanText(form.itemType) || 'produto_acabado',
+      ...(clientId ? { client_id: clientId } : {}),
     }
     const payload = form.itemType === 'insumo'
       ? {
@@ -516,6 +520,7 @@ export default function CadastroItens() {
         part_weight_g: toPosFloat(row.part_weight_g),
         unit_value: toPosFloat(row.unit_value),
         resin: cleanText(row.resin),
+        ...(clientId ? { client_id: clientId } : {}),
       }
       if (!payload.code || !payload.description) continue
       if (!payload.cycle_seconds || !payload.cavities || !payload.part_weight_g || !payload.unit_value) continue
@@ -563,7 +568,8 @@ export default function CadastroItens() {
     const CHUNK = 300
     for (let i = 0; i < best.mapped.length; i += CHUNK) {
       const slice = best.mapped.slice(i, i + CHUNK)
-      const { error } = await supabase.from('items').upsert(slice, { onConflict: 'code', ignoreDuplicates: true })
+      const conflict = clientId ? 'client_id,code' : 'code'
+      const { error } = await supabase.from('items').upsert(slice, { onConflict: conflict, ignoreDuplicates: true })
       if (error) { failed = error.message; break }
     }
     setImporting(false)
