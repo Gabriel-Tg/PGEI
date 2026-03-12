@@ -7,6 +7,7 @@ export default function Login({
   authenticatedTitle = 'Você está autenticado',
   authenticatedDescription,
   showAdminShortcut = true,
+  allowContinueWhenAuthenticated = true,
 }) {
   const isMissingSessionError = (err) => String(err?.message || '').toLowerCase().includes('auth session missing')
   const [email, setEmail] = useState('')
@@ -75,11 +76,11 @@ export default function Login({
             <button className="btn primary" onClick={() => { location.href = '/admin/itens' }}>
               Ir para Cadastro de Itens
             </button>
-          ) : (
+          ) : allowContinueWhenAuthenticated ? (
             <button className="btn primary" onClick={() => { if (typeof onAuthenticated === 'function') onAuthenticated(user) }}>
               Continuar
             </button>
-          )}
+          ) : null}
           <button className="btn ghost" onClick={signOut}>Sair</button>
         </div>
       </div>

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import './admin.css'
 import { supabase } from '../lib/supabaseClient'
-import { createClient } from '@supabase/supabase-js'
 import AdminLayout from './components/AdminLayout'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
@@ -31,11 +30,8 @@ export default function AdminPanel() {
   const [showMachineModal, setShowMachineModal] = useState(false)
   const [editingClientId, setEditingClientId] = useState(null)
   const [editingMachineId, setEditingMachineId] = useState(null)
-  const [clientForm, setClientForm] = useState({ name: '', slug: '', subdomain: '', active: true, is_demo: false, access_email: '', access_password: '', access_name: '' })
+  const [clientForm, setClientForm] = useState({ name: '', subdomain: '', active: true, is_demo: false })
   const [machineForm, setMachineForm] = useState({ client_id: '', machine_code: '', machine_name: '', route_slug: '', sector: '', active: true })
-
-  const url = import.meta.env.VITE_SUPABASE_URL
-  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY
 
   function handleAuthInput(event) {
     const { name, value } = event.target
@@ -124,7 +120,7 @@ export default function AdminPanel() {
 
   function openClientModal() {
     setEditingClientId(null)
-    setClientForm({ name: '', slug: '', subdomain: '', active: true, is_demo: false, access_email: '', access_password: '', access_name: '' })
+    setClientForm({ name: '', subdomain: '', active: true, is_demo: false })
     setShowClientModal(true)
   }
 
@@ -145,13 +141,9 @@ export default function AdminPanel() {
     setEditingClientId(client.id)
     setClientForm({
       name: client.name || '',
-      slug: client.slug || '',
       subdomain: client.subdomain || '',
       active: !!client.active,
       is_demo: !!client.is_demo,
-      access_email: '',
-      access_password: '',
-      access_name: '',
     })
     setShowClientModal(true)
   }
@@ -181,79 +173,14 @@ export default function AdminPanel() {
     await loadData()
   }
 
-  async function createClientAccessUser({ clientId, email, password, fullName }) {
-    const normalizedEmail = String(email || '').trim().toLowerCase()
-    const cleanPassword = String(password || '').trim()
-    if (!normalizedEmail || !cleanPassword) return
-
-    const isolated = createClient(url, anon, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    })
-
-    const { error: signUpError } = await isolated.auth.signUp({
-      email: normalizedEmail,
-      password: cleanPassword,
-      options: {
-        data: {
-          full_name: fullName || null,
-        },
-      },
-    })
-
-    if (signUpError && !String(signUpError.message || '').toLowerCase().includes('already')) {
-      throw signUpError
-    }
-
-    const { data: existingRow, error: findErr } = await supabase
-      .from('client_users')
-      .select('id, email')
-      .eq('client_id', clientId)
-      .ilike('email', normalizedEmail)
-      .limit(1)
-      .maybeSingle()
-
-    if (findErr) throw findErr
-
-    if (existingRow?.id) {
-      const { error: updErr } = await supabase
-        .from('client_users')
-        .update({
-          email: normalizedEmail,
-          full_name: String(fullName || '').trim() || null,
-          role: 'manager',
-          active: true,
-        })
-        .eq('id', existingRow.id)
-
-      if (updErr) throw updErr
-      return
-    }
-
-    const { error: insertErr } = await supabase.from('client_users').insert([
-      {
-        client_id: clientId,
-        email: normalizedEmail,
-        full_name: String(fullName || '').trim() || null,
-        role: 'manager',
-        active: true,
-      },
-    ])
-
-    if (insertErr) throw insertErr
-  }
-
   async function handleCreateClient(event) {
     event.preventDefault()
     const name = String(clientForm.name || '').trim()
-    const slug = normalizeSlug(clientForm.slug || name)
-    const subdomain = normalizeSlug(clientForm.subdomain || slug)
+    const subdomain = normalizeSlug(clientForm.subdomain)
+    const slug = subdomain
 
-    if (!name || !slug || !subdomain) {
-      alert('Preencha nome, slug e subdominio válidos.')
+    if (!name || !subdomain) {
+      alert('Preencha nome e subdominio válidos.')
       return
     }
 
@@ -279,19 +206,6 @@ export default function AdminPanel() {
         return
       }
       clientId = data?.id || null
-    }
-
-    try {
-      if (clientId && clientForm.access_email && clientForm.access_password) {
-        await createClientAccessUser({
-          clientId,
-          email: clientForm.access_email,
-          password: clientForm.access_password,
-          fullName: clientForm.access_name,
-        })
-      }
-    } catch (err) {
-      alert(`Cliente salvo, mas falhou ao criar usuário de acesso: ${err?.message || 'erro desconhecido'}`)
     }
 
     setShowClientModal(false)
@@ -508,16 +422,6 @@ export default function AdminPanel() {
                 </label>
 
                 <label>
-                  Slug
-                  <input
-                    value={clientForm.slug}
-                    onChange={(e) => setClientForm((prev) => ({ ...prev, slug: e.target.value }))}
-                    placeholder="ex: metal-sul"
-                    required
-                  />
-                </label>
-
-                <label>
                   Subdominio
                   <input
                     value={clientForm.subdomain}
@@ -536,39 +440,6 @@ export default function AdminPanel() {
                     <option value="1">Sim</option>
                     <option value="0">Não</option>
                   </select>
-                </label>
-
-                <label className="full-width" style={{ marginTop: 8, fontWeight: 700 }}>
-                  Acesso do cliente (opcional)
-                </label>
-
-                <label>
-                  E-mail de acesso
-                  <input
-                    type="email"
-                    value={clientForm.access_email}
-                    onChange={(e) => setClientForm((prev) => ({ ...prev, access_email: e.target.value }))}
-                    placeholder="operador@cliente.com"
-                  />
-                </label>
-
-                <label>
-                  Senha inicial
-                  <input
-                    type="password"
-                    value={clientForm.access_password}
-                    onChange={(e) => setClientForm((prev) => ({ ...prev, access_password: e.target.value }))}
-                    placeholder="Senha temporária"
-                  />
-                </label>
-
-                <label>
-                  Nome do usuário
-                  <input
-                    value={clientForm.access_name}
-                    onChange={(e) => setClientForm((prev) => ({ ...prev, access_name: e.target.value }))}
-                    placeholder="Operador responsável"
-                  />
                 </label>
 
                 <div className="full-width admin-form-actions">

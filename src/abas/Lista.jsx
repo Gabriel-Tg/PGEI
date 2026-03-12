@@ -20,9 +20,13 @@ export default function Lista({
   enviarParaFila,     // agora vamos chamar com { operador, data, hora }
   refreshOrdens,      // opcional
   isAdmin = false,
+  canReorder = null,
+  canEditOrder = null,
   clientId = null,
   machineIds = MAQUINAS,
 }) {
+  const canManageQueue = typeof canReorder === 'boolean' ? canReorder : isAdmin
+  const canEditActiveOrder = typeof canEditOrder === 'boolean' ? canEditOrder : isAdmin
   const [itemTechByCode, setItemTechByCode] = useState({})
 
   // 🔶 Modal de confirmação "Enviar para fila / interromper"
@@ -264,7 +268,7 @@ await supabase.rpc('reorder_machine_queue', {
                                 hora: nowBr.toFormat("HH:mm"),
                               })
                             }}>Iniciar Produção</button>
-                            {isAdmin && (
+                            {canEditActiveOrder && (
                               <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
                             )}
                             {/* 🚚 agora abre modal de confirmação */}
@@ -273,7 +277,7 @@ await supabase.rpc('reorder_machine_queue', {
                         ) : (
                           <>
                             <button className="btn" onClick={() => setFinalizando(ativa)}>Finalizar</button>
-                            {isAdmin && (
+                            {canEditActiveOrder && (
                               <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
                             )}
                             {/* 🚚 agora abre modal de confirmação */}
@@ -291,7 +295,7 @@ await supabase.rpc('reorder_machine_queue', {
               <div className="cell-fila">
                 {fila.length === 0 ? (
                   <div className="fila"><div className="muted">Sem itens na fila</div></div>
-                ) : isAdmin ? (
+                ) : canManageQueue ? (
                   <DndContext
                     sensors={sensors}
                     onDragEnd={(e) => moverNaFila(m, e)}
@@ -307,7 +311,7 @@ await supabase.rpc('reorder_machine_queue', {
                             etiquetaVariant="fila"
                             highlightInterrompida={f.status === 'AGUARDANDO' && !!f.interrupted_at}
                             canReorder={true}
-                            canEdit={isAdmin}
+                            canEdit={canEditActiveOrder}
                           />
                         ))}
                       </div>

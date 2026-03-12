@@ -10,7 +10,16 @@ export default function useAuthAdmin(tenantClientId = null){
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [tenantAccess, setTenantAccess] = useState(false)
+  const [tenantRole, setTenantRole] = useState(null)
   const [tenantAccessChecked, setTenantAccessChecked] = useState(false)
+
+  function normalizeRole(role) {
+    const normalized = String(role || '').trim().toLowerCase()
+    if (normalized === 'pcp') return 'pcp'
+    if (normalized === 'fabrica' || normalized === 'operator') return 'fabrica'
+    if (normalized === 'gestao' || normalized === 'manager' || normalized === 'admin') return 'gestao'
+    return null
+  }
 
   useEffect(() => {
     let active = true
@@ -55,24 +64,28 @@ export default function useAuthAdmin(tenantClientId = null){
     async function checkTenantAccess() {
       if (!authChecked) {
         setTenantAccess(false)
+        setTenantRole(null)
         setTenantAccessChecked(false)
         return
       }
 
       if (!authUser) {
         setTenantAccess(false)
+        setTenantRole(null)
         setTenantAccessChecked(true)
         return
       }
 
       if (isAdmin) {
         setTenantAccess(true)
+        setTenantRole('gestao')
         setTenantAccessChecked(true)
         return
       }
 
       if (!tenantClientId) {
         setTenantAccess(isProducao)
+        setTenantRole(isProducao ? 'fabrica' : null)
         setTenantAccessChecked(true)
         return
       }
@@ -80,13 +93,14 @@ export default function useAuthAdmin(tenantClientId = null){
       const email = String(authUser?.email || '').trim().toLowerCase()
       if (!email) {
         setTenantAccess(false)
+        setTenantRole(null)
         setTenantAccessChecked(true)
         return
       }
 
       const { data, error } = await supabase
         .from('client_users')
-        .select('id')
+        .select('id, role')
         .eq('client_id', tenantClientId)
         .eq('active', true)
         .ilike('email', email)
@@ -98,11 +112,13 @@ export default function useAuthAdmin(tenantClientId = null){
       if (error) {
         console.warn('Falha ao validar acesso por cliente:', error)
         setTenantAccess(false)
+        setTenantRole(null)
         setTenantAccessChecked(true)
         return
       }
 
       setTenantAccess(!!data?.id)
+      setTenantRole(data?.id ? normalizeRole(data?.role) : null)
       setTenantAccessChecked(true)
     }
 
@@ -115,5 +131,26 @@ export default function useAuthAdmin(tenantClientId = null){
     return tenantAccess
   }, [isAdmin, tenantAccess])
 
-  return { authUser, authChecked, isAdmin, isProducao, hasAccess, tenantAccessChecked }
+  const accessLevel = useMemo(() => {
+    if (isAdmin) return 'gestao'
+    return tenantRole
+  }, [isAdmin, tenantRole])
+
+  const permissions = useMemo(() => {
+    const isGestao = accessLevel === 'gestao'
+    const isPcp = accessLevel === 'pcp'
+    const isFabrica = accessLevel === 'fabrica'
+    return {
+      isGestao,
+      isPcp,
+      isFabrica,
+      canAccessGestao: isGestao,
+      canCreateOrder: isGestao || isPcp,
+      canEditQueue: isGestao || isPcp,
+      canEditOrder: isGestao || isPcp,
+      canViewRastreio: isGestao || isPcp,
+    }
+  }, [accessLevel])
+
+  return { authUser, authChecked, isAdmin, isProducao, hasAccess, tenantAccessChecked, tenantRole: accessLevel, permissions }
 }

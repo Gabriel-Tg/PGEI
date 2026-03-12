@@ -65,16 +65,28 @@ export default function DemoApp({ tenantClient = null }){
   }, [tenantClientId, tenantMachines])
   const tenantMachinesReady = !tenantClientId || machinesResolved
 
-  const { authUser, authChecked, isAdmin, isProducao, hasAccess, tenantAccessChecked } = useAuthAdmin(tenantClientId)
-  const hasGestaoAccess = !!authUser && isAdmin
+  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantClientId)
+  const hasGestaoAccess = !!authUser && !!permissions?.canAccessGestao
+  const canCreateOrder = !!permissions?.canCreateOrder
+  const canEditQueue = !!permissions?.canEditQueue
+  const canEditOrder = !!permissions?.canEditOrder
+  const canViewRastreio = !!permissions?.canViewRastreio
 
   const {
     ordens, paradas,
     fetchOrdensAbertas,
+    fetchOrdensFinalizadas, fetchParadas,
     criarOrdem, atualizar, enviarParaFila, finalizar,
     confirmarInicio, confirmarParada, confirmarRetomada, confirmarBaixaEf, confirmarEncerrarBaixaEf,
     ativosPorMaquina, registroGrupos, lastFinalizadoPorMaquina, onStatusChange
   } = useOrders(tenantClientId)
+
+  useEffect(() => {
+    if (!authChecked || !tenantAccessChecked || !authUser || !hasAccess) return
+    fetchOrdensAbertas()
+    fetchOrdensFinalizadas()
+    fetchParadas()
+  }, [authChecked, tenantAccessChecked, authUser, hasAccess, tenantClientId])
 
   useEffect(()=>{
      const nowBR = DateTime.now().setZone('America/Sao_Paulo')
@@ -294,10 +306,20 @@ export default function DemoApp({ tenantClient = null }){
       return
     }
 
-    if (!isAdmin && !['painel', 'lista', 'apontamento', 'login'].includes(tab)) {
+    if (!canCreateOrder && tab === 'nova') {
+      setTab('painel')
+      return
+    }
+
+    if (!canViewRastreio && tab === 'rastreio') {
+      setTab('painel')
+      return
+    }
+
+    if (!hasGestaoAccess && tab === 'gestao') {
       setTab('painel')
     }
-  }, [authChecked, authUser, tab, hasAccess, isAdmin])
+  }, [authChecked, authUser, tab, hasAccess, canCreateOrder, canViewRastreio, hasGestaoAccess])
 
   async function handleSignOut() {
     try {
@@ -331,6 +353,25 @@ export default function DemoApp({ tenantClient = null }){
     )
   }
 
+  const hasTenantRouteAccess = !!authUser && tenantAccessChecked && hasAccess
+
+  function renderTenantAccessRequired() {
+    const accessDenied = !!authUser && tenantAccessChecked && !hasAccess
+    return (
+      <div className="app">
+        {renderBrandBar('Acesso restrito ao cliente')}
+        {accessDenied ? (
+          <div style={{ maxWidth: 520, margin: '16px auto', padding: '0 16px' }}>
+            <div style={{ background: '#ffecec', color: '#a80000', padding: 10, borderRadius: 10 }}>
+              Este usuário não possui acesso ativo para este cliente.
+            </div>
+          </div>
+        ) : null}
+        <Login onAuthenticated={handleLoginSuccess} showAdminShortcut={false} />
+      </div>
+    )
+  }
+
   // rotas rápidas
   // rota de login para acesso via celular (/login)
   if (location && location.pathname === '/login') {
@@ -343,6 +384,7 @@ export default function DemoApp({ tenantClient = null }){
   }
 
   if (location && location.pathname === '/ficha') {
+    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
     return (
       <div className="app">
         {renderBrandBar('Ficha Técnica Digital')}
@@ -352,6 +394,7 @@ export default function DemoApp({ tenantClient = null }){
   }
 
   if (location && location.pathname === '/indicadores') {
+    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
     return (
       <div className="app">
         {renderBrandBar('Indicadores por Setor')}
@@ -380,6 +423,7 @@ export default function DemoApp({ tenantClient = null }){
   }, [invalidMachineRoute, navigate])
 
   if (isMachineRoute) {
+    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
     if (machinesLoading) {
       return <div className="app" style={{ padding: 24 }}>Carregando máquina...</div>
     }
@@ -428,6 +472,7 @@ export default function DemoApp({ tenantClient = null }){
   }
 
   if (location && location.pathname === '/prioridade') {
+    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
     return (
       <div className="app">
         <Prioridade
@@ -441,6 +486,7 @@ export default function DemoApp({ tenantClient = null }){
   }
 
   if (location && String(location.pathname || '').toLowerCase() === '/tv') {
+    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
     if (!tenantMachinesReady) {
       return <div className="app" style={{ padding: 24 }}>Carregando maquinas...</div>
     }
@@ -475,10 +521,10 @@ export default function DemoApp({ tenantClient = null }){
             <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
             <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
             <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
-            {isAdmin && (
+            {canCreateOrder && (
               <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
             )}
-            {isAdmin && (
+            {canViewRastreio && (
               <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
             )}
             {hasGestaoAccess && (
@@ -492,9 +538,12 @@ export default function DemoApp({ tenantClient = null }){
       {tab === 'login' && (
         <Login
           onAuthenticated={handleLoginSuccess}
-          authenticatedTitle="Acesso liberado"
-          authenticatedDescription="Clique em Continuar para abrir seu ambiente."
+          authenticatedTitle={authUser && tenantAccessChecked && !hasAccess ? 'Acesso negado' : 'Acesso liberado'}
+          authenticatedDescription={authUser && tenantAccessChecked && !hasAccess
+            ? 'Este usuário não possui acesso para este cliente.'
+            : 'Clique em Continuar para abrir seu ambiente.'}
           showAdminShortcut={false}
+          allowContinueWhenAuthenticated={!authUser || !tenantAccessChecked || hasAccess}
         />
       )}
 
@@ -547,7 +596,9 @@ export default function DemoApp({ tenantClient = null }){
             setFinalizando={setFinalizando}
             enviarParaFila={enviarParaFila}
             refreshOrdens={fetchOrdensAbertas}
-            isAdmin={isAdmin}
+            isAdmin={canEditOrder}
+            canReorder={canEditQueue}
+            canEditOrder={canEditOrder}
             clientId={tenantClientId}
           />
         ) : (
@@ -555,10 +606,10 @@ export default function DemoApp({ tenantClient = null }){
         )
       )}
 
-      {tab === 'nova' && isAdmin && (
-        isAdmin && tenantMachinesReady ? (
+      {tab === 'nova' && canCreateOrder && (
+        canCreateOrder && tenantMachinesReady ? (
           <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} clientId={tenantClientId} machineIds={machineIds} />
-        ) : isAdmin ? (
+        ) : canCreateOrder ? (
           <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
         ) : (
           <div style={{ padding: 24 }}>
@@ -568,7 +619,7 @@ export default function DemoApp({ tenantClient = null }){
         )
       )}
 
-      {tab === 'rastreio' && isAdmin && (
+      {tab === 'rastreio' && canViewRastreio && (
         <Rastreio clientId={tenantClientId} />
       )}
 
@@ -580,7 +631,7 @@ export default function DemoApp({ tenantClient = null }){
         )
       )}
 
-      {tab === 'gestao' && isAdmin && (
+      {tab === 'gestao' && hasGestaoAccess && (
         hasGestaoAccess && tenantMachinesReady ? (
           <Gestao clientId={tenantClientId} machineIds={machineIds} />
         ) : hasGestaoAccess ? (
