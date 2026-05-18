@@ -1,81 +1,19 @@
 import { DateTime } from "luxon";
-<<<<<<< HEAD
 import { getTurnoAtual as resolveTurnoAtual } from './shifts';
 
 // Retorna 1, 2, 3 ou null quando estiver sem programacao.
 // Aceita: nothing (usa agora), ISO string, JS Date, ou Luxon DateTime
 export function getTurnoAtual(dateInput = null) {
   return resolveTurnoAtual(dateInput);
-=======
-
-// Retorna 1, 2, 3 ou 'Hora Extra'
-// Aceita: nothing (usa agora), ISO string, JS Date, ou Luxon DateTime
-export function getTurnoAtual(dateInput = null) {
-  // normalize para um Luxon DateTime no fuso de São Paulo
-  let dt;
-  if (!dateInput) {
-    dt = DateTime.now().setZone("America/Sao_Paulo");
-  } else if (typeof dateInput === "string") {
-    // aceita ISO com ou sem offset
-    dt = DateTime.fromISO(dateInput, { setZone: true }).setZone("America/Sao_Paulo");
-  } else if (dateInput instanceof Date) {
-    dt = DateTime.fromJSDate(dateInput).setZone("America/Sao_Paulo");
-  } else if (dateInput && typeof dateInput === "object" && dateInput.isLuxonDateTime) {
-    dt = dateInput.setZone("America/Sao_Paulo");
-  } else {
-    // fallback seguro
-    dt = DateTime.now().setZone("America/Sao_Paulo");
-  }
-
-  // Luxon.weekday: 1 = Monday ... 7 = Sunday
-  // queremos dia estilo JS getDay(): 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  const dia = dt.weekday % 7; // (7 % 7 = 0 -> Domingo)
-  const minutos = dt.hour * 60 + dt.minute;
-
-  const inRange = (startMin, endMin, m) => {
-    if (startMin <= endMin) return m >= startMin && m < endMin;
-    return m >= startMin || m < endMin;
-  };
-
-  // Domingo
-  if (dia === 0) {
-    if (inRange(23 * 60 + 15, 24 * 60, minutos)) return 3;
-    if (minutos < 5 * 60 + 15) return 3;
-    return "Hora Extra";
-  }
-
-  // Segunda a Sexta
-  if (dia >= 1 && dia <= 5) {
-    if (inRange(5 * 60 + 15, 13 * 60 + 45, minutos)) return 1;
-    if (inRange(13 * 60 + 45, 22 * 60 + 15, minutos)) return 2;
-    if (inRange(22 * 60 + 15, 5 * 60 + 15, minutos)) return 3;
-  }
-
-  // Sábado
-  if (dia === 6) {
-    if (inRange(5 * 60 + 15, 9 * 60 + 15, minutos)) return 1;
-    if (inRange(9 * 60 + 15, 13 * 60 + 15, minutos)) return 2;
-    return "Hora Extra";
-  }
-
-  return "Hora Extra";
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 }
 
 // src/lib/utils.js
 export function statusClass(s){
-<<<<<<< HEAD
   const status = String(s || '').trim().toUpperCase()
   if(status === 'AGUARDANDO') return 'card gray'
   if(status === 'PRODUZINDO') return 'card green'
   if(status === 'BAIXA_EFICIENCIA') return 'card yellow'
   if(status === 'PARADA') return 'card red'
-=======
-  if(s==='AGUARDANDO') return 'card gray'
-  if(s==='PRODUZINDO') return 'card green'
-  if(s==='BAIXA_EFICIENCIA') return 'card yellow'
-  if(s==='PARADA') return 'card red'
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   return 'card'
 }
 
@@ -89,7 +27,6 @@ export function fmtDateTime(ts) {
   } catch { return ts }
 }
 
-<<<<<<< HEAD
 export function formatHHMMSS(totalSeconds) {
   const sec = Math.max(0, Math.floor(totalSeconds || 0))
   const h = String(Math.floor(sec / 3600)).padStart(2, '0')
@@ -126,8 +63,6 @@ export function getOrderStopDisplay(ordem, paradas = []) {
   }
 }
 
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 // Converte data/hora local digitada -> ISO UTC
 export function localDateTimeToISO(dateStr, timeStr) {
   const [Y, M, D] = String(dateStr).split('-').map(Number);
@@ -147,12 +82,5 @@ export function jaIniciou(ordem) { return Boolean(ordem?.started_at) }
 export function fmtDuracao(startIso, endIso){
   if(!startIso || !endIso) return '-'
   const sec = Math.max(0, Math.floor((new Date(endIso) - new Date(startIso))/1000))
-<<<<<<< HEAD
   return formatHHMMSS(sec)
-=======
-  const h = String(Math.floor(sec/3600)).padStart(2,'0')
-  const m = String(Math.floor((sec%3600)/60)).padStart(2,'0')
-  const s = String(sec%60).padStart(2,'0')
-  return `${h}:${m}:${s}`
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 }
