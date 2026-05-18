@@ -11,7 +11,10 @@ import Lista from '../abas/Lista'
 import NovaOrdem from '../abas/NovaOrdem'
 import Rastreio from '../abas/Rastreio'
 import Gestao from '../abas/Gestao'
+<<<<<<< HEAD
 import Estoque from '../abas/Estoque'
+=======
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 import PainelTV from '../abas/PainelTV'
 import Tablets from '../pages/Tablets'
 import Ficha from '../pages/Ficha'
@@ -248,7 +251,11 @@ export default function DemoApp({ tenantClient = null }){
     }
   }
 
+<<<<<<< HEAD
   // Atalhos de teclado: Ctrl+L (Login) e Ctrl+I (Apontamento oculto)
+=======
+  // Atalhos de teclado: Ctrl+L (Login) e Ctrl+I (Cadastro Itens)
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   useEffect(() => {
     const onKey = (e) => {
       const ctrl = e.ctrlKey || e.metaKey; // permitir Cmd no Mac
@@ -259,7 +266,11 @@ export default function DemoApp({ tenantClient = null }){
         setTab('login');
       } else if (key === 'i') {
         e.preventDefault();
+<<<<<<< HEAD
         setTab('apontamento');
+=======
+        setTab('admin-itens');
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       }
     };
     window.addEventListener('keydown', onKey);
@@ -521,6 +532,10 @@ export default function DemoApp({ tenantClient = null }){
           <>
             <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
             <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
+<<<<<<< HEAD
+=======
+            <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
             {canCreateOrder && (
               <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
             )}
@@ -530,7 +545,10 @@ export default function DemoApp({ tenantClient = null }){
             {hasGestaoAccess && (
               <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
             )}
+<<<<<<< HEAD
             <button className={`tabbtn ${tab==='estoque'?'active':''}`} onClick={()=>setTab('estoque')}>Estoque</button>
+=======
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
             <button className="tabbtn" onClick={handleSignOut}>Sair</button>
           </>
         </div>
@@ -645,10 +663,13 @@ export default function DemoApp({ tenantClient = null }){
         )
       )}
 
+<<<<<<< HEAD
       {tab === 'estoque' && tenantAccessChecked && hasAccess && (
         <Estoque />
       )}
 
+=======
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       {/* Modais centralizados */}
       <GlobalModals
         editando={editando} setEditando={setEditando}

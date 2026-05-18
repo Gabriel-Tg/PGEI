@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import RastreioResumoPeriodo from './RastreioResumoPeriodo'
+=======
+import React, { useMemo, useState } from 'react'
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import '../styles/rastreio.css'
@@ -18,6 +22,7 @@ const formatMs = (ms) => {
   return `${h}h ${String(m).padStart(2, '0')}min`
 }
 
+<<<<<<< HEAD
 const extractItemCodeFromOrderProduct = (product) => {
   if (!product) return ''
   return String(product).split('-')[0]?.trim() || ''
@@ -25,6 +30,9 @@ const extractItemCodeFromOrderProduct = (product) => {
 
 export default function Rastreio({ externalSearchRequest = null }) {
   const [activeView, setActiveView] = useState('trace')
+=======
+export default function Rastreio({ clientId = null }) {
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   const [osCode, setOsCode] = useState('')
   const [order, setOrder] = useState(null)
   const [scans, setScans] = useState([])
@@ -33,6 +41,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
   const [manualEntries, setManualEntries] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+<<<<<<< HEAD
   const [isFinderOpen, setIsFinderOpen] = useState(false)
   const [finderType, setFinderType] = useState('cliente')
   const [finderQuery, setFinderQuery] = useState('')
@@ -51,34 +60,88 @@ export default function Rastreio({ externalSearchRequest = null }) {
   const loadTraceByOrder = useCallback(async (ord) => {
     if (!ord?.id) {
       setError('O.S inválida para rastreio.')
+=======
+
+  async function handleSearch(e) {
+    e?.preventDefault?.()
+    const code = osCode.trim()
+    if (!code) {
+      setError('Informe a O.S. para rastrear.')
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       return
     }
 
     setLoading(true)
     setError('')
+<<<<<<< HEAD
     resetTraceData()
     setOrder(ord)
 
     try {
+=======
+    setOrder(null)
+    setScans([])
+    setScraps([])
+    setStops([])
+    setManualEntries([])
+
+    try {
+      let ordQuery = supabase
+        .from('orders')
+        .select('*')
+        .eq('code', code)
+
+      if (clientId) ordQuery = ordQuery.eq('client_id', clientId)
+
+      const { data: ord, error: ordErr } = await ordQuery.maybeSingle()
+
+      if (ordErr) {
+        throw ordErr
+      }
+
+      if (!ord) {
+        setError('Nenhuma O.S. encontrada com esse código.')
+        return
+      }
+
+      setOrder(ord)
+
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       const [scanRes, scrapRes, stopRes, manualRes] = await Promise.all([
         supabase
           .from('production_scans')
           .select('*')
+<<<<<<< HEAD
+=======
+          .eq('client_id', ord.client_id || clientId)
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
         supabase
           .from('scrap_logs')
           .select('*')
+<<<<<<< HEAD
+=======
+          .eq('client_id', ord.client_id || clientId)
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
         supabase
           .from('machine_stops')
           .select('*')
+<<<<<<< HEAD
+=======
+          .eq('client_id', ord.client_id || clientId)
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           .eq('order_id', ord.id)
           .order('started_at', { ascending: true }),
         supabase
           .from('injection_production_entries')
           .select('*')
+<<<<<<< HEAD
+=======
+          .eq('client_id', ord.client_id || clientId)
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
       ])
@@ -90,6 +153,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
     } catch (err) {
       console.warn('Falha ao rastrear O.S.', err)
       setError('Não foi possível carregar os dados agora. Tente novamente em instantes.')
+<<<<<<< HEAD
       resetTraceData()
     } finally {
       setLoading(false)
@@ -245,6 +309,13 @@ export default function Rastreio({ externalSearchRequest = null }) {
     loadTraceByCode(nextCode)
   }, [externalSearchRequest, loadTraceByCode])
 
+=======
+    } finally {
+      setLoading(false)
+    }
+  }
+
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   const totals = useMemo(() => {
     const totalScanPcs = scans.reduce((acc, s) => acc + Number(s.qty_pieces || 0), 0)
     const totalManualPcs = manualEntries.reduce((acc, m) => acc + Number(m.good_qty || 0), 0)
@@ -292,6 +363,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
 
   return (
     <div className="rastreio-page">
+<<<<<<< HEAD
       <div className="rastreio-view-nav" role="tablist" aria-label="Navegação do rastreio">
         <button
           type="button"
@@ -593,6 +665,240 @@ export default function Rastreio({ externalSearchRequest = null }) {
             <div className="empty-state">Pesquise a O.S para ver paradas, bipagens, produção manual e refugos em um só painel.</div>
           )}
         </>
+=======
+      <div className="rastreio-header">
+        <div>
+          <h2 style={{ margin: 0 }}>Rastreio de O.S</h2>
+          <div style={{ color: '#475569', fontSize: 13 }}>Agrupado por O.S • Paradas, produção e refugo em um só lugar.</div>
+        </div>
+        {loading && (
+          <div className="loading-dots" aria-label="Carregando">
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
+      </div>
+
+      <form className="rastreio-form" onSubmit={handleSearch}>
+        <input
+          type="text"
+          value={osCode}
+          onChange={(e) => setOsCode(e.target.value)}
+          placeholder="Digite o código da O.S (ex: 753)"
+          aria-label="Código da O.S"
+        />
+        <button type="submit" disabled={loading}>{loading ? 'Buscando…' : 'Pesquisar'}</button>
+        {order && <div className="rastreio-status">O.S selecionada: <strong>{order.code}</strong></div>}
+      </form>
+
+      {error && <div className="error-box">{error}</div>}
+
+      {order ? (
+        <>
+          <div className="rastreio-cards">
+            <div className="rastreio-card">
+              <span>Cliente</span>
+              <strong>{order.customer || 'N/A'}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Produto</span>
+              <strong>{order.product || 'N/A'}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Máquina</span>
+              <strong>{order.machine_id || 'N/A'}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Status</span>
+              <strong>{order.finalized ? 'Finalizada' : (order.status || 'N/A')}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Qtd. planejada</span>
+              <strong>{formatPieces(order.qty)}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Caixas previstas</span>
+              <strong>{order.boxes || 'N/A'}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Peças/caixa (padrão)</span>
+              <strong>{formatPieces(order.standard)}</strong>
+            </div>
+            <div className="rastreio-card">
+              <span>Última atualização</span>
+              <strong>{fmtDateTime(order.updated_at || order.finalized_at || order.started_at || order.created_at)}</strong>
+            </div>
+          </div>
+
+          <div className="rastreio-grid">
+            <div className="panel-box">
+              <h3 className="panel-title">Resumo rápido</h3>
+              <div className="rastreio-cards" style={{ marginTop: 8 }}>
+                <div className="rastreio-card">
+                  <span>Produção (bipagens)</span>
+                  <strong>{formatPieces(totals.totalScanPcs)} pcs</strong>
+                </div>
+                <div className="rastreio-card">
+                  <span>Produção manual</span>
+                  <strong>{formatPieces(totals.totalManualPcs)} pcs</strong>
+                </div>
+                <div className="rastreio-card">
+                  <span>Total produzido</span>
+                  <strong>{formatPieces(totals.totalProduced)} pcs</strong>
+                </div>
+                <div className="rastreio-card">
+                  <span>Refugo</span>
+                  <strong>{formatPieces(totals.totalScrap)} pcs</strong>
+                </div>
+                <div className="rastreio-card">
+                  <span>Paradas (qtd)</span>
+                  <strong>{totals.stopCount}</strong>
+                </div>
+                <div className="rastreio-card">
+                  <span>Paradas (tempo)</span>
+                  <strong>{formatMs(totals.stopMs)}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel-box">
+              <h3 className="panel-title">Linha do tempo da O.S</h3>
+              {timeline.length === 0 ? (
+                <div className="empty-state">Nenhum evento encontrado para esta O.S.</div>
+              ) : (
+                <div className="trace-list">
+                  {timeline.map((ev) => {
+                    if (ev.type === 'stop') {
+                      const st = ev.data || {}
+                      return (
+                        <div className="trace-item" key={ev.key}>
+                          <div className="trace-head">
+                            <span className="trace-date">{fmtDateTime(ev.ts)}</span>
+                            <span className="badge badge-stop">Parada</span>
+                          </div>
+                          <div className="trace-info">
+                            <div>
+                              <label>Motivo</label>
+                              <strong>{st.reason || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Operador</label>
+                              <strong>{st.started_by || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Duração</label>
+                              <strong>{fmtDuracao(st.started_at, st.resumed_at || new Date().toISOString())}</strong>
+                            </div>
+                            <div>
+                              <label>Observação</label>
+                              <strong>{st.notes || 'N/A'}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    if (ev.type === 'scan') {
+                      const sc = ev.data || {}
+                      return (
+                        <div className="trace-item" key={ev.key}>
+                          <div className="trace-head">
+                            <span className="trace-date">{fmtDateTime(ev.ts)}</span>
+                            <span className="badge badge-scan">Bipagem</span>
+                          </div>
+                          <div className="trace-info">
+                            <div>
+                              <label>Caixa</label>
+                              <strong>{String(sc.scanned_box || '0').padStart(3, '0')}</strong>
+                            </div>
+                            <div>
+                              <label>Peças na caixa</label>
+                              <strong>{formatPieces(sc.qty_pieces || order?.standard)}</strong>
+                            </div>
+                            <div>
+                              <label>Máquina / Turno</label>
+                              <strong>{sc.machine_id || 'N/A'} • {sc.shift || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Código lido</label>
+                              <strong>{sc.code || sc.op_code || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Operador</label>
+                              <strong>{sc.operator || 'N/A'}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    if (ev.type === 'manual') {
+                      const m = ev.data || {}
+                      return (
+                        <div className="trace-item" key={ev.key}>
+                          <div className="trace-head">
+                            <span className="trace-date">{fmtDateTime(ev.ts)}</span>
+                            <span className="badge badge-manual">Prod. manual</span>
+                          </div>
+                          <div className="trace-info">
+                            <div>
+                              <label>Quantidade</label>
+                              <strong>{formatPieces(m.good_qty)}</strong>
+                            </div>
+                            <div>
+                              <label>Máquina / Turno</label>
+                              <strong>{m.machine_id || 'N/A'} • {m.shift || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Produto</label>
+                              <strong>{m.product || 'N/A'}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    if (ev.type === 'scrap') {
+                      const sr = ev.data || {}
+                      return (
+                        <div className="trace-item" key={ev.key}>
+                          <div className="trace-head">
+                            <span className="trace-date">{fmtDateTime(ev.ts)}</span>
+                            <span className="badge badge-scrap">Refugo</span>
+                          </div>
+                          <div className="trace-info">
+                            <div>
+                              <label>Quantidade</label>
+                              <strong>{formatPieces(sr.qty)}</strong>
+                            </div>
+                            <div>
+                              <label>Motivo</label>
+                              <strong>{sr.reason || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Operador</label>
+                              <strong>{sr.operator || 'N/A'}</strong>
+                            </div>
+                            <div>
+                              <label>Máquina / Turno</label>
+                              <strong>{sr.machine_id || 'N/A'} • {sr.shift || 'N/A'}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    return null
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="empty-state">Pesquise a O.S para ver paradas, bipagens, produção manual e refugos em um só painel.</div>
+>>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       )}
     </div>
   )
