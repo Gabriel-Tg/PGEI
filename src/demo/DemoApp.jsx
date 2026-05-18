@@ -23,7 +23,7 @@ import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient'
 
 
-export default function DemoApp({ tenantClient = null }){
+export default function DemoApp({ tenantClient = null, isDemoEnvironment = false }){
   const [tab,setTab] = useState('login')
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
@@ -65,7 +65,7 @@ export default function DemoApp({ tenantClient = null }){
   }, [tenantClientId, tenantMachines])
   const tenantMachinesReady = !tenantClientId || machinesResolved
 
-  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantClientId)
+  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantClientId, { isDemoTenant: isDemoEnvironment })
   const hasGestaoAccess = !!authUser && !!permissions?.canAccessGestao
   const canCreateOrder = !!permissions?.canCreateOrder
   const canEditQueue = !!permissions?.canEditQueue
@@ -247,7 +247,7 @@ export default function DemoApp({ tenantClient = null }){
     }
   }
 
-  // Atalhos de teclado: Ctrl+L (Login) e Ctrl+I (Cadastro Itens)
+  // Atalhos de teclado: Ctrl+L (Apontamento) e Ctrl+I (Cadastro Itens)
   useEffect(() => {
     const onKey = (e) => {
       const ctrl = e.ctrlKey || e.metaKey; // permitir Cmd no Mac
@@ -255,7 +255,7 @@ export default function DemoApp({ tenantClient = null }){
       const key = String(e.key).toLowerCase();
       if (key === 'l') {
         e.preventDefault();
-        setTab('login');
+        setTab('apontamento');
       } else if (key === 'i') {
         e.preventDefault();
         setTab('admin-itens');
@@ -520,7 +520,6 @@ export default function DemoApp({ tenantClient = null }){
           <>
             <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
             <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
-            <button className={`tabbtn ${tab==='apontamento'?'active':''}`} onClick={()=>setTab('apontamento')}>Apontamento</button>
             {canCreateOrder && (
               <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
             )}

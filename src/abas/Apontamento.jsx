@@ -11,9 +11,10 @@ import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorT
 import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
 
-export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
+export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clientId = null, machineIds = MAQUINAS }) {
   const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false, authUser: null };
   const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
+  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [apontamentos, setApontamentos] = useState([]); // Produção manual das injetoras
@@ -111,16 +112,20 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   async function fetchOrdersCompatByIds(orderIds) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) return [];
 
-    const runtimeRes = await supabase
+    let runtimeQuery = supabase
       .from('production_orders_runtime_v')
       .select('id,code,product,standard,created_at,boxes,machine_id')
       .in('id', orderIds);
+    runtimeQuery = withClient(runtimeQuery);
+    const runtimeRes = await runtimeQuery;
 
     if (isMissingRelationError(runtimeRes.error, 'production_orders_runtime_v')) {
-      const { data, error } = await supabase
+      let ordersQuery = supabase
         .from('orders')
         .select('id,code,product,standard,created_at,boxes,machine_id')
         .in('id', orderIds);
+      ordersQuery = withClient(ordersQuery);
+      const { data, error } = await ordersQuery;
       if (error) throw error;
       return data || [];
     }
@@ -130,16 +135,20 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
   }
 
   async function fetchAllOrdersCompat() {
-    const runtimeRes = await supabase
+    let runtimeQuery = supabase
       .from('production_orders_runtime_v')
       .select('id, code, product, standard, created_at, boxes, machine_id')
       .order('created_at', { ascending: false });
+    runtimeQuery = withClient(runtimeQuery);
+    const runtimeRes = await runtimeQuery;
 
     if (isMissingRelationError(runtimeRes.error, 'production_orders_runtime_v')) {
-      const { data, error } = await supabase
+      let ordersQuery = supabase
         .from('orders')
         .select('id, code, product, standard, created_at, boxes, machine_id')
         .order('created_at', { ascending: false });
+      ordersQuery = withClient(ordersQuery);
+      const { data, error } = await ordersQuery;
       if (error) throw error;
       return data || [];
     }
@@ -273,7 +282,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       cursor = cursor.plus({ days: 1 });
     }
     return res;
-  }, [filtroStart, filtroEnd]);
+  }, [filtroStart, filtroEnd, clientId]);
 
   // Reconsulta completa do período atual
   const refetchData = useCallback(async () => {
@@ -283,35 +292,35 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     }
 
     try {
-      const bipQuery = supabase
+      const bipQuery = withClient(supabase
         .from('production_scans')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
-      const refQuery = supabase
+      const refQuery = withClient(supabase
         .from('scrap_logs')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
-      const paradaQuery = supabase
+      const paradaQuery = withClient(supabase
         .from('machine_stops')
         .select('*')
         .lte('started_at', filtroEnd.toISOString())
-        .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
+        .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
 
-      const apontQuery = supabase
+      const apontQuery = withClient(supabase
         .from('injection_production_entries')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
-      const shiftRespQuery = supabase
+      const shiftRespQuery = withClient(supabase
         .from('shift_responsibles')
         .select('*')
         .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString());
+        .lte('created_at', filtroEnd.toISOString()));
 
       const [bipRes, refRes, parRes, apRes, respRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
       const { data: bip } = bipRes || {}; const { data: ref } = refRes || {}; const { data: par } = parRes || {}; const { data: aps } = apRes || {}; const { data: resp } = respRes || {};
@@ -337,7 +346,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     } catch (e) {
       console.warn('Refetch falhou:', e);
     }
-  }, [filtroStart, filtroEnd]);
+  }, [filtroStart, filtroEnd, clientId]);
 
   useEffect(() => {
     let mounted = true;
@@ -355,36 +364,36 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
       }
 
       try {
-        const bipQuery = supabase
+        const bipQuery = withClient(supabase
           .from('production_scans')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const refQuery = supabase
+        const refQuery = withClient(supabase
           .from('scrap_logs')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const paradaQuery = supabase
+        const paradaQuery = withClient(supabase
           .from('machine_stops')
           .select('*')
           .lte('started_at', filtroEnd.toISOString())
-          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`);
+          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
 
         // produção manual das injetoras
-        const apontQuery = supabase
+        const apontQuery = withClient(supabase
           .from('injection_production_entries')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
-        const shiftRespQuery = supabase
+        const shiftRespQuery = withClient(supabase
           .from('shift_responsibles')
           .select('*')
           .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString());
+          .lte('created_at', filtroEnd.toISOString()));
 
         // fetch bipagens, refugos e paradas
         const [{ data: bip }, { data: ref }, { data: par }, { data: aps }, { data: resp }] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
@@ -444,7 +453,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     }
     fetchAllOrders();
     return () => { mounted = false; };
-  }, [filtroStart, filtroEnd]);
+  }, [filtroStart, filtroEnd, clientId]);
 
   // Busca valores unitários dos itens usados nos pedidos/apontamentos do período
   useEffect(() => {
@@ -465,10 +474,10 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
     let active = true;
     (async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withClient(supabase
           .from('items')
           .select('code, unit_value, cycle_seconds, cavities')
-          .in('code', Array.from(codes));
+          .in('code', Array.from(codes)));
         if (error) throw error;
         if (!active) return;
         const map = {};
@@ -1190,13 +1199,14 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                   // Resolve O.S -> order_id + product
                   let ordSel = null;
                   {
-                    const q = supabase
+                    let q = supabase
                       .from('orders')
                       .select('id, code, product, machine_id, created_at')
                       .eq('code', payload.osCode)
                       .eq('machine_id', payload.machine)
                       .order('created_at', { ascending: false })
                       .limit(1);
+                    q = withClient(q);
                     const { data: ordData, error: ordErr } = await q;
                     if (ordErr || !ordData || !ordData[0]) {
                       showToast('O.S não encontrada para a máquina selecionada.', 'err');
@@ -1211,6 +1221,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
 
                   // 1) Inserir produção manual
                   const prodIns = {
+                    ...(clientId ? { client_id: clientId } : {}),
                     entry_date: diaZ.toISODate(),
                     created_at: createdAtUtcIso,
                     machine_id: payload.machine,
@@ -1230,6 +1241,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
                   // 2) Inserir refugos (scrap_logs), se houver
                   if (payload.scrapEntries.length > 0) {
                     const scrapRows = payload.scrapEntries.map((s) => ({
+                      ...(clientId ? { client_id: clientId } : {}),
                       created_at: createdAtUtcIso,
                       machine_id: payload.machine,
                       shift: String(payload.turno),

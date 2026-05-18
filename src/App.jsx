@@ -84,8 +84,8 @@ export default function App() {
   }
 
   if (tenantClient) {
-    return <DemoApp tenantClient={tenantClient} />
+    return <DemoApp tenantClient={tenantClient} isDemoEnvironment={!!tenantClient.is_demo} />
   }
 
-  return isDemoHost ? <DemoApp tenantClient={null} /> : <SiteApp />
+  return isDemoHost ? <DemoApp tenantClient={null} isDemoEnvironment /> : <SiteApp />
 }

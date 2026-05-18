@@ -6,7 +6,7 @@ import {
   PRODUCAO_EMAILS,
 } from '../lib/constants'
 
-export default function useAuthAdmin(tenantClientId = null){
+export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = false } = {}){
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [tenantAccess, setTenantAccess] = useState(false)
@@ -83,6 +83,14 @@ export default function useAuthAdmin(tenantClientId = null){
         return
       }
 
+      if (isDemoTenant) {
+        const email = String(authUser?.email || '').trim().toLowerCase()
+        setTenantAccess(!!email)
+        setTenantRole(email ? 'gestao' : null)
+        setTenantAccessChecked(true)
+        return
+      }
+
       if (!tenantClientId) {
         setTenantAccess(isProducao)
         setTenantRole(isProducao ? 'fabrica' : null)
@@ -124,7 +132,7 @@ export default function useAuthAdmin(tenantClientId = null){
 
     checkTenantAccess()
     return () => { cancelled = true }
-  }, [authChecked, authUser, isAdmin, isProducao, tenantClientId])
+  }, [authChecked, authUser, isAdmin, isProducao, isDemoTenant, tenantClientId])
 
   const hasAccess = useMemo(() => {
     if (isAdmin) return true

@@ -43,6 +43,13 @@ as $$
     public.is_platform_admin()
     or exists (
       select 1
+      from public.clients c
+      where c.id = target_client_id
+        and c.is_demo = true
+        and c.active = true
+    )
+    or exists (
+      select 1
       from public.client_users cu
       where cu.client_id = target_client_id
         and cu.active = true
