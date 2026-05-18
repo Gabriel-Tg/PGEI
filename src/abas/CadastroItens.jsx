@@ -47,7 +47,6 @@ const INSUMO_TECH_DEFAULTS = {
 }
 const PRODUCT_IMAGES_BUCKET = import.meta.env.VITE_SUPABASE_PRODUCT_IMAGES_BUCKET || 'product-images'
 
-<<<<<<< HEAD
 // Cabeçalhos de CSV
 const REQUIRED_HEADERS = ['code', 'description']
 const CSV_TEMPLATE_HEADERS = [
@@ -69,16 +68,6 @@ const normalizeComparableText = (value) => cleanText(value).toLowerCase().normal
 const validateHeaders = (fields=[]) => {
   const got = new Set(fields.map(normalizeKey))
   for (const h of REQUIRED_HEADERS) if (!got.has(h)) return `Cabeçalho ausente: ${h}`
-=======
-// Cabeçalhos esperados (CSV)
-const EXPECTED_HEADERS = [
-  'code','description','color','cycle_seconds','cavities','part_weight_g','unit_value','resin'
-]
-const normalizeKey = (k) => String(k ?? '').trim().toLowerCase().replace(/\s+/g, '_')
-const validateHeaders = (fields=[]) => {
-  const got = new Set(fields.map(normalizeKey))
-  for (const h of EXPECTED_HEADERS) if (!got.has(h)) return `Cabeçalho ausente: ${h}`
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   return null
 }
 const getFileExtension = (fileName = '') => {
@@ -91,11 +80,7 @@ const getFileExtension = (fileName = '') => {
 
 const sanitizeCodeForPath = (value) => String(value ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
 
-<<<<<<< HEAD
 export default function CadastroItens() {
-=======
-export default function CadastroItens({ clientId = null }) {
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   // ============== AUTH / ADMIN ONLY GATE ==============
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -118,27 +103,14 @@ export default function CadastroItens({ clientId = null }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-<<<<<<< HEAD
-=======
-  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query)
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
   const fetchItems = async () => {
     setLoading(true)
     setError(null)
-<<<<<<< HEAD
     const { data, error } = await supabase
       .from('items')
       .select('*')
       .order('code', { ascending: true })
-=======
-    const { data, error } = await withClient(
-      supabase
-        .from('items')
-        .select('*')
-        .order('code', { ascending: true })
-    )
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
     if (error) {
       setError(error.message)
       setItems([])
@@ -152,11 +124,7 @@ export default function CadastroItens({ clientId = null }) {
     if (!authChecked || !isAdmin) return
     fetchItems()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-<<<<<<< HEAD
   }, [authChecked, isAdmin])
-=======
-  }, [authChecked, isAdmin, clientId])
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
   const isProdutoAcabado = (item) => {
     const type = String(item?.item_type || '').trim().toLowerCase()
@@ -349,11 +317,8 @@ export default function CadastroItens({ clientId = null }) {
     unidade: '',
     cliente: '',
     estoque_minimo: '',
-<<<<<<< HEAD
     padrao: '',
     embalagem: '',
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   })
   const [formErr, setFormErr] = useState(null)
   const [imageFile, setImageFile] = useState(null)
@@ -373,11 +338,8 @@ export default function CadastroItens({ clientId = null }) {
       unidade: '',
       cliente: '',
       estoque_minimo: '',
-<<<<<<< HEAD
       padrao: '',
       embalagem: '',
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
     })
     setImageFile(null)
     setRemoveProductImage(false)
@@ -416,11 +378,8 @@ export default function CadastroItens({ clientId = null }) {
       color: cleanText(item.color),
       cycle_seconds: String(item.cycle_seconds ?? ''),
       cavities: String(item.cavities ?? ''),
-<<<<<<< HEAD
       padrao: String(item.padrao ?? ''),
       embalagem: String(item.embalagem ?? ''),
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       part_weight_g: String(item.part_weight_g ?? ''),
       unit_value: String(item.unit_value ?? ''),
       resin: cleanText(item.resin),
@@ -483,10 +442,6 @@ export default function CadastroItens({ clientId = null }) {
       code,
       description: cleanText(form.description),
       item_type: cleanText(form.itemType) || 'produto_acabado',
-<<<<<<< HEAD
-=======
-      ...(clientId ? { client_id: clientId } : {}),
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
     }
     const payload = form.itemType === 'insumo'
       ? {
@@ -497,11 +452,8 @@ export default function CadastroItens({ clientId = null }) {
           color: cleanText(form.color) || INSUMO_TECH_DEFAULTS.color,
           cycle_seconds: toPosFloat(form.cycle_seconds) ?? INSUMO_TECH_DEFAULTS.cycle_seconds,
           cavities: toPosInt(form.cavities) ?? INSUMO_TECH_DEFAULTS.cavities,
-<<<<<<< HEAD
           padrao: toNonNegFloat(form.padrao),
           embalagem: cleanText(form.embalagem),
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           part_weight_g: toPosFloat(form.part_weight_g) ?? INSUMO_TECH_DEFAULTS.part_weight_g,
           unit_value: toNonNegFloat(form.unit_value) ?? INSUMO_TECH_DEFAULTS.unit_value,
           resin: cleanText(form.resin) || INSUMO_TECH_DEFAULTS.resin,
@@ -513,11 +465,8 @@ export default function CadastroItens({ clientId = null }) {
           color: cleanText(form.color),
           cycle_seconds: toPosFloat(form.cycle_seconds),
           cavities: toPosInt(form.cavities),
-<<<<<<< HEAD
           padrao: toNonNegFloat(form.padrao),
           embalagem: cleanText(form.embalagem),
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           part_weight_g: toPosFloat(form.part_weight_g),
           unit_value: toPosFloat(form.unit_value),
           resin: cleanText(form.resin),
@@ -577,7 +526,6 @@ export default function CadastroItens({ clientId = null }) {
     })
   }
 
-<<<<<<< HEAD
   function resolveCsvItemType(row) {
     const explicitType = normalizeComparableText(row?.item_type)
     if (['insumo', 'materia prima', 'materia_prima', 'materia-prima'].includes(explicitType)) {
@@ -597,13 +545,10 @@ export default function CadastroItens({ clientId = null }) {
     return 'insumo'
   }
 
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   function mapRows(data) {
     const seenCodes = new Set()
     const mapped = []
     for (const row of data) {
-<<<<<<< HEAD
       const normalizedType = resolveCsvItemType(row)
       const payload = normalizedType === 'insumo'
         ? {
@@ -633,21 +578,6 @@ export default function CadastroItens({ clientId = null }) {
           }
       if (!payload.code || !payload.description) continue
       if (normalizedType === 'produto_acabado' && (!payload.cycle_seconds || !payload.cavities || !payload.part_weight_g || !payload.unit_value)) continue
-=======
-      const payload = {
-        code: cleanText(row.code),
-        description: cleanText(row.description),
-        color: cleanText(row.color),
-        cycle_seconds: toPosFloat(row.cycle_seconds),
-        cavities: toPosInt(row.cavities),
-        part_weight_g: toPosFloat(row.part_weight_g),
-        unit_value: toPosFloat(row.unit_value),
-        resin: cleanText(row.resin),
-        ...(clientId ? { client_id: clientId } : {}),
-      }
-      if (!payload.code || !payload.description) continue
-      if (!payload.cycle_seconds || !payload.cavities || !payload.part_weight_g || !payload.unit_value) continue
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       if (seenCodes.has(payload.code)) continue
       seenCodes.add(payload.code)
       mapped.push(payload)
@@ -692,12 +622,7 @@ export default function CadastroItens({ clientId = null }) {
     const CHUNK = 300
     for (let i = 0; i < best.mapped.length; i += CHUNK) {
       const slice = best.mapped.slice(i, i + CHUNK)
-<<<<<<< HEAD
       const { error } = await supabase.from('items').upsert(slice, { onConflict: 'code', ignoreDuplicates: true })
-=======
-      const conflict = clientId ? 'client_id,code' : 'code'
-      const { error } = await supabase.from('items').upsert(slice, { onConflict: conflict, ignoreDuplicates: true })
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       if (error) { failed = error.message; break }
     }
     setImporting(false)
@@ -706,17 +631,10 @@ export default function CadastroItens({ clientId = null }) {
     else await fetchItems()
   }
   function downloadCSVTemplate() {
-<<<<<<< HEAD
     const header = CSV_TEMPLATE_HEADERS.join(',') + '\n'
     const sample = [
       '500001,Tampa 200ml,produto_acabado,Branco,12,2,8.5,0.32,PP,,,',
       'MP-001,Resina virgem,insumo,-,1,1,1,0,PP,KG,Cliente Exemplo,100',
-=======
-    const header = EXPECTED_HEADERS.join(',') + '\n'
-    const sample = [
-      'ABC-001,Tampa 200ml,Branco,12,2,8.5,0.32,PP',
-      'ABC-002,Tampa 500ml,Preto,14,4,10.2,0.35,PEAD',
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
     ].join('\n')
     const blob = new Blob([header + sample], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -752,11 +670,7 @@ export default function CadastroItens({ clientId = null }) {
               <h2 style={{ margin: 0 }}>Cadastro de Itens</h2>
               <small style={{ opacity: 0.8 }}>Somente administradores</small>
             </div>
-<<<<<<< HEAD
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-=======
-              <div style={{ display: 'flex', gap: 8 }}>
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
               <button
                 onClick={downloadCSVTemplate}
                 style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600, background: '#fff' }}
@@ -1017,7 +931,6 @@ export default function CadastroItens({ clientId = null }) {
                   </div>
 
                   <div style={grid3}>
-<<<<<<< HEAD
                     <Field label="Padrão por embalagem" name="padrao" value={form.padrao} onChange={onChange} inputMode="decimal" placeholder="Ex.: 100" />
                     <Field label="Embalagem" name="embalagem" value={form.embalagem} onChange={onChange} placeholder="Ex.: Caixa / Saco Modelo A" />
                     <Field label="Peso da peça (g)*" name="part_weight_g" value={form.part_weight_g} onChange={onChange} inputMode="decimal" placeholder="Ex.: 8.7" />
@@ -1027,11 +940,6 @@ export default function CadastroItens({ clientId = null }) {
                     <Field label="Valor unitário (R$)*" name="unit_value" value={form.unit_value} onChange={onChange} inputMode="decimal" placeholder="Ex.: 0.32" />
                     <Field label="Resina utilizada" name="resin" value={form.resin} onChange={onChange} placeholder="Ex.: PP / PEAD / ABS…" />
                     <div />
-=======
-                    <Field label="Peso da peça (g)*" name="part_weight_g" value={form.part_weight_g} onChange={onChange} inputMode="decimal" placeholder="Ex.: 8.7" />
-                    <Field label="Valor unitário (R$)*" name="unit_value" value={form.unit_value} onChange={onChange} inputMode="decimal" placeholder="Ex.: 0.32" />
-                    <Field label="Resina utilizada" name="resin" value={form.resin} onChange={onChange} placeholder="Ex.: PP / PEAD / ABS…" />
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                   </div>
                 </>
               )}

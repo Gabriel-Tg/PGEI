@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
@@ -6,24 +5,13 @@ import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../lib/constants';
 import { isMissingRelationError } from '../lib/productionRuntime';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
 import { getShiftWindowsForDay } from '../lib/shifts';
-=======
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { DateTime } from 'luxon';
-import { supabase } from '../lib/supabaseClient';
-import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../lib/constants';
-import { fmtDateTime, getTurnoAtual } from '../lib/utils';
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 import useAuthAdmin from '../hooks/useAuthAdmin';
 import { toBrazilTime } from '../lib/timezone';
 import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorTurno';
 import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
 
-<<<<<<< HEAD
 export default function Apontamento({ isAdmin: _unusedIsAdminProp = false }) {
-=======
-export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clientId = null, machineIds = MAQUINAS }) {
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false, authUser: null };
   const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
   const [bipagens, setBipagens] = useState([]);
@@ -52,7 +40,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     goodQty: '',
     scrapEntries: [{ qty: '', reason: '' }],
   });
-<<<<<<< HEAD
   const [manualSaving, setManualSaving] = useState(false);
   const manualSavingRef = useRef(false);
 
@@ -63,50 +50,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
       fim: window.end.hour * 60 + window.end.minute,
       turnoKey: window.shiftKey,
     }));
-=======
-  const availableMachines = useMemo(() => {
-    const src = Array.isArray(machineIds) && machineIds.length ? machineIds : MAQUINAS;
-    return src
-      .map((m) => String(m || '').trim().toUpperCase())
-      .filter(Boolean);
-  }, [machineIds]);
-  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
-
-  useEffect(() => {
-    if (!availableMachines.length) {
-      if (manualForm.machine) setManualForm((f) => ({ ...f, machine: '' }));
-      return;
-    }
-    const current = String(manualForm.machine || '').trim().toUpperCase();
-    if (current && availableMachines.includes(current)) return;
-    setManualForm((f) => ({ ...f, machine: availableMachines[0] }));
-  }, [availableMachines, manualForm.machine]);
-
-  // Helpers locais para fatiar paradas por turno (clipping por turno)
-  function getTurnoIntervalsDiaLocal(date) {
-    const dia = date.getDay();
-    if (dia === 0) {
-      return [
-        { ini: 23 * 60, fim: 24 * 60, turnoKey: '3' },
-      ];
-    }
-    if (dia >= 1 && dia <= 5) {
-      return [
-        { ini: 5 * 60, fim: 13 * 60 + 30, turnoKey: '1' },
-        { ini: 13 * 60 + 30, fim: 22 * 60, turnoKey: '2' },
-        { ini: 22 * 60, fim: 24 * 60, turnoKey: '3' },
-        { ini: 0, fim: 5 * 60, turnoKey: '3' },
-      ];
-    }
-    if (dia === 6) {
-      return [
-        { ini: 0, fim: 5 * 60, turnoKey: '3' },
-        { ini: 5 * 60, fim: 9 * 60, turnoKey: '1' },
-        { ini: 9 * 60, fim: 13 * 60, turnoKey: '2' },
-      ];
-    }
-    return [];
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   }
 
   function inRangeMinutes(minIni, minFim, minutos) {
@@ -165,7 +108,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     return t.split('-')[0]?.trim() || null;
   }
 
-<<<<<<< HEAD
   async function fetchOrdersCompatByIds(orderIds) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) return [];
 
@@ -206,8 +148,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     return runtimeRes.data || [];
   }
 
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   // A duração do turno por período é calculada após `filtroStart/filtroEnd`.
 
   // Componente simples de donut percentual
@@ -314,11 +254,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
   // Calcula a duração total do turno dentro do período filtrado (em ms)
   const duracaoTurnoPorPeriodo = useMemo(() => {
     if (!filtroStart || !filtroEnd) return {};
-<<<<<<< HEAD
     const res = { '1': 0, '2': 0 };
-=======
-    const res = { '1': 0, '2': 0, '3': 0 };
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
     // iterar dia a dia em America/Sao_Paulo
     let cursor = DateTime.fromJSDate(filtroStart).setZone('America/Sao_Paulo').startOf('day');
@@ -347,7 +283,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     }
 
     try {
-<<<<<<< HEAD
       const bipQuery = supabase
         .from('production_scans')
         .select('*')
@@ -377,37 +312,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
         .select('*')
         .gte('created_at', filtroStart.toISOString())
         .lte('created_at', filtroEnd.toISOString());
-=======
-      const bipQuery = withClient(supabase
-        .from('production_scans')
-        .select('*')
-        .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString()));
-
-      const refQuery = withClient(supabase
-        .from('scrap_logs')
-        .select('*')
-        .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString()));
-
-      const paradaQuery = withClient(supabase
-        .from('machine_stops')
-        .select('*')
-        .lte('started_at', filtroEnd.toISOString())
-        .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
-
-      const apontQuery = withClient(supabase
-        .from('injection_production_entries')
-        .select('*')
-        .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString()));
-
-      const shiftRespQuery = withClient(supabase
-        .from('shift_responsibles')
-        .select('*')
-        .gte('created_at', filtroStart.toISOString())
-        .lte('created_at', filtroEnd.toISOString()));
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
       const [bipRes, refRes, parRes, apRes, respRes] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
       const { data: bip } = bipRes || {}; const { data: ref } = refRes || {}; const { data: par } = parRes || {}; const { data: aps } = apRes || {}; const { data: resp } = respRes || {};
@@ -425,14 +329,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
       (aps || []).forEach(a => { if (a.order_id != null) orderIdsSet.add(String(a.order_id)); });
       const orderIds = Array.from(orderIdsSet);
       if (orderIds.length > 0) {
-<<<<<<< HEAD
         const ords = await fetchOrdersCompatByIds(orderIds);
-=======
-        const { data: ords } = await withClient(supabase
-          .from('orders')
-          .select('id,code,product,standard,created_at,boxes'))
-          .in('id', orderIds);
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
         setOrders(ords || []);
       } else {
         setOrders([]);
@@ -458,7 +355,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
       }
 
       try {
-<<<<<<< HEAD
         const bipQuery = supabase
           .from('production_scans')
           .select('*')
@@ -489,38 +385,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
           .select('*')
           .gte('created_at', filtroStart.toISOString())
           .lte('created_at', filtroEnd.toISOString());
-=======
-        const bipQuery = withClient(supabase
-          .from('production_scans')
-          .select('*')
-          .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString()));
-
-        const refQuery = withClient(supabase
-          .from('scrap_logs')
-          .select('*')
-          .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString()));
-
-        const paradaQuery = withClient(supabase
-          .from('machine_stops')
-          .select('*')
-          .lte('started_at', filtroEnd.toISOString())
-          .or(`resumed_at.gte.${filtroStart.toISOString()},resumed_at.is.null`));
-
-        // produção manual das injetoras
-        const apontQuery = withClient(supabase
-          .from('injection_production_entries')
-          .select('*')
-          .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString()));
-
-        const shiftRespQuery = withClient(supabase
-          .from('shift_responsibles')
-          .select('*')
-          .gte('created_at', filtroStart.toISOString())
-          .lte('created_at', filtroEnd.toISOString()));
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
         // fetch bipagens, refugos e paradas
         const [{ data: bip }, { data: ref }, { data: par }, { data: aps }, { data: resp }] = await Promise.all([bipQuery, refQuery, paradaQuery, apontQuery, shiftRespQuery]);
@@ -547,21 +411,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
         const orderIds = Array.from(orderIdsSet);
         let ordersData = [];
         if (orderIds.length > 0) {
-<<<<<<< HEAD
           ordersData = await fetchOrdersCompatByIds(orderIds);
-=======
-          // consultar apenas orders relevantes
-          const { data: ords, error } = await withClient(supabase
-            .from('orders')
-            .select('id,code,product,standard,created_at,boxes')) // traga campos úteis
-            .in('id', orderIds);
-          if (error) {
-            console.warn('Erro ao buscar orders por ids:', error);
-            ordersData = [];
-          } else {
-            ordersData = ords || [];
-          }
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
         } else {
           ordersData = [];
         }
@@ -585,21 +435,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     // Busca todas as O.S registradas (independente de bipagens/refugos no período)
     async function fetchAllOrders() {
       try {
-<<<<<<< HEAD
         const data = await fetchAllOrdersCompat();
         if (mounted) setOrdersAll(data || []);
-=======
-        const { data, error } = await withClient(supabase
-          .from('orders')
-          .select('id, code, product, standard, created_at, boxes'))
-          .order('created_at', { ascending: false });
-        if (error) {
-          console.warn('Erro ao buscar todas as orders:', error);
-          if (mounted) setOrdersAll([]);
-        } else if (mounted) {
-          setOrdersAll(data || []);
-        }
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
       } catch (err) {
         console.error('Exception ao buscar todas as orders:', err);
         if (mounted) setOrdersAll([]);
@@ -607,11 +444,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     }
     fetchAllOrders();
     return () => { mounted = false; };
-<<<<<<< HEAD
   }, [filtroStart, filtroEnd]);
-=======
-  }, [filtroStart, filtroEnd, clientId]);
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
   // Busca valores unitários dos itens usados nos pedidos/apontamentos do período
   useEffect(() => {
@@ -632,15 +465,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     let active = true;
     (async () => {
       try {
-<<<<<<< HEAD
         const { data, error } = await supabase
           .from('items')
           .select('code, unit_value, cycle_seconds, cavities')
-=======
-        const { data, error } = await withClient(supabase
-          .from('items')
-          .select('code, unit_value, cycle_seconds, cavities'))
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           .in('code', Array.from(codes));
         if (error) throw error;
         if (!active) return;
@@ -658,7 +485,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     })();
 
     return () => { active = false; };
-<<<<<<< HEAD
   }, [orders, apontamentos]);
   // Calcular horas paradas por turno/máquina
   const horasParadasPorTurno = useMemo(() => calcularHorasParadasPorTurno(paradas, TURNOS, filtroStart, filtroEnd), [paradas, filtroStart, filtroEnd]);
@@ -672,21 +498,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     return MAQUINAS.filter(m => String(m) === String(filtroMaquina));
   }, [filtroMaquina]);
   maquinasConsideradas = maquinasConsideradas.filter(m => MAQUINAS.includes(m));
-=======
-  }, [orders, apontamentos, clientId]);
-  // Calcular horas paradas por turno/máquina
-  const horasParadasPorTurno = useMemo(() => calcularHorasParadasPorTurno(paradas, TURNOS, filtroStart, filtroEnd), [paradas, filtroStart, filtroEnd]);
-  // Listas de máquinas por setor, como em Registro.jsx
-  const grupoPET = useMemo(() => availableMachines.filter(m => String(m).toUpperCase().startsWith('P')), [availableMachines]);
-  const grupoINJ = useMemo(() => availableMachines.filter(m => String(m).toUpperCase().startsWith('I')), [availableMachines]);
-  let maquinasConsideradas = useMemo(() => {
-    if (filtroMaquina === 'todas') return availableMachines;
-    if (filtroMaquina === 'pet') return grupoPET;
-    if (filtroMaquina === 'injecao') return grupoINJ;
-    return availableMachines.filter(m => String(m) === String(filtroMaquina));
-  }, [availableMachines, filtroMaquina, grupoINJ, grupoPET]);
-  maquinasConsideradas = maquinasConsideradas.filter(m => availableMachines.includes(m));
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
   // mapa por id para lookup rápido
   const ordersMap = useMemo(() => {
@@ -710,7 +521,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     return map;
   }, [shiftResponsibles]);
 
-<<<<<<< HEAD
   const osOptionsByMachine = useMemo(() => {
     const selectedMachine = String(manualForm.machine || '').trim();
     if (!selectedMachine) return [];
@@ -735,18 +545,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
       .map(([code]) => code);
   }, [ordersAll, manualForm.machine]);
 
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
   // Agrupa por turno e máquina e calcula refugo %
   const agrupadoPorTurno = useMemo(() => {
     const porTurno = {};
     TURNOS.forEach(t => {
       porTurno[t.key] = {};
-<<<<<<< HEAD
       MAQUINAS.forEach(maq => {
-=======
-      availableMachines.forEach(maq => {
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
         porTurno[t.key][maq] = {
           bipadas: 0,
           refugo: 0,
@@ -778,10 +582,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
       porTurno[turno][maq].caixas.push({
         num: b.scanned_box,
         hora: b.created_at,
-<<<<<<< HEAD
-=======
-        operator: b.operator || '',
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
         order_id: orderId,
         order: matchedOrder || null,
         product: matchedOrder?.product || '',
@@ -807,13 +607,9 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
       const goodQty = Number(a.good_qty) || 0;
       porTurno[turno][maq].producaoManual += goodQty;
       porTurno[turno][maq].manualEntries.push({
-<<<<<<< HEAD
         created_at: a.created_at,
         good_qty: goodQty,
         order_code: a.order_code || order?.code || '',
-=======
-        good_qty: goodQty,
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
         product: a.product || order?.product || '',
         order,
       });
@@ -848,12 +644,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
 
         // Determinar produção considerando o padrão de cada caixa individualmente.
         // Quando não houver padrão na O.S da caixa, usa o padrão da máquina como fallback.
-<<<<<<< HEAD
         const maqDef = MAQUINAS && MAQUINAS[maq];
         const padraoFromConstRaw = (maqDef && (maqDef.padrao_por_caixa ?? maqDef.padrao ?? maqDef.piecesPerBox ?? maqDef.pieces_per_box)) ?? 0;
-=======
-        const padraoFromConstRaw = 0;
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
         const parsePiecesPerBox = (val) => {
           if (val == null) return 0;
           const s = String(val).trim();
@@ -927,11 +719,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     });
 
     return porTurno;
-<<<<<<< HEAD
   }, [bipagens, refugos, ordersMap, apontamentos, itemsMap, duracaoTurnoPorPeriodo]);
-=======
-  }, [bipagens, refugos, ordersMap, apontamentos, itemsMap, duracaoTurnoPorPeriodo, availableMachines]);
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
 
   // RENDER
   return (
@@ -998,11 +786,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
               <option value="todas">Todas as máquinas</option>
               <option value="pet">PET</option>
               <option value="injecao">Injeção</option>
-<<<<<<< HEAD
               {MAQUINAS.map(m => (
-=======
-              {availableMachines.map(m => (
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
@@ -1122,10 +906,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                                     {caixasSorted.map((c, i) => (
                                       <li key={i}>
                                         Caixa {c.num}: {fmtDateTime(c.hora)}
-<<<<<<< HEAD
-=======
-                                        {c.operator ? ` — Operador: ${c.operator}` : ''}
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                                         {c.order ? ` — O.S: ${c.order.code || c.order.id} (Padrão: ${c.order.standard})` : ''}
                                       </li>
                                     ))}
@@ -1135,7 +915,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                                 <div style={{ marginTop: 8, fontSize: 13, color: '#444' }}>
                                   <b>Produção Realizada (peças):</b> {dados.producaoPecas} {dados.padraoPorCaixa != null ? `(padrão ${dados.padraoPorCaixa}/caixa)` : `(padrões variados)`}
                                 </div>
-<<<<<<< HEAD
 
                                 <div className="sub-title" style={{ marginTop: 8 }}><b>Apontamentos manuais:</b></div>
                                 {!dados.manualEntries || dados.manualEntries.length === 0 ? (
@@ -1156,8 +935,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                                     })}
                                   </ul>
                                 )}
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                               </div>
 
                               {dados.refugos && dados.refugos.length > 0 && (
@@ -1259,11 +1036,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
             </div>
           </div>
         {/* Modal de Apontamento Manual */}
-<<<<<<< HEAD
         <Modal open={manualOpen} onClose={() => { if (!manualSavingRef.current) setManualOpen(false); }} title="Apontar Produção Manual" closeOnBackdrop={!manualSaving}>
-=======
-        <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Apontar Produção Manual">
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
           <div className="grid2" style={{ gap: 12 }}>
             <label className="label">
               Data
@@ -1280,17 +1053,10 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
               <select
                 className="select"
                 value={manualForm.machine}
-<<<<<<< HEAD
                 onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value, osCode: '' }))}
               >
                 <option value="">Selecione...</option>
                 {MAQUINAS.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
-=======
-                onChange={(e) => setManualForm((f) => ({ ...f, machine: e.target.value }))}
-              >
-                <option value="">Selecione...</option>
-                {availableMachines.filter((m) => /^(P[1-4]|I[1-6])$/.test(m)).map((m) => (
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>
@@ -1317,13 +1083,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                 value={manualForm.osCode}
                 onChange={(e) => setManualForm((f) => ({ ...f, osCode: e.target.value }))}
               >
-<<<<<<< HEAD
                 <option value="">{manualForm.machine ? 'Selecione...' : 'Selecione a máquina primeiro...'}</option>
                 {osOptionsByMachine.map((code) => (
-=======
-                <option value="">Selecione...</option>
-                {Array.from(new Set((ordersAll || []).map((o) => o?.code))).filter(Boolean).map((code) => (
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                   <option key={code} value={code}>{code}</option>
                 ))}
               </select>
@@ -1398,19 +1159,12 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
           </div>
 
           <div className="flex" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-<<<<<<< HEAD
             <button className="btn" onClick={() => setManualOpen(false)} disabled={manualSaving}>Cancelar</button>
             <button
               className="btn"
               onClick={async () => {
                 if (manualSavingRef.current) return;
 
-=======
-            <button className="btn" onClick={() => setManualOpen(false)}>Cancelar</button>
-            <button
-              className="btn"
-              onClick={async () => {
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                 const payload = {
                   date: manualForm.date,
                   machine: manualForm.machine,
@@ -1421,11 +1175,8 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                     .map((e) => ({ qty: Number(e.qty || 0), reason: (e.reason || '').trim() }))
                     .filter((e) => e.qty > 0 && e.reason.length > 0),
                 };
-<<<<<<< HEAD
                 manualSavingRef.current = true;
                 setManualSaving(true);
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                 try {
                   if (!payload.date || !payload.machine || !payload.turno || !payload.osCode) {
                     showToast('Preencha Data, Máquina, Turno e O.S.', 'err');
@@ -1439,7 +1190,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                   // Resolve O.S -> order_id + product
                   let ordSel = null;
                   {
-<<<<<<< HEAD
                     const q = supabase
                       .from('orders')
                       .select('id, code, product, machine_id, created_at')
@@ -1450,18 +1200,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                     const { data: ordData, error: ordErr } = await q;
                     if (ordErr || !ordData || !ordData[0]) {
                       showToast('O.S não encontrada para a máquina selecionada.', 'err');
-=======
-                    let q = supabase
-                      .from('orders')
-                      .select('id, code, product, machine_id, created_at')
-                      .eq('code', payload.osCode)
-                      .order('created_at', { ascending: false })
-                      .limit(1);
-                    if (clientId) q = q.eq('client_id', clientId);
-                    const { data: ordData, error: ordErr } = await q;
-                    if (ordErr || !ordData || !ordData[0]) {
-                      showToast('O.S não encontrada.', 'err');
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                       return;
                     }
                     ordSel = ordData[0];
@@ -1473,10 +1211,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
 
                   // 1) Inserir produção manual
                   const prodIns = {
-<<<<<<< HEAD
-=======
-                    ...(clientId ? { client_id: clientId } : {}),
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                     entry_date: diaZ.toISODate(),
                     created_at: createdAtUtcIso,
                     machine_id: payload.machine,
@@ -1496,10 +1230,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                   // 2) Inserir refugos (scrap_logs), se houver
                   if (payload.scrapEntries.length > 0) {
                     const scrapRows = payload.scrapEntries.map((s) => ({
-<<<<<<< HEAD
-=======
-                      ...(clientId ? { client_id: clientId } : {}),
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
                       created_at: createdAtUtcIso,
                       machine_id: payload.machine,
                       shift: String(payload.turno),
@@ -1529,7 +1259,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                     goodQty: '',
                     scrapEntries: [{ qty: '', reason: '' }],
                   });
-<<<<<<< HEAD
                   showToast('Apontamento registrado.', 'ok');
                   void refetchData();
                 } catch (err) {
@@ -1543,18 +1272,6 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
               disabled={manualSaving}
             >
               {manualSaving ? 'Registrando...' : 'Registrar'}
-=======
-                  // reconsulta para refletir números sem F5
-                  await refetchData();
-                  showToast('Apontamento registrado.', 'ok');
-                } catch (err) {
-                  console.warn('Falha ao registrar apontamento manual', err);
-                  showToast('Falha ao registrar apontamento.', 'err');
-                }
-              }}
-            >
-              Registrar
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
             </button>
           </div>
         </Modal>
@@ -1562,9 +1279,3 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     </div>
   );
 }
-<<<<<<< HEAD
-
-
-
-=======
->>>>>>> e94e21c436e733dd65724ac1211f903d57584a3f
