@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" fill="none">
+  <defs>
+    <linearGradient id="line" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F5F9A" stop-opacity="0.26" />
+      <stop offset="1" stop-color="#09304F" stop-opacity="0.18" />
+    </linearGradient>
+    <pattern id="dots" width="120" height="120" patternUnits="userSpaceOnUse">
+      <circle cx="8" cy="8" r="2.2" fill="#0F5F9A" fill-opacity="0.16" />
+      <circle cx="60" cy="60" r="1.8" fill="#09304F" fill-opacity="0.12" />
+    </pattern>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#dots)" />
+
+  <g stroke="url(#line)" stroke-width="2">
+    <path d="M0 150H360L500 290H940L1140 90H1620L1820 290H1920" />
+    <path d="M0 470H280L420 610H980L1170 410H1520L1700 590H1920" />
+    <path d="M0 760H520L660 900H1040L1270 680H1600L1770 850H1920" />
+    <path d="M240 0V260L420 440V710L620 910V1080" />
+    <path d="M930 0V170L1120 360V760L1300 940V1080" />
+    <path d="M1550 0V250L1730 430V700L1890 880V1080" />
+  </g>
+
+  <g fill="#0F5F9A">
+    <circle cx="360" cy="150" r="5" fill-opacity="0.35" />
+    <circle cx="940" cy="290" r="5" fill-opacity="0.32" />
+    <circle cx="1520" cy="410" r="5" fill-opacity="0.34" />
+    <circle cx="660" cy="900" r="5" fill-opacity="0.3" />
+    <circle cx="1730" cy="430" r="5" fill-opacity="0.36" />
+  </g>
+</svg>

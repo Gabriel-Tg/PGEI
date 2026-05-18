@@ -1,0 +1,2911 @@
+import { useEffect, useMemo, useState } from 'react'
+import { DateTime } from 'luxon'
+import { supabase } from '../lib/supabaseClient'
+import { fmtDateTime, getTurnoAtual } from '../lib/utils'
+import { getProductImageCandidates } from '../lib/productImageMap'
+import Modal from '../components/Modal'
+import '../styles/estoque.css'
+
+const STOCK_CONTEXTS = [
+  { id: 'inputs', label: 'Insumos' },
+  { id: 'finished', label: 'Produtos acabados' },
+]
+
+const TABS = [
+  { id: 'inventario', label: 'Inventário' },
+  { id: 'requisicao', label: 'Requisição' },
+  { id: 'retorno', label: 'Retorno' },
+  { id: 'compras', label: 'Compras' },
+]
+const MANUAL_PURCHASE_INVOICE = 'Lançamento Manual'
+
+const nowIsoDate = () => new Date().toISOString().slice(0, 10)
+
+const toPositiveNumber = (value) => {
+  const parsed = Number(String(value ?? '').replace(',', '.').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const parsePiecesPerBox = (value) => {
+  if (value == null) return 0
+  const digitsOnly = String(value).replace(/[^0-9]/g, '')
+  return digitsOnly ? Number.parseInt(digitsOnly, 10) : 0
+}
+
+const parseScannedBoxLabel = (value) => {
+  const normalized = normalize(value)
+  const match = normalized.match(/^(?:OS\s*)?(\d+)\s*-\s*(\d+)$/i)
+  if (!match) return null
+
+  return {
+    opCode: match[1],
+    boxNumber: Number.parseInt(match[2], 10),
+    normalizedCode: `OS ${match[1]} - ${match[2].padStart(3, '0')}`,
+  }
+}
+
+const normalize = (value) => String(value ?? '').trim()
+const normalizeClientValue = (value) => normalize(value).toLowerCase()
+const isUnitUN = (value) => normalize(value).toUpperCase() === 'UN'
+const matchesAllowedClient = (value, allowedClientNormalized) => {
+  if (!allowedClientNormalized) return true
+  return normalizeClientValue(value) === allowedClientNormalized
+}
+const isFinishedProductCode = (code) => normalize(code).startsWith('5')
+const extractFinishedCodeFromOrderProduct = (productValue) => {
+  const normalized = normalize(productValue)
+  if (!normalized) return ''
+  return normalize(normalized.split('-')[0])
+}
+
+const makeId = () => {
+  if (typeof crypto !== 'undefined' && crypto?.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.round(Math.random() * 1e9)}`
+}
+
+function sortByFifoDate(a, b) {
+  const aDate = new Date(a?.date || a?.createdAt || 0).getTime()
+  const bDate = new Date(b?.date || b?.createdAt || 0).getTime()
+  if (aDate !== bDate) return aDate - bDate
+  const aCreated = new Date(a?.createdAt || 0).getTime()
+  const bCreated = new Date(b?.createdAt || 0).getTime()
+  return aCreated - bCreated
+}
+
+function sortByLatest(a, b) {
+  const aDate = new Date(a?.createdAt || a?.date || 0).getTime()
+  const bDate = new Date(b?.createdAt || b?.date || 0).getTime()
+  return bDate - aDate
+}
+
+const formatMoney = (value) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const formatQty = (value) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+}
+
+const formatQtyByUnit = (value, unit) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  if (isUnitUN(unit)) {
+    return Math.round(number).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  }
+  return formatQty(number)
+}
+
+const formatQtyPerPiece = (value) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 })
+}
+
+const mapPurchaseFromDb = (row) => ({
+  id: row.id,
+  date: row.date,
+  invoiceNumber: row.invoice_number,
+  itemCode: row.item_code,
+  product: row.product,
+  client: row.client,
+  quantity: Number(row.quantity),
+  unitValue: Number(row.unit_value),
+  balance: Number(row.balance),
+  createdAt: row.created_at,
+})
+
+const mapRequisitionFromDb = (row) => ({
+  id: row.id,
+  itemCode: row.item_code,
+  op: row.op,
+  client: row.client,
+  quantity: Number(row.quantity),
+  createdAt: row.created_at,
+  allocations: Array.isArray(row.allocations) ? row.allocations : [],
+})
+
+const mapReturnFromDb = (row) => ({
+  id: row.id,
+  op: row.op,
+  itemCode: row.item_code,
+  itemDescription: row.item_description,
+  quantity: Number(row.quantity),
+  createdAt: row.created_at,
+  allocations: Array.isArray(row.allocations) ? row.allocations : [],
+})
+
+const mapFinishedOutputFromDb = (row) => ({
+  id: row.id,
+  date: row.date,
+  invoiceNumber: row.invoice_number,
+  accessKey: row.access_key,
+  itemCode: row.item_code,
+  product: row.product,
+  client: row.client,
+  quantity: Number(row.quantity),
+  unit: row.unit,
+  unitValue: Number(row.unit_value),
+  totalValue: Number(row.total_value),
+  createdAt: row.created_at,
+})
+
+const emptyPurchaseForm = {
+  date: nowIsoDate(),
+  invoiceNumber: '',
+  itemCode: '',
+  product: '',
+  client: '',
+  quantity: '',
+  unitValue: '',
+}
+
+const emptyRequisitionForm = {
+  op: '',
+  opQuantity: '',
+}
+
+const emptyReturnForm = {
+  op: '',
+  itemCode: '',
+  itemDescription: '',
+  quantity: '',
+}
+
+const getXmlText = (node, selector) => normalize(node?.querySelector(selector)?.textContent)
+
+const parseXmlNumber = (value) => {
+  const parsed = Number(String(value ?? '').replace(',', '.').trim())
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const parseNfeDate = (value) => {
+  const raw = normalize(value)
+  if (!raw) return nowIsoDate()
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return raw.slice(0, 10) || nowIsoDate()
+}
+
+const parseNfeXml = (xmlText, fileName = '') => {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(xmlText, 'application/xml')
+  const parserError = doc.querySelector('parsererror')
+  if (parserError) {
+    throw new Error(`XML invÃ¡lido: ${fileName || 'arquivo selecionado'}`)
+  }
+
+  const nfeNode = doc.querySelector('NFe, nfeProc NFe') || doc
+  const infNfe = nfeNode.querySelector('infNFe') || doc.querySelector('infNFe')
+  const ide = nfeNode.querySelector('ide') || doc.querySelector('ide')
+  const dest = nfeNode.querySelector('dest') || doc.querySelector('dest')
+  const emit = nfeNode.querySelector('emit') || doc.querySelector('emit')
+  const total = nfeNode.querySelector('ICMSTot') || doc.querySelector('ICMSTot')
+  const accessKey = normalize(infNfe?.getAttribute('Id')).replace(/^NFe/i, '')
+  const invoiceNumber = getXmlText(ide, 'nNF')
+  const date = parseNfeDate(getXmlText(ide, 'dhEmi') || getXmlText(ide, 'dEmi'))
+  const client = getXmlText(dest, 'xNome') || getXmlText(emit, 'xNome') || '-'
+  const totalValue = parseXmlNumber(getXmlText(total, 'vNF'))
+  const detRows = Array.from(nfeNode.querySelectorAll('det'))
+
+  const items = detRows.map((det, index) => {
+    const prod = det.querySelector('prod') || det
+    const itemCode = getXmlText(prod, 'cProd')
+    const product = getXmlText(prod, 'xProd')
+    const quantity = parseXmlNumber(getXmlText(prod, 'qCom'))
+    const unit = getXmlText(prod, 'uCom')
+    const unitValue = parseXmlNumber(getXmlText(prod, 'vUnCom'))
+    const itemTotalValue = parseXmlNumber(getXmlText(prod, 'vProd'))
+
+    return {
+      itemNumber: Number(det.getAttribute('nItem')) || index + 1,
+      itemCode,
+      product,
+      quantity,
+      unit,
+      unitValue,
+      totalValue: itemTotalValue,
+    }
+  }).filter((item) => item.itemCode || item.product || item.quantity > 0)
+
+  if (!invoiceNumber && !accessKey) {
+    throw new Error(`NÃ£o foi possÃ­vel identificar a NF no XML ${fileName || ''}.`.trim())
+  }
+  if (items.length === 0) {
+    throw new Error(`Nenhum item encontrado no XML ${fileName || ''}.`.trim())
+  }
+
+  return {
+    fileName,
+    invoiceNumber: invoiceNumber || accessKey || fileName,
+    accessKey,
+    date,
+    client,
+    totalValue,
+    items,
+  }
+}
+
+function ProductCellWithHoverImage({
+  itemCode,
+  product,
+  imageUrl = '',
+  enablePreview = false,
+}) {
+  const label = normalize(product) || '-'
+  const candidates = useMemo(() => (
+    enablePreview ? getProductImageCandidates(itemCode, imageUrl) : []
+  ), [enablePreview, itemCode, imageUrl])
+  const [resolvedImageUrl, setResolvedImageUrl] = useState('')
+  const [openUpward, setOpenUpward] = useState(false)
+
+  useEffect(() => {
+    let active = true
+
+    if (!enablePreview || candidates.length === 0) {
+      setResolvedImageUrl('')
+      return () => {
+        active = false
+      }
+    }
+
+    const checkCandidate = (index) => {
+      if (!active) return
+      if (index >= candidates.length) {
+        setResolvedImageUrl('')
+        return
+      }
+
+      const candidate = candidates[index]
+      if (!candidate) {
+        checkCandidate(index + 1)
+        return
+      }
+
+      const img = new Image()
+      img.onload = () => {
+        if (active) setResolvedImageUrl(candidate)
+      }
+      img.onerror = () => {
+        if (active) checkCandidate(index + 1)
+      }
+      img.src = candidate
+    }
+
+    setResolvedImageUrl('')
+    checkCandidate(0)
+
+    return () => {
+      active = false
+    }
+  }, [enablePreview, candidates])
+
+  const hasPreview = !!resolvedImageUrl
+
+  const handleMouseEnter = (event) => {
+    const triggerRect = event.currentTarget.getBoundingClientRect()
+    const previewHeight = 220
+    const margin = 16
+    const spaceBelow = window.innerHeight - triggerRect.bottom
+    setOpenUpward(spaceBelow < (previewHeight + margin))
+  }
+
+  if (!enablePreview || !hasPreview) {
+    return <span>{label}</span>
+  }
+
+  return (
+    <span className="estoque-product-hover" tabIndex={0} onMouseEnter={handleMouseEnter}>
+      <span className="estoque-product-label">{label}</span>
+      <span className={`estoque-product-preview ${openUpward ? 'estoque-product-preview--up' : ''}`} role="tooltip">
+        <img
+          src={resolvedImageUrl}
+          alt={label}
+          loading="lazy"
+        />
+      </span>
+    </span>
+  )
+}
+
+export default function Estoque({ readOnly = false, allowedClient = '', enableProductImagePreview = false }) {
+  const [stockContext, setStockContext] = useState('inputs')
+  const [tab, setTab] = useState('inventario')
+  const [inventoryClientFilter, setInventoryClientFilter] = useState('')
+  const [finishedInventoryClientFilter, setFinishedInventoryClientFilter] = useState('')
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [showPurchaseForm, setShowPurchaseForm] = useState(false)
+  const [purchaseEntryMode, setPurchaseEntryMode] = useState('nf')
+  const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm)
+  const [manualInventoryModalOpen, setManualInventoryModalOpen] = useState(false)
+  const [manualInventoryDate, setManualInventoryDate] = useState(nowIsoDate())
+  const [manualInventoryQtyByCode, setManualInventoryQtyByCode] = useState({})
+  const [manualInventorySaving, setManualInventorySaving] = useState(false)
+  const [manualInventoryError, setManualInventoryError] = useState('')
+  const [requisitionForm, setRequisitionForm] = useState(emptyRequisitionForm)
+  const [purchaseError, setPurchaseError] = useState('')
+  const [requisitionError, setRequisitionError] = useState('')
+  const [requisitionInfo, setRequisitionInfo] = useState('')
+  const [requisitionOpContext, setRequisitionOpContext] = useState({
+    loading: false,
+    finishedItemCode: '',
+    client: '',
+    product: '',
+  })
+  const [returnForm, setReturnForm] = useState(emptyReturnForm)
+  const [returnError, setReturnError] = useState('')
+  const [returnInfo, setReturnInfo] = useState('')
+  const [usageModal, setUsageModal] = useState({ open: false, purchase: null, rows: [] })
+  const [purchases, setPurchases] = useState([])
+  const [requisitions, setRequisitions] = useState([])
+  const [returns, setReturns] = useState([])
+  const [itemStructures, setItemStructures] = useState([])
+  const [requisitionManualByCode, setRequisitionManualByCode] = useState({})
+  const [finishedScans, setFinishedScans] = useState([])
+  const [finishedScansLoading, setFinishedScansLoading] = useState(false)
+  const [finishedScansError, setFinishedScansError] = useState('')
+  const [finishedScanCode, setFinishedScanCode] = useState('')
+  const [finishedScanSubmitting, setFinishedScanSubmitting] = useState(false)
+  const [finishedScanError, setFinishedScanError] = useState('')
+  const [finishedScanInfo, setFinishedScanInfo] = useState('')
+  const [finishedOutputs, setFinishedOutputs] = useState([])
+  const [finishedOutputsError, setFinishedOutputsError] = useState('')
+  const [finishedOutputImporting, setFinishedOutputImporting] = useState(false)
+  const [finishedOutputImportError, setFinishedOutputImportError] = useState('')
+  const [finishedOutputImportInfo, setFinishedOutputImportInfo] = useState('')
+  const [finishedScanConfirm, setFinishedScanConfirm] = useState({
+    open: false,
+    order: null,
+    scanCode: '',
+    boxNumber: null,
+    manualQty: '',
+    error: '',
+  })
+  const [missingStockTables, setMissingStockTables] = useState({})
+
+  const allowedClientNormalized = useMemo(() => normalizeClientValue(allowedClient), [allowedClient])
+
+  const isMissingTableError = (error) => {
+    const message = String(error?.message || error || '').toLowerCase()
+    return message.includes('could not find the table') || message.includes('schema cache') || message.includes('does not exist')
+  }
+
+  const reportMissingStockTable = (tableName, error) => {
+    setMissingStockTables((prev) => ({ ...prev, [tableName]: true }))
+    setError((prev) => {
+      const message = `Tabela "${tableName}" não está disponível neste ambiente.`
+      if (!prev) return message
+      if (prev.includes(message)) return prev
+      return `${prev} ${message}`
+    })
+    console.warn('Tabela ausente:', tableName, error)
+  }
+
+  const safeFetchStockTable = async (tableName, queryAction) => {
+    try {
+      const { data, error } = await queryAction
+      if (error) {
+        if (isMissingTableError(error)) {
+          reportMissingStockTable(tableName, error)
+          return { data: [], error: null, missing: true }
+        }
+        return { data: [], error, missing: false }
+      }
+      return { data, error: null, missing: false }
+    } catch (err) {
+      if (isMissingTableError(err)) {
+        reportMissingStockTable(tableName, err)
+        return { data: [], error: null, missing: true }
+      }
+      return { data: [], error: err, missing: false }
+    }
+  }
+
+  useEffect(() => {
+    fetchItems()
+    fetchStockMovements()
+    fetchItemStructures()
+    fetchFinishedProductScans()
+    fetchFinishedProductOutputs()
+  }, [])
+
+  useEffect(() => {
+    const channel = supabase.channel('estoque-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'items' },
+        () => {
+          fetchItems()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'item_structures' },
+        () => {
+          fetchItemStructures()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'production_scans' },
+        () => {
+          fetchFinishedProductScans()
+        }
+      )
+
+    if (!missingStockTables.estoque_purchases) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_purchases' },
+        () => {
+          fetchStockMovements()
+        }
+      )
+    }
+
+    if (!missingStockTables.estoque_requisitions) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_requisitions' },
+        () => {
+          fetchStockMovements()
+        }
+      )
+    }
+
+    if (!missingStockTables.estoque_returns) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_returns' },
+        () => {
+          fetchStockMovements()
+        }
+      )
+    }
+
+    if (!missingStockTables.estoque_finished_outputs) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estoque_finished_outputs' },
+        () => {
+          fetchFinishedProductOutputs()
+        }
+      )
+    }
+
+    channel.subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [missingStockTables])
+
+  function buildReturnAllocationPlan(op, itemCode, quantity, returnsBase = []) {
+    const matchingRequisitions = [...(requisitions || [])]
+      .filter((req) => normalize(req?.op) === op && normalize(req?.itemCode) === itemCode)
+      .sort((a, b) => {
+        const aDate = new Date(a?.createdAt || 0).getTime()
+        const bDate = new Date(b?.createdAt || 0).getTime()
+        return aDate - bDate
+      })
+
+    if (matchingRequisitions.length === 0) {
+      return { ok: false, error: 'Nenhuma requisição encontrada para esta O.P e item.' }
+    }
+
+    const returnedByReqAlloc = {}
+    ;(returnsBase || []).forEach((ret) => {
+      ;(ret?.allocations || []).forEach((allocation) => {
+        const reqId = normalize(allocation?.requisitionId)
+        const purchaseId = normalize(allocation?.purchaseId)
+        const returnedQty = Number(allocation?.returnedQty)
+        if (!reqId || !purchaseId || !Number.isFinite(returnedQty) || returnedQty <= 0) return
+        const key = `${reqId}::${purchaseId}`
+        returnedByReqAlloc[key] = (returnedByReqAlloc[key] || 0) + returnedQty
+      })
+    })
+
+    const returnableAllocations = []
+    matchingRequisitions.forEach((req) => {
+      ;(req?.allocations || []).forEach((allocation) => {
+        const reqId = normalize(req?.id)
+        const purchaseId = normalize(allocation?.purchaseId)
+        const usedQty = Number(allocation?.usedQty)
+        if (!reqId || !purchaseId || !Number.isFinite(usedQty) || usedQty <= 0) return
+        const key = `${reqId}::${purchaseId}`
+        const alreadyReturned = Number(returnedByReqAlloc[key] || 0)
+        const availableToReturn = Math.max(0, usedQty - alreadyReturned)
+        if (availableToReturn <= 0) return
+        returnableAllocations.push({
+          requisitionId: reqId,
+          purchaseId,
+          invoiceNumber: allocation?.invoiceNumber,
+          availableToReturn,
+        })
+      })
+    })
+
+    const totalReturnable = returnableAllocations.reduce((sum, row) => sum + row.availableToReturn, 0)
+    if (totalReturnable < quantity) {
+      return {
+        ok: false,
+        error: `Quantidade retornada excede o consumido da O.P. Disponível para retorno: ${formatQty(totalReturnable)}.`
+      }
+    }
+
+    let remainingReturn = quantity
+    const allocationsApplied = []
+    for (const row of returnableAllocations) {
+      if (remainingReturn <= 0) break
+      const appliedQty = Math.min(row.availableToReturn, remainingReturn)
+      if (appliedQty <= 0) continue
+      allocationsApplied.push({
+        requisitionId: row.requisitionId,
+        purchaseId: row.purchaseId,
+        invoiceNumber: row.invoiceNumber,
+        returnedQty: appliedQty,
+      })
+      remainingReturn -= appliedQty
+    }
+
+    return { ok: true, allocations: allocationsApplied }
+  }
+
+  async function fetchStockMovements() {
+    try {
+      const [purchasesRes, requisitionsRes, returnsRes] = await Promise.all([
+        safeFetchStockTable('estoque_purchases', supabase.from('estoque_purchases').select('*').order('created_at', { ascending: false })),
+        safeFetchStockTable('estoque_requisitions', supabase.from('estoque_requisitions').select('*').order('created_at', { ascending: false })),
+        safeFetchStockTable('estoque_returns', supabase.from('estoque_returns').select('*').order('created_at', { ascending: false })),
+      ])
+
+      if (purchasesRes.error) throw purchasesRes.error
+      if (requisitionsRes.error) throw requisitionsRes.error
+      if (returnsRes.error) throw returnsRes.error
+
+      setPurchases((purchasesRes.data || []).map(mapPurchaseFromDb))
+      setRequisitions((requisitionsRes.data || []).map(mapRequisitionFromDb))
+      setReturns((returnsRes.data || []).map(mapReturnFromDb))
+    } catch (err) {
+      setError(err?.message || 'Não foi possível carregar os lançamentos de estoque.')
+    }
+  }
+
+  async function fetchItemStructures() {
+    try {
+      const { data, error: queryError } = await supabase
+        .from('item_structures')
+        .select('*')
+
+      if (queryError) throw queryError
+      setItemStructures(data || [])
+    } catch (err) {
+      setError(err?.message || 'Não foi possível carregar as estruturas dos itens.')
+    }
+  }
+
+  async function fetchOrdersByIds(orderIds) {
+    const uniqueIds = Array.from(new Set((orderIds || []).map((value) => normalize(value)).filter(Boolean)))
+    if (uniqueIds.length === 0) return {}
+
+    const map = {}
+    const chunkSize = 150
+
+    for (let index = 0; index < uniqueIds.length; index += chunkSize) {
+      const chunk = uniqueIds.slice(index, index + chunkSize)
+      const { data, error: queryError } = await supabase
+        .from('orders')
+        .select('id, code, customer, product, machine_id, boxes, standard, created_at')
+        .in('id', chunk)
+
+      if (queryError) throw queryError
+
+      ;(data || []).forEach((order) => {
+        const key = normalize(order?.id)
+        if (!key || map[key]) return
+        map[key] = order
+      })
+    }
+
+    return map
+  }
+
+  async function fetchLatestOrderByCode(opCode) {
+    const code = normalize(opCode)
+    if (!code) return null
+
+    const { data, error: queryError } = await supabase
+      .from('orders')
+      .select('id, code, customer, product, machine_id, boxes, standard, created_at')
+      .eq('code', code)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (queryError) throw queryError
+    return Array.isArray(data) && data.length > 0 ? data[0] : null
+  }
+
+  async function fetchFinishedProductScans() {
+    setFinishedScansLoading(true)
+    setFinishedScansError('')
+
+    try {
+      const { data, error: queryError } = await supabase
+        .from('production_scans')
+        .select('id, created_at, order_id, op_code, machine_id, shift, scanned_box, qty_pieces, code')
+        .order('created_at', { ascending: false })
+
+      if (queryError) throw queryError
+
+      const rows = data || []
+      const orderMap = await fetchOrdersByIds(rows.map((row) => row?.order_id))
+
+      setFinishedScans(rows.map((row) => {
+        const order = orderMap[normalize(row?.order_id)] || null
+        return {
+          id: row.id,
+          createdAt: row.created_at,
+          orderId: normalize(row?.order_id),
+          opCode: normalize(order?.code || row?.op_code),
+          machineId: normalize(row?.machine_id || order?.machine_id),
+          shift: normalize(row?.shift),
+          scannedBox: Number(row?.scanned_box),
+          qtyPieces: Number(row?.qty_pieces),
+          rawCode: normalize(row?.code),
+          customer: normalize(order?.customer),
+          product: normalize(order?.product),
+          finishedItemCode: extractFinishedCodeFromOrderProduct(order?.product),
+        }
+      }))
+    } catch (err) {
+      setFinishedScans([])
+      setFinishedScansError(err?.message || 'Não foi possível carregar as bipagens de produtos acabados.')
+    } finally {
+      setFinishedScansLoading(false)
+    }
+  }
+
+  async function fetchFinishedProductOutputs() {
+    setFinishedOutputsError('')
+
+    try {
+      const { data, error: queryError } = await safeFetchStockTable(
+        'estoque_finished_outputs',
+        supabase
+          .from('estoque_finished_outputs')
+          .select('*')
+          .order('created_at', { ascending: false })
+      )
+
+      if (queryError) throw queryError
+      setFinishedOutputs((data || []).map(mapFinishedOutputFromDb))
+    } catch (err) {
+      setFinishedOutputs([])
+      setFinishedOutputsError(
+        err?.message || 'Não foi possível carregar as saídas por Nota Fiscal.'
+      )
+    }
+  }
+
+  async function resolveRequisitionOpContext(opValue) {
+    const op = normalize(opValue)
+    if (!op) {
+      setRequisitionOpContext({ loading: false, finishedItemCode: '', client: '', product: '' })
+      return
+    }
+
+    setRequisitionOpContext((prev) => ({ ...prev, loading: true }))
+    try {
+      const { data, error: queryError } = await supabase
+        .from('orders')
+        .select('code, customer, product, created_at')
+        .eq('code', op)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (queryError) throw queryError
+
+      const order = Array.isArray(data) && data.length > 0 ? data[0] : null
+      const finishedItemCode = extractFinishedCodeFromOrderProduct(order?.product)
+      const client = normalize(order?.customer)
+      const product = normalize(order?.product)
+
+      setRequisitionOpContext({
+        loading: false,
+        finishedItemCode,
+        client,
+        product,
+      })
+    } catch {
+      setRequisitionOpContext({ loading: false, finishedItemCode: '', client: '', product: '' })
+    }
+  }
+
+  async function fetchItems() {
+    setLoading(true)
+    setError('')
+    try {
+      const { data, error: queryError } = await supabase
+        .from('items')
+        .select('*')
+        .order('code', { ascending: true })
+
+      if (queryError) throw queryError
+      setItems(data || [])
+    } catch (err) {
+      setItems([])
+      setError(err?.message || 'Não foi possível carregar os insumos.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const itemByCode = useMemo(() => {
+    const map = {}
+    ;(items || []).forEach((item) => {
+      if (!matchesAllowedClient(item?.cliente || item?.client, allowedClientNormalized)) return
+      const code = normalize(item?.code)
+      if (!code) return
+      map[code] = item
+    })
+    return map
+  }, [items, allowedClientNormalized])
+
+  const allItemsByCode = useMemo(() => {
+    const map = {}
+    ;(items || []).forEach((item) => {
+      const code = normalize(item?.code)
+      if (!code) return
+      map[code] = item
+    })
+    return map
+  }, [items])
+
+  const scopedItems = useMemo(() => {
+    return (items || []).filter((item) => matchesAllowedClient(item?.cliente || item?.client, allowedClientNormalized))
+  }, [items, allowedClientNormalized])
+
+  const purchasableItems = useMemo(
+    () => (scopedItems || []).filter((item) => !isFinishedProductCode(item?.code)),
+    [scopedItems]
+  )
+
+  const inventoryClientOptions = useMemo(() => {
+    const set = new Set()
+    ;(scopedItems || []).forEach((item) => {
+      const client = normalize(item?.cliente || item?.client)
+      if (!client) return
+      set.add(client)
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [scopedItems])
+
+  useEffect(() => {
+    if (!inventoryClientFilter) return
+    const selectedNormalized = normalizeClientValue(inventoryClientFilter)
+    const stillExists = inventoryClientOptions.some(
+      (client) => normalizeClientValue(client) === selectedNormalized
+    )
+    if (!stillExists) {
+      setInventoryClientFilter('')
+    }
+  }, [inventoryClientFilter, inventoryClientOptions])
+
+  useEffect(() => {
+    if (!allowedClientNormalized) return
+    if (inventoryClientFilter) setInventoryClientFilter('')
+  }, [allowedClientNormalized, inventoryClientFilter])
+
+  useEffect(() => {
+    if (!allowedClientNormalized) return
+    if (finishedInventoryClientFilter) setFinishedInventoryClientFilter('')
+  }, [allowedClientNormalized, finishedInventoryClientFilter])
+
+  const purchaseBalanceByCode = useMemo(() => {
+    const acc = {}
+    ;(purchases || []).forEach((row) => {
+      const code = normalize(row?.itemCode)
+      const balance = Number(row?.balance)
+      if (!code || !Number.isFinite(balance) || balance <= 0) return
+      acc[code] = (acc[code] || 0) + balance
+    })
+    return acc
+  }, [purchases])
+
+  const inventoryRows = useMemo(() => {
+    const list = Array.isArray(scopedItems) ? scopedItems : []
+    const selectedClientNormalized = allowedClientNormalized
+      ? ''
+      : normalizeClientValue(inventoryClientFilter)
+
+    return list
+      .filter((item) => {
+        const code = String(item?.code || '').trim()
+        if (!code) return false
+        if (selectedClientNormalized) {
+          const itemClient = item?.cliente || item?.client
+          if (!matchesAllowedClient(itemClient, selectedClientNormalized)) return false
+        }
+        return !code.startsWith('5')
+      })
+      .map((item) => {
+        const code = normalize(item?.code)
+        const stockFromPurchase = purchaseBalanceByCode[code]
+        const stockValue = Number.isFinite(stockFromPurchase)
+          ? stockFromPurchase
+          : (item.estoque ?? item.stock ?? item.estoque_atual ?? null)
+        const minValue = item.estoque_minimo ?? item.minimo ?? item.min_stock ?? null
+        const stockNum = Number(stockValue)
+        const minNum = Number(minValue)
+        const hasStock = Number.isFinite(stockNum)
+        const hasMin = Number.isFinite(minNum)
+        const status = hasStock && hasMin
+          ? (stockNum <= minNum ? 'Baixo' : 'OK')
+          : '-'
+
+        return {
+        id: item.id,
+        itemCode: code,
+        product: item.description,
+        imageUrl: normalize(item?.image_url),
+        client: item.cliente || item.client || '-',
+        stock: hasStock ? stockNum : '-',
+        min: hasMin ? minNum : '-',
+        status,
+        updatedAt: item.created_at ? fmtDateTime(item.created_at) : '-',
+        }
+      })
+  }, [scopedItems, purchaseBalanceByCode, inventoryClientFilter, allowedClientNormalized])
+
+  const purchaseRows = useMemo(
+    () => [...(purchases || [])]
+      .filter((row) => matchesAllowedClient(row?.client, allowedClientNormalized))
+      .sort(sortByLatest)
+      .slice(0, 30),
+    [purchases, allowedClientNormalized]
+  )
+
+  const latestUnitValueByItemCode = useMemo(() => {
+    const map = {}
+    ;(purchases || [])
+      .slice()
+      .sort(sortByLatest)
+      .forEach((row) => {
+        const code = normalize(row?.itemCode)
+        const unitValue = Number(row?.unitValue)
+        if (!code || !Number.isFinite(unitValue) || unitValue <= 0) return
+        if (!map[code]) map[code] = unitValue
+      })
+    return map
+  }, [purchases])
+
+  const requisitionRows = useMemo(
+    () => [...(requisitions || [])]
+      .filter((row) => matchesAllowedClient(row?.client, allowedClientNormalized))
+      .sort(sortByLatest)
+      .slice(0, 20),
+    [requisitions, allowedClientNormalized]
+  )
+
+  const returnRows = useMemo(
+    () => [...(returns || [])]
+      .filter((row) => {
+        if (!allowedClientNormalized) return true
+        const itemCode = normalize(row?.itemCode)
+        const sourceItem = (items || []).find((item) => normalize(item?.code) === itemCode)
+        return matchesAllowedClient(sourceItem?.cliente || sourceItem?.client, allowedClientNormalized)
+      })
+      .sort(sortByLatest)
+      .slice(0, 30),
+    [returns, items, allowedClientNormalized]
+  )
+
+  const purchaseHistoryIds = useMemo(() => {
+    const set = new Set()
+
+    ;(requisitions || []).forEach((req) => {
+      ;(req?.allocations || []).forEach((allocation) => {
+        const purchaseId = normalize(allocation?.purchaseId)
+        if (purchaseId) set.add(purchaseId)
+      })
+    })
+
+    ;(returns || []).forEach((ret) => {
+      ;(ret?.allocations || []).forEach((allocation) => {
+        const purchaseId = normalize(allocation?.purchaseId)
+        if (purchaseId) set.add(purchaseId)
+      })
+    })
+
+    return set
+  }, [requisitions, returns])
+
+  const finishedInventoryClientOptions = useMemo(() => {
+    const set = new Set()
+
+    ;(finishedScans || []).forEach((row) => {
+      const sourceItem = allItemsByCode[normalize(row?.finishedItemCode)]
+      const client = normalize(row?.customer || sourceItem?.cliente || sourceItem?.client)
+      if (!client) return
+      if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return
+      set.add(client)
+    })
+
+    ;(finishedOutputs || []).forEach((row) => {
+      const sourceItem = allItemsByCode[normalize(row?.itemCode)]
+      const client = normalize(row?.client || sourceItem?.cliente || sourceItem?.client)
+      if (!client) return
+      if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return
+      set.add(client)
+    })
+
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [finishedScans, finishedOutputs, allItemsByCode, allowedClientNormalized])
+
+  useEffect(() => {
+    if (!finishedInventoryClientFilter) return
+    const selectedNormalized = normalizeClientValue(finishedInventoryClientFilter)
+    const stillExists = finishedInventoryClientOptions.some(
+      (client) => normalizeClientValue(client) === selectedNormalized
+    )
+    if (!stillExists) setFinishedInventoryClientFilter('')
+  }, [finishedInventoryClientFilter, finishedInventoryClientOptions])
+
+  const finishedScanRows = useMemo(() => {
+    const selectedClientNormalized = allowedClientNormalized
+      ? ''
+      : normalizeClientValue(finishedInventoryClientFilter)
+
+    return (finishedScans || [])
+      .map((row) => {
+        const sourceItem = allItemsByCode[normalize(row?.finishedItemCode)]
+        const client = normalize(row?.customer || sourceItem?.cliente || sourceItem?.client)
+
+        if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return null
+        if (selectedClientNormalized && !matchesAllowedClient(client, selectedClientNormalized)) return null
+
+        return {
+          ...row,
+          itemDescription: normalize(sourceItem?.description) || normalize(row?.product) || '-',
+          imageUrl: normalize(sourceItem?.image_url),
+          color: normalize(sourceItem?.color),
+          client: client || '-',
+        }
+      })
+      .filter(Boolean)
+  }, [finishedScans, allItemsByCode, allowedClientNormalized, finishedInventoryClientFilter])
+
+  const finishedOutputRows = useMemo(() => {
+    const selectedClientNormalized = allowedClientNormalized
+      ? ''
+      : normalizeClientValue(finishedInventoryClientFilter)
+
+    return (finishedOutputs || [])
+      .map((row) => {
+        const sourceItem = allItemsByCode[normalize(row?.itemCode)]
+        const client = normalize(row?.client || sourceItem?.cliente || sourceItem?.client)
+
+        if (allowedClientNormalized && !matchesAllowedClient(client, allowedClientNormalized)) return null
+        if (selectedClientNormalized && !matchesAllowedClient(client, selectedClientNormalized)) return null
+
+        return {
+          ...row,
+          product: normalize(row?.product) || normalize(sourceItem?.description) || '-',
+          imageUrl: normalize(sourceItem?.image_url),
+          client: client || '-',
+        }
+      })
+      .filter(Boolean)
+  }, [finishedOutputs, allItemsByCode, allowedClientNormalized, finishedInventoryClientFilter])
+
+  const finishedOutputByCode = useMemo(() => {
+    const map = {}
+    ;(finishedOutputRows || []).forEach((row) => {
+      const code = normalize(row?.itemCode)
+      const quantity = Number(row?.quantity)
+      if (!code || !Number.isFinite(quantity) || quantity <= 0) return
+      map[code] = (map[code] || 0) + quantity
+    })
+    return map
+  }, [finishedOutputRows])
+
+  const finishedInventoryRows = useMemo(() => {
+    const grouped = new Map()
+
+    finishedScanRows.forEach((row) => {
+      const key = normalize(row?.finishedItemCode) || `op:${normalize(row?.opCode)}`
+      if (!key) return
+
+      const current = grouped.get(key) || {
+        key,
+        itemCode: normalize(row?.finishedItemCode) || '-',
+        product: row?.itemDescription || normalize(row?.product) || '-',
+        imageUrl: row?.imageUrl,
+        client: row?.client || '-',
+        boxes: 0,
+        pieces: 0,
+        lastEntryAt: row?.createdAt || null,
+        lastOp: row?.opCode || '-',
+      }
+
+      current.boxes += 1
+      current.pieces += Number(row?.qtyPieces) || 0
+
+      const currentLastMs = new Date(current.lastEntryAt || 0).getTime()
+      const nextLastMs = new Date(row?.createdAt || 0).getTime()
+      if (nextLastMs >= currentLastMs) {
+        current.lastEntryAt = row?.createdAt || current.lastEntryAt
+        current.lastOp = row?.opCode || current.lastOp
+      }
+
+      if ((!current.product || current.product === '-') && row?.itemDescription) {
+        current.product = row.itemDescription
+      }
+      if ((!current.client || current.client === '-') && row?.client) {
+        current.client = row.client
+      }
+      if (!current.imageUrl && row?.imageUrl) {
+        current.imageUrl = row.imageUrl
+      }
+
+      grouped.set(key, current)
+    })
+
+    ;(finishedOutputRows || []).forEach((row) => {
+      const key = normalize(row?.itemCode)
+      if (!key || grouped.has(key)) return
+      grouped.set(key, {
+        key,
+        itemCode: key,
+        product: row?.product || '-',
+        imageUrl: row?.imageUrl,
+        client: row?.client || '-',
+        boxes: 0,
+        pieces: 0,
+        outputPieces: 0,
+        balancePieces: 0,
+        lastEntryAt: null,
+        lastOp: '-',
+      })
+    })
+
+    grouped.forEach((row, key) => {
+      const outputPieces = Number(finishedOutputByCode[key] || 0)
+      row.outputPieces = outputPieces
+      row.balancePieces = Number(row?.pieces || 0) - outputPieces
+    })
+
+    return Array.from(grouped.values()).sort((left, right) => {
+      const leftDate = new Date(left?.lastEntryAt || 0).getTime()
+      const rightDate = new Date(right?.lastEntryAt || 0).getTime()
+      return rightDate - leftDate
+    })
+  }, [finishedScanRows, finishedOutputRows, finishedOutputByCode])
+
+  const finishedInventoryTotals = useMemo(() => {
+    const totals = finishedScanRows.reduce((acc, row) => {
+      acc.boxes += 1
+      acc.pieces += Number(row?.qtyPieces) || 0
+      return acc
+    }, { boxes: 0, pieces: 0 })
+    totals.outputPieces = finishedOutputRows.reduce((sum, row) => sum + (Number(row?.quantity) || 0), 0)
+    totals.balancePieces = totals.pieces - totals.outputPieces
+    return totals
+  }, [finishedScanRows, finishedOutputRows])
+
+  const recentFinishedScanRows = useMemo(
+    () => finishedScanRows.slice(0, 80),
+    [finishedScanRows]
+  )
+
+  const recentFinishedOutputRows = useMemo(
+    () => finishedOutputRows.slice(0, 80),
+    [finishedOutputRows]
+  )
+
+  async function handleFinishedOutputXmlImport(e) {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0) return
+
+    setFinishedOutputImporting(true)
+    setFinishedOutputImportError('')
+    setFinishedOutputImportInfo('')
+
+    try {
+      const parsedNotes = await Promise.all(files.map(async (file) => {
+        const text = await file.text()
+        return parseNfeXml(text, file.name)
+      }))
+
+      const rowsToInsert = parsedNotes.flatMap((note) => (
+        (note.items || []).map((item) => {
+          const itemCode = normalize(item.itemCode)
+          const sourceItem = allItemsByCode[itemCode]
+          const product = normalize(item.product || sourceItem?.description || itemCode)
+          const client = normalize(note.client || sourceItem?.cliente || sourceItem?.client)
+          const quantity = Number(item.quantity)
+
+          return {
+            id: makeId(),
+            date: note.date,
+            invoice_number: note.invoiceNumber,
+            access_key: note.accessKey || null,
+            item_code: itemCode,
+            product,
+            client,
+            quantity,
+            unit: normalize(item.unit),
+            unit_value: Number(item.unitValue) || 0,
+            total_value: Number(item.totalValue) || 0,
+          }
+        })
+      )).filter((row) => row.item_code && Number.isFinite(row.quantity) && row.quantity > 0)
+
+      if (rowsToInsert.length === 0) {
+        setFinishedOutputImportError('Nenhum item com cÃ³digo e quantidade foi encontrado nos XMLs.')
+        return
+      }
+
+      const blockedFinishedRows = rowsToInsert.filter((row) => !isFinishedProductCode(row.item_code))
+      if (blockedFinishedRows.length > 0) {
+        const codes = Array.from(new Set(blockedFinishedRows.map((row) => row.item_code))).join(', ')
+        setFinishedOutputImportError(`A saÃ­da por NF aceita apenas produtos acabados (cÃ³digo iniciado por 5). Itens encontrados: ${codes}.`)
+        return
+      }
+
+      const { data, error: insertError } = await supabase
+        .from('estoque_finished_outputs')
+        .insert(rowsToInsert)
+        .select('*')
+
+      if (insertError) throw insertError
+
+      setFinishedOutputs((prev) => [...(data || []).map(mapFinishedOutputFromDb), ...(prev || [])])
+      setFinishedOutputImportInfo(
+        `${rowsToInsert.length} item(ns) importado(s) de ${parsedNotes.length} XML(s) de Nota Fiscal.`
+      )
+    } catch (err) {
+      setFinishedOutputImportError(err?.message || 'NÃ£o foi possÃ­vel importar os XMLs de Nota Fiscal.')
+    } finally {
+      setFinishedOutputImporting(false)
+    }
+  }
+
+  async function registerFinishedProductScan({ order, scanCode, boxNumber, qtyPieces }) {
+    const nowBr = DateTime.now().setZone('America/Sao_Paulo')
+    const shift = getTurnoAtual(nowBr)
+
+    const payload = {
+      created_at: nowBr.toUTC().toISO(),
+      machine_id: normalize(order?.machine_id) || null,
+      shift: shift ? String(shift) : '',
+      order_id: order?.id,
+      op_code: normalize(order?.code),
+      scanned_box: boxNumber,
+      qty_pieces: qtyPieces,
+      code: scanCode,
+    }
+
+    const { error: insertError } = await supabase
+      .from('production_scans')
+      .insert([payload])
+
+    if (insertError) throw insertError
+
+    await fetchFinishedProductScans()
+  }
+
+  async function submitFinishedScan(scanValue, manualQty = null) {
+    setFinishedScanError('')
+    setFinishedScanInfo('')
+    setFinishedScanSubmitting(true)
+
+    try {
+      const parsedScan = parseScannedBoxLabel(scanValue)
+      if (!parsedScan) {
+        setFinishedScanError('Formato inválido. Use: OS 753 - 001.')
+        return
+      }
+
+      const order = await fetchLatestOrderByCode(parsedScan.opCode)
+      if (!order) {
+        setFinishedScanError(`O.S ${parsedScan.opCode} não encontrada.`)
+        return
+      }
+
+      const orderClient = normalize(order?.customer)
+      if (allowedClientNormalized && !matchesAllowedClient(orderClient, allowedClientNormalized)) {
+        setFinishedScanError('Esta O.S não pertence ao cliente liberado neste acesso.')
+        return
+      }
+
+      const totalBoxes = Number(order?.boxes)
+      if (Number.isFinite(totalBoxes) && totalBoxes > 0) {
+        if (parsedScan.boxNumber < 1 || parsedScan.boxNumber > totalBoxes) {
+          setFinishedScanError(`Caixa fora do intervalo desta O.S. Máximo permitido: ${totalBoxes}.`)
+          return
+        }
+      }
+
+      const { data: duplicateRow, error: duplicateError } = await supabase
+        .from('production_scans')
+        .select('id')
+        .eq('order_id', order.id)
+        .eq('scanned_box', parsedScan.boxNumber)
+        .limit(1)
+        .maybeSingle()
+
+      if (duplicateError) throw duplicateError
+      if (duplicateRow) {
+        setFinishedScanError(`A caixa ${String(parsedScan.boxNumber).padStart(3, '0')} já foi bipada para a O.S ${parsedScan.opCode}.`)
+        return
+      }
+
+      const qtyPiecesPerBox = manualQty || parsePiecesPerBox(order?.standard)
+
+      if (!manualQty && qtyPiecesPerBox <= 0) {
+        setFinishedScanConfirm({
+          open: true,
+          order,
+          scanCode: parsedScan.normalizedCode,
+          boxNumber: parsedScan.boxNumber,
+          manualQty: '',
+          error: '',
+        })
+        return
+      }
+
+      if (!Number.isFinite(qtyPiecesPerBox) || qtyPiecesPerBox <= 0) {
+        setFinishedScanError('Quantidade de peças por caixa inválida para esta bipagem.')
+        return
+      }
+
+      await registerFinishedProductScan({
+        order,
+        scanCode: parsedScan.normalizedCode,
+        boxNumber: parsedScan.boxNumber,
+        qtyPieces: qtyPiecesPerBox,
+      })
+
+      setFinishedScanCode('')
+      setFinishedScanConfirm({ open: false, order: null, scanCode: '', boxNumber: null, manualQty: '', error: '' })
+      setFinishedScanInfo(`Caixa ${String(parsedScan.boxNumber).padStart(3, '0')} da O.S ${parsedScan.opCode} registrada no estoque.`)
+    } catch (err) {
+      setFinishedScanError(err?.message || 'Não foi possível validar a bipagem do produto acabado.')
+    } finally {
+      setFinishedScanSubmitting(false)
+    }
+  }
+
+  function handleFinishedScanSubmit(e) {
+    e.preventDefault()
+    submitFinishedScan(finishedScanCode)
+  }
+
+  function closeFinishedScanConfirm() {
+    if (finishedScanSubmitting) return
+    setFinishedScanConfirm({ open: false, order: null, scanCode: '', boxNumber: null, manualQty: '', error: '' })
+  }
+
+  async function handleConfirmFinishedScanQty() {
+    const manualQty = parsePiecesPerBox(finishedScanConfirm.manualQty)
+    if (!manualQty) {
+      setFinishedScanConfirm((prev) => ({ ...prev, error: 'Informe a quantidade de peças desta caixa.' }))
+      return
+    }
+
+    await submitFinishedScan(finishedScanConfirm.scanCode, manualQty)
+  }
+
+  const requisitionStructureRows = useMemo(() => {
+    const finishedItemCode = normalize(requisitionOpContext.finishedItemCode)
+    const opQty = toPositiveNumber(requisitionForm.opQuantity) || 0
+    if (!finishedItemCode) return []
+
+    return (itemStructures || [])
+      .filter((row) => normalize(row?.finished_item_code) === finishedItemCode)
+      .map((row) => {
+        const inputCode = normalize(row?.input_item_code)
+        const qtyPerPiece = Number(row?.quantity_per_piece)
+        const source = itemByCode[inputCode]
+        const sourceUnit = normalize(source?.unidade)
+        const availableStock = Number(purchaseBalanceByCode[inputCode] || 0)
+        const totalRaw = Number.isFinite(qtyPerPiece) ? qtyPerPiece * opQty : 0
+        const totalRequired = isUnitUN(sourceUnit) ? Math.round(totalRaw) : totalRaw
+        const manualRaw = requisitionManualByCode[inputCode]
+        const manualParsed = toPositiveNumber(manualRaw)
+        const manualQty = manualParsed
+          ? (isUnitUN(sourceUnit) ? Math.round(manualParsed) : manualParsed)
+          : null
+        const requestedQty = manualQty || totalRequired
+
+        return {
+          itemCode: inputCode,
+          description: source?.description || '-',
+          unidade: source?.unidade || '-',
+          availableStock,
+          qtyPerPiece,
+          totalRequired,
+          requestedQty,
+          manualRaw: manualRaw ?? '',
+        }
+      })
+  }, [itemStructures, requisitionOpContext.finishedItemCode, requisitionForm.opQuantity, itemByCode, purchaseBalanceByCode, requisitionManualByCode])
+
+  function handlePurchaseFieldChange(e) {
+    const { name, value } = e.target
+
+    setPurchaseForm((prev) => {
+      const next = { ...prev, [name]: value }
+      if (name === 'itemCode') {
+        const code = normalize(value)
+        const source = itemByCode[code]
+        if (source) {
+          next.product = normalize(source.description)
+          next.client = normalize(source.cliente || source.client)
+        }
+      }
+      return next
+    })
+  }
+
+  function closeManualInventoryModal() {
+    if (manualInventorySaving) return
+    setManualInventoryModalOpen(false)
+    setManualInventoryError('')
+  }
+
+  function handleManualInventoryQtyChange(itemCode, value) {
+    const code = normalize(itemCode)
+    if (!code) return
+    setManualInventoryQtyByCode((prev) => ({ ...prev, [code]: value }))
+  }
+
+  async function handleManualInventorySubmit() {
+    setManualInventoryError('')
+    const date = normalize(manualInventoryDate) || nowIsoDate()
+
+    const rowsToInsert = (purchasableItems || []).map((item) => {
+      const code = normalize(item?.code)
+      const unit = normalize(item?.unidade)
+      const rawQty = manualInventoryQtyByCode[code]
+      const parsed = toPositiveNumber(rawQty)
+      if (!parsed) return null
+
+      const quantity = isUnitUN(unit) ? Math.round(parsed) : parsed
+      if (!Number.isFinite(quantity) || quantity <= 0) return null
+
+      const itemUnitValue = Number(item?.unit_value)
+      const latestUnitValue = Number(latestUnitValueByItemCode[code])
+      const fallbackUnitValue = Number.isFinite(itemUnitValue) && itemUnitValue > 0
+        ? itemUnitValue
+        : (Number.isFinite(latestUnitValue) && latestUnitValue > 0 ? latestUnitValue : 1)
+
+      return {
+        id: makeId(),
+        date,
+        invoice_number: MANUAL_PURCHASE_INVOICE,
+        item_code: code,
+        product: normalize(item?.description || code),
+        client: normalize(item?.cliente || item?.client),
+        quantity,
+        unit_value: fallbackUnitValue,
+        balance: quantity,
+      }
+    }).filter(Boolean)
+
+    if (rowsToInsert.length === 0) {
+      setManualInventoryError('Informe pelo menos uma quantidade maior que zero para lançar o inventário manual.')
+      return
+    }
+
+    setManualInventorySaving(true)
+    try {
+      const { data, error: insertError } = await supabase
+        .from('estoque_purchases')
+        .insert(rowsToInsert)
+        .select('*')
+
+      if (insertError) throw insertError
+
+      const mapped = (data || []).map(mapPurchaseFromDb)
+      setPurchases((prev) => [...mapped, ...(prev || [])])
+      setManualInventoryModalOpen(false)
+      setManualInventoryQtyByCode({})
+      setManualInventoryError('')
+    } catch (err) {
+      setManualInventoryError(err?.message || 'Não foi possível salvar o inventário manual.')
+    } finally {
+      setManualInventorySaving(false)
+    }
+  }
+
+  function resetPurchaseForm() {
+    setPurchaseForm({ ...emptyPurchaseForm, date: nowIsoDate() })
+    setPurchaseError('')
+    setPurchaseEntryMode('nf')
+  }
+
+  function openPurchaseForm(mode = 'nf') {
+    setShowPurchaseForm(true)
+    setPurchaseError('')
+    setPurchaseEntryMode(mode)
+    setPurchaseForm((prev) => ({
+      ...prev,
+      date: prev?.date || nowIsoDate(),
+      invoiceNumber: mode === 'manual' ? MANUAL_PURCHASE_INVOICE : (mode === purchaseEntryMode ? prev.invoiceNumber : ''),
+    }))
+  }
+
+  async function handlePurchaseSubmit(e) {
+    e.preventDefault()
+    setPurchaseError('')
+
+    const date = normalize(purchaseForm.date) || nowIsoDate()
+    const invoiceNumber = purchaseEntryMode === 'manual'
+      ? MANUAL_PURCHASE_INVOICE
+      : normalize(purchaseForm.invoiceNumber)
+    const itemCode = normalize(purchaseForm.itemCode)
+    const product = normalize(purchaseForm.product)
+    const client = normalize(purchaseForm.client)
+    const quantity = toPositiveNumber(purchaseForm.quantity)
+    const unitValue = toPositiveNumber(purchaseForm.unitValue)
+
+    if (purchaseEntryMode !== 'manual' && !invoiceNumber) {
+      setPurchaseError('Informe a Nota Fiscal.')
+      return
+    }
+    if (!itemCode) {
+      setPurchaseError('Informe o código do item.')
+      return
+    }
+    if (isFinishedProductCode(itemCode)) {
+      setPurchaseError('Produto acabado (código iniciado por 5) não pode ser lançado em compras.')
+      return
+    }
+    if (!product) {
+      setPurchaseError('Informe o produto.')
+      return
+    }
+    if (!client) {
+      setPurchaseError('Informe o cliente.')
+      return
+    }
+    if (!quantity) {
+      setPurchaseError('Quantidade deve ser maior que zero.')
+      return
+    }
+    if (!unitValue) {
+      setPurchaseError('Valor unitário deve ser maior que zero.')
+      return
+    }
+
+    const payload = {
+      id: makeId(),
+      date,
+      invoice_number: invoiceNumber,
+      item_code: itemCode,
+      product,
+      client,
+      quantity,
+      unit_value: unitValue,
+      balance: quantity,
+    }
+
+    try {
+      const { data, error: insertError } = await supabase
+        .from('estoque_purchases')
+        .insert(payload)
+        .select('*')
+        .single()
+
+      if (insertError) throw insertError
+
+      setPurchases((prev) => [mapPurchaseFromDb(data), ...(prev || [])])
+      resetPurchaseForm()
+      setShowPurchaseForm(false)
+    } catch (err) {
+      setPurchaseError(err?.message || 'Não foi possível salvar a compra no Supabase.')
+    }
+  }
+
+  function handleRequisitionFieldChange(e) {
+    const { name, value } = e.target
+    setRequisitionForm((prev) => ({ ...prev, [name]: value }))
+
+    if (name === 'op') {
+      setRequisitionManualByCode({})
+      resolveRequisitionOpContext(value)
+    }
+  }
+
+  function handleManualRequisitionChange(itemCode, value) {
+    const code = normalize(itemCode)
+    if (!code) return
+    setRequisitionManualByCode((prev) => ({ ...prev, [code]: value }))
+  }
+
+  function handleReturnFieldChange(e) {
+    const { name, value } = e.target
+    setReturnForm((prev) => {
+      const next = { ...prev, [name]: value }
+      if (name === 'itemCode') {
+        const code = normalize(value)
+        const source = itemByCode[code]
+        if (source) {
+          next.itemDescription = normalize(source.description)
+        }
+      }
+      return next
+    })
+  }
+
+  async function handleReturnSubmit(e) {
+    e.preventDefault()
+    setReturnError('')
+    setReturnInfo('')
+
+    const op = normalize(returnForm.op)
+    const itemCode = normalize(returnForm.itemCode)
+    const typedDescription = normalize(returnForm.itemDescription)
+    const quantity = toPositiveNumber(returnForm.quantity)
+
+    if (!op) {
+      setReturnError('Informe a O.P do retorno.')
+      return
+    }
+    if (!itemCode) {
+      setReturnError('Informe o item do retorno.')
+      return
+    }
+    if (isFinishedProductCode(itemCode)) {
+      setReturnError('Produto acabado (código iniciado por 5) não pode ser lançado em retorno de material.')
+      return
+    }
+    if (!quantity) {
+      setReturnError('Quantidade retornada deve ser maior que zero.')
+      return
+    }
+
+    const sourceItem = itemByCode[itemCode]
+
+    const plan = buildReturnAllocationPlan(op, itemCode, quantity, returns)
+    if (!plan?.ok) {
+      setReturnError(plan?.error || 'Não foi possível calcular o retorno para as NFs originais.')
+      return
+    }
+
+    const allocationsApplied = plan.allocations || []
+    const purchaseBalanceAddMap = new Map()
+    allocationsApplied.forEach((row) => {
+      const pid = normalize(row?.purchaseId)
+      const q = Number(row?.returnedQty)
+      if (!pid || !Number.isFinite(q) || q <= 0) return
+      purchaseBalanceAddMap.set(pid, (purchaseBalanceAddMap.get(pid) || 0) + q)
+    })
+
+    const product = normalize(
+      typedDescription || sourceItem?.description || itemCode
+    )
+
+    try {
+      const purchaseUpdates = Array.from(purchaseBalanceAddMap.entries()).map(([id, qtyToAdd]) => {
+        const source = (purchases || []).find((purchase) => normalize(purchase?.id) === id)
+        const currentBalance = Number(source?.balance)
+        const nextBalance = Number.isFinite(currentBalance)
+          ? currentBalance + Number(qtyToAdd || 0)
+          : Number(qtyToAdd || 0)
+
+        return supabase
+          .from('estoque_purchases')
+          .update({ balance: nextBalance })
+          .eq('id', id)
+      })
+
+      const purchaseUpdateResults = await Promise.all(purchaseUpdates)
+      const purchaseUpdateError = purchaseUpdateResults.find((result) => result.error)?.error
+      if (purchaseUpdateError) throw purchaseUpdateError
+
+      const returnPayload = {
+        id: makeId(),
+        op,
+        item_code: itemCode,
+        item_description: product,
+        quantity,
+        allocations: allocationsApplied,
+      }
+
+      const { data: returnData, error: returnInsertError } = await supabase
+        .from('estoque_returns')
+        .insert(returnPayload)
+        .select('*')
+        .single()
+
+      if (returnInsertError) throw returnInsertError
+
+      setReturns((prev) => [mapReturnFromDb(returnData), ...(prev || [])])
+      setPurchases((prev) =>
+        (prev || []).map((purchase) => {
+          const currentId = normalize(purchase?.id)
+          if (!purchaseBalanceAddMap.has(currentId)) return purchase
+          const currentBalance = Number(purchase?.balance)
+          const nextBalance = Number.isFinite(currentBalance)
+            ? currentBalance + Number(purchaseBalanceAddMap.get(currentId) || 0)
+            : Number(purchaseBalanceAddMap.get(currentId) || 0)
+          return { ...purchase, balance: nextBalance }
+        })
+      )
+      setReturnForm(emptyReturnForm)
+      setReturnInfo(`Retorno lançado com sucesso na(s) NF(s) original(is): ${allocationsApplied.length}.`)
+    } catch (err) {
+      setReturnError(err?.message || 'Não foi possível salvar o retorno no Supabase.')
+    }
+  }
+
+  async function handleRequisitionSubmit(e) {
+    e.preventDefault()
+    setRequisitionError('')
+    setRequisitionInfo('')
+
+    const op = normalize(requisitionForm.op)
+    const finishedItemCode = normalize(requisitionOpContext.finishedItemCode)
+    const client = normalize(requisitionOpContext.client)
+    const opQuantity = toPositiveNumber(requisitionForm.opQuantity)
+
+    if (!op) {
+      setRequisitionError('Informe a O.P da requisição.')
+      return
+    }
+
+    if (!opQuantity) {
+      setRequisitionError('Quantidade da O.P deve ser maior que zero.')
+      return
+    }
+
+    if (!finishedItemCode) {
+      setRequisitionError('Não foi possível identificar o produto acabado desta O.P.')
+      return
+    }
+
+    if (!client) {
+      setRequisitionError('Informe o cliente da requisição.')
+      return
+    }
+
+    if (requisitionStructureRows.length === 0) {
+      setRequisitionError('Este produto acabado não possui estrutura cadastrada.')
+      return
+    }
+
+    const plannedRows = requisitionStructureRows
+      .filter((row) => Number(row.requestedQty) > 0)
+
+    if (plannedRows.length === 0) {
+      setRequisitionError('Nenhum insumo foi informado para requisição.')
+      return
+    }
+
+    const workingBalanceByPurchase = new Map(
+      (purchases || []).map((purchase) => [normalize(purchase?.id), Number(purchase?.balance) || 0])
+    )
+
+    const allocationMap = new Map()
+    const requisitionInsertRows = []
+
+    for (const structureRow of plannedRows) {
+      const itemCode = normalize(structureRow.itemCode)
+      const qtyRequested = Number(structureRow.requestedQty)
+
+      const availableRows = [...(purchases || [])]
+        .filter((row) => {
+          const sameCode = normalize(row?.itemCode) === itemCode
+          if (!sameCode) return false
+          const rowId = normalize(row?.id)
+          const balance = Number(workingBalanceByPurchase.get(rowId) || 0)
+          return Number.isFinite(balance) && balance > 0
+        })
+        .sort(sortByFifoDate)
+
+      const availableTotal = availableRows.reduce((sum, row) => {
+        const rowId = normalize(row?.id)
+        return sum + Number(workingBalanceByPurchase.get(rowId) || 0)
+      }, 0)
+
+      if (availableTotal < qtyRequested) {
+        setRequisitionError(
+          `Estoque insuficiente para ${itemCode}. Disponível: ${formatQty(availableTotal)}.`
+        )
+        return
+      }
+
+      let remaining = qtyRequested
+      const allocations = []
+
+      for (const row of availableRows) {
+        if (remaining <= 0) break
+        const rowId = normalize(row?.id)
+        const currentBalance = Number(workingBalanceByPurchase.get(rowId) || 0)
+        if (currentBalance <= 0) continue
+
+        const usedQty = Math.min(currentBalance, remaining)
+        const nextBalance = currentBalance - usedQty
+
+        workingBalanceByPurchase.set(rowId, nextBalance)
+        allocationMap.set(row.id, nextBalance)
+        allocations.push({
+          purchaseId: row.id,
+          invoiceNumber: row.invoiceNumber,
+          date: row.date,
+          usedQty,
+          balanceAfter: nextBalance,
+          finishedItemCode,
+          opQuantity,
+          quantityPerPiece: Number(structureRow.qtyPerPiece || 0),
+        })
+        remaining -= usedQty
+      }
+
+      requisitionInsertRows.push({
+        id: makeId(),
+        item_code: itemCode,
+        op,
+        client,
+        quantity: qtyRequested,
+        allocations,
+      })
+    }
+
+    try {
+      const purchaseUpdates = Array.from(allocationMap.entries()).map(([id, balance]) =>
+        supabase
+          .from('estoque_purchases')
+          .update({ balance })
+          .eq('id', id)
+      )
+
+      const purchaseUpdateResults = await Promise.all(purchaseUpdates)
+      const purchaseUpdateError = purchaseUpdateResults.find((result) => result.error)?.error
+      if (purchaseUpdateError) throw purchaseUpdateError
+
+      const { data: reqData, error: reqError } = await supabase
+        .from('estoque_requisitions')
+        .insert(requisitionInsertRows)
+        .select('*')
+
+      if (reqError) throw reqError
+
+      setPurchases((prev) =>
+        (prev || []).map((row) => {
+          if (!allocationMap.has(row.id)) return row
+          return { ...row, balance: allocationMap.get(row.id) }
+        })
+      )
+      setRequisitions((prev) => [...(reqData || []).map(mapRequisitionFromDb), ...(prev || [])])
+      setRequisitionForm(emptyRequisitionForm)
+      setRequisitionManualByCode({})
+      setRequisitionOpContext({ loading: false, finishedItemCode: '', client: '', product: '' })
+      setRequisitionInfo(
+        `Requisição concluída pela estrutura. ${requisitionInsertRows.length} insumo(s) processado(s).`
+      )
+    } catch (err) {
+      setRequisitionError(err?.message || 'Não foi possível salvar a requisição no Supabase.')
+    }
+  }
+
+  async function openUsageModal(purchaseRow) {
+    if (!purchaseRow) return
+    const requisitionById = new Map((requisitions || []).map((req) => [normalize(req?.id), req]))
+    const itemByCodeAll = new Map((items || []).map((item) => [normalize(item?.code), item]))
+    const rows = []
+    ;(requisitions || []).forEach((req) => {
+      const reqDate = req?.createdAt || null
+      const reqOp = normalize(req?.op)
+      const reqClient = normalize(req?.client)
+      ;(req?.allocations || []).forEach((allocation) => {
+        if (allocation?.purchaseId !== purchaseRow.id) return
+        const finishedItemCode = normalize(allocation?.finishedItemCode)
+        rows.push({
+          id: `${req.id}-${allocation.purchaseId}-${allocation.invoiceNumber}-${allocation.usedQty}`,
+          requisitionDate: reqDate,
+          op: reqOp,
+          client: reqClient,
+          finishedItemCode,
+          productDescription: '-',
+          productColor: '-',
+          qty: Number(allocation?.usedQty) || 0,
+          movementType: 'utilizacao',
+        })
+      })
+    })
+
+    ;(returns || []).forEach((ret) => {
+      const retDate = ret?.createdAt || null
+      const retOp = normalize(ret?.op)
+      ;(ret?.allocations || []).forEach((allocation) => {
+        if (allocation?.purchaseId !== purchaseRow.id) return
+        const linkedReq = requisitionById.get(normalize(allocation?.requisitionId))
+        const linkedReqAllocation = (linkedReq?.allocations || []).find(
+          (reqAllocation) => normalize(reqAllocation?.purchaseId) === normalize(allocation?.purchaseId)
+        )
+        const finishedItemCode = normalize(linkedReqAllocation?.finishedItemCode)
+        rows.push({
+          id: `${ret.id}-${allocation.purchaseId}-${allocation.invoiceNumber}-${allocation.returnedQty}`,
+          requisitionDate: retDate,
+          op: retOp,
+          client: 'RETORNO',
+          finishedItemCode,
+          productDescription: '-',
+          productColor: '-',
+          qty: Number(allocation?.returnedQty) || 0,
+          movementType: 'retorno',
+        })
+      })
+    })
+
+    const missingOpCodes = Array.from(new Set(
+      rows
+        .filter((row) => !normalize(row?.finishedItemCode) && normalize(row?.op))
+        .map((row) => normalize(row?.op))
+    ))
+
+    const finishedCodeByOp = new Map()
+    if (missingOpCodes.length > 0) {
+      try {
+        const { data, error: ordersError } = await supabase
+          .from('orders')
+          .select('code, product, created_at')
+          .in('code', missingOpCodes)
+          .order('created_at', { ascending: false })
+
+        if (!ordersError) {
+          ;(data || []).forEach((order) => {
+            const opCode = normalize(order?.code)
+            if (!opCode || finishedCodeByOp.has(opCode)) return
+            const finishedCode = extractFinishedCodeFromOrderProduct(order?.product)
+            if (finishedCode) finishedCodeByOp.set(opCode, finishedCode)
+          })
+        }
+      } catch {
+        // Mantem o historico visivel mesmo se a busca complementar da O.P falhar.
+      }
+    }
+
+    const rowsWithProduct = rows.map((row) => {
+      const directCode = normalize(row?.finishedItemCode)
+      const opCode = normalize(row?.op)
+      const resolvedCode = directCode || finishedCodeByOp.get(opCode) || ''
+      const finishedItem = itemByCodeAll.get(resolvedCode)
+
+      return {
+        ...row,
+        finishedItemCode: resolvedCode,
+        productDescription: normalize(finishedItem?.description) || '-',
+        productColor: normalize(finishedItem?.color) || '-',
+      }
+    })
+
+    rowsWithProduct.sort((a, b) => {
+      const aDate = new Date(a?.requisitionDate || 0).getTime()
+      const bDate = new Date(b?.requisitionDate || 0).getTime()
+      return bDate - aDate
+    })
+
+    setUsageModal({ open: true, purchase: purchaseRow, rows: rowsWithProduct })
+  }
+
+  return (
+    <div className="estoque-page">
+      <div className="estoque-header">
+        <div>
+          <h2 className="estoque-title">
+            {stockContext === 'inputs' ? 'Controle de Insumos' : 'Controle de Produtos Acabados'}
+          </h2>
+          <p className="estoque-sub">
+            {stockContext === 'inputs'
+              ? 'Inventário, requisição, retorno e compras por Nota Fiscal.'
+              : 'Validação de bipagem e entrada de caixas em estoque para qualquer O.S.'}
+          </p>
+        </div>
+
+        <div className="estoque-actions">
+          {STOCK_CONTEXTS.map((context) => (
+            <button
+              key={context.id}
+              type="button"
+              className={`estoque-tabbtn ${stockContext === context.id ? 'active' : ''}`}
+              onClick={() => setStockContext(context.id)}
+            >
+              {context.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {stockContext === 'inputs' && (
+        <div className="estoque-tabs">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              className={`estoque-tabbtn ${tab === item.id ? 'active' : ''}`}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {stockContext === 'finished' && (
+        <>
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Entrada por bipagem</h3>
+                <p className="estoque-sub">Leia ou digite o código da caixa para validar a O.S e registrar a entrada no estoque.</p>
+              </div>
+            </div>
+
+            {!readOnly ? (
+              <form className="estoque-form" onSubmit={handleFinishedScanSubmit}>
+                <div className="estoque-form-grid" style={{ gridTemplateColumns: 'minmax(260px, 380px) auto' }}>
+                  <label>
+                    Código da caixa
+                    <input
+                      value={finishedScanCode}
+                      onChange={(e) => setFinishedScanCode(e.target.value)}
+                      placeholder="Ex.: OS 753 - 001"
+                    />
+                  </label>
+
+                  <div className="estoque-form-actions" style={{ alignItems: 'flex-end' }}>
+                    <button className="btn primary" type="submit" disabled={finishedScanSubmitting}>
+                      {finishedScanSubmitting ? 'Validando…' : 'Validar e bipar'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              <div className="estoque-alert">Visualização habilitada. A bipagem de entrada está bloqueada para este perfil.</div>
+            )}
+
+            {finishedScanError ? <div className="estoque-alert">{finishedScanError}</div> : null}
+            {finishedScanInfo ? <div className="estoque-alert">{finishedScanInfo}</div> : null}
+          </div>
+
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Saí­das por Nota Fiscal</h3>
+                <p className="estoque-sub">Importe XMLs de NF-e para registrar a saída e abater o saldo de produtos acabados.</p>
+              </div>
+
+              {!readOnly && (
+                <label className={`btn primary ${finishedOutputImporting ? 'disabled' : ''}`} style={{ cursor: finishedOutputImporting ? 'not-allowed' : 'pointer' }}>
+                  {finishedOutputImporting ? 'Importandoâ€¦' : 'Importar XMLs'}
+                  <input
+                    type="file"
+                    accept=".xml,application/xml,text/xml"
+                    multiple
+                    onChange={handleFinishedOutputXmlImport}
+                    disabled={finishedOutputImporting}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              )}
+            </div>
+
+            {readOnly ? (
+              <div className="estoque-alert">Visualização habilitada. Importação de saídas por NF está bloqueada para este perfil.</div>
+            ) : null}
+            {finishedOutputsError ? <div className="estoque-alert">{finishedOutputsError}</div> : null}
+            {finishedOutputImportError ? <div className="estoque-alert">{finishedOutputImportError}</div> : null}
+            {finishedOutputImportInfo ? <div className="estoque-alert">{finishedOutputImportInfo}</div> : null}
+          </div>
+
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Estoque de produtos acabados</h3>
+                <p className="estoque-sub">{formatQty(finishedInventoryTotals.boxes)} caixas registradas • {formatQty(finishedInventoryTotals.pieces)} peças de entrada • {formatQty(finishedInventoryTotals.outputPieces)} peças em NF • saldo {formatQty(finishedInventoryTotals.balancePieces)}.</p>
+              </div>
+
+              <div className="estoque-inventory-controls">
+                {!allowedClientNormalized && (
+                  <select
+                    className="estoque-filter-select"
+                    value={finishedInventoryClientFilter}
+                    onChange={(e) => setFinishedInventoryClientFilter(e.target.value)}
+                    aria-label="Filtrar produtos acabados por cliente"
+                    disabled={finishedInventoryClientOptions.length === 0}
+                  >
+                    <option value="">Todos os clientes</option>
+                    {finishedInventoryClientOptions.map((client) => (
+                      <option key={client} value={client}>{client}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {finishedScansError ? <div className="estoque-alert">{finishedScansError}</div> : null}
+
+            <div className="estoque-table-wrap">
+              <table className="estoque-table">
+                <thead>
+                  <tr>
+                    <th>Cod Item</th>
+                    <th>Produto</th>
+                    <th>Cliente</th>
+                    <th>Caixas</th>
+                    <th>Entrada</th>
+                    <th>Saída NF</th>
+                    <th>Saldo</th>
+                    <th>Última entrada</th>
+                    <th>Última O.S</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {finishedInventoryRows.length === 0 && (
+                    <tr>
+                      <td colSpan="9" className="estoque-empty">
+                        {finishedScansLoading ? 'Carregando produtos acabados…' : 'Nenhuma caixa de produto acabado foi registrada ainda.'}
+                      </td>
+                    </tr>
+                  )}
+
+                  {finishedInventoryRows.map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.itemCode || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.itemCode}
+                          product={row.product}
+                          imageUrl={row.imageUrl}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
+                      <td>{row.client || '-'}</td>
+                      <td>{formatQty(row.boxes)}</td>
+                      <td>{formatQty(row.pieces)}</td>
+                      <td>{formatQty(row.outputPieces)}</td>
+                      <td className={Number(row.balancePieces) < 0 ? 'estoque-negative' : ''}>{formatQty(row.balancePieces)}</td>
+                      <td>{row.lastEntryAt ? fmtDateTime(row.lastEntryAt) : '-'}</td>
+                      <td>{row.lastOp || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Últimas saídas por NF</h3>
+                <p className="estoque-sub">Itens importados dos XMLs de Nota Fiscal.</p>
+              </div>
+            </div>
+
+            <div className="estoque-table-wrap">
+              <table className="estoque-table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Nota Fiscal</th>
+                    <th>Cod Item</th>
+                    <th>Produto</th>
+                    <th>Cliente</th>
+                    <th>Quantidade</th>
+                    <th>Unidade</th>
+                    <th>Valor unitário</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentFinishedOutputRows.length === 0 && (
+                    <tr>
+                      <td colSpan="9" className="estoque-empty">
+                        Nenhuma saída por Nota Fiscal importada.
+                      </td>
+                    </tr>
+                  )}
+
+                  {recentFinishedOutputRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.date ? new Date(row.date).toLocaleDateString('pt-BR') : '-'}</td>
+                      <td>{row.invoiceNumber || '-'}</td>
+                      <td>{row.itemCode || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.itemCode}
+                          product={row.product}
+                          imageUrl={row.imageUrl}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
+                      <td>{row.client || '-'}</td>
+                      <td>{formatQty(row.quantity)}</td>
+                      <td>{row.unit || '-'}</td>
+                      <td>R$ {formatMoney(row.unitValue)}</td>
+                      <td>R$ {formatMoney(row.totalValue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="estoque-card">
+            <div className="estoque-card-head">
+              <div>
+                <h3>Últimas bipagens</h3>
+                <p className="estoque-sub">Histórico recente das caixas validadas na entrada do estoque.</p>
+              </div>
+            </div>
+
+            <div className="estoque-table-wrap">
+              <table className="estoque-table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>O.S</th>
+                    <th>Caixa</th>
+                    <th>Cod Item</th>
+                    <th>Produto</th>
+                    <th>Cliente</th>
+                    <th>Peças</th>
+                    <th>Máquina</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentFinishedScanRows.length === 0 && (
+                    <tr>
+                      <td colSpan="8" className="estoque-empty">
+                        {finishedScansLoading ? 'Carregando histórico de bipagens…' : 'Nenhuma bipagem registrada para produtos acabados.'}
+                      </td>
+                    </tr>
+                  )}
+
+                  {recentFinishedScanRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.createdAt ? fmtDateTime(row.createdAt) : '-'}</td>
+                      <td>{row.opCode || '-'}</td>
+                      <td>{Number.isFinite(row.scannedBox) ? String(row.scannedBox).padStart(3, '0') : '-'}</td>
+                      <td>{row.finishedItemCode || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.finishedItemCode}
+                          product={row.itemDescription}
+                          imageUrl={row.imageUrl}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
+                      <td>{row.client || '-'}</td>
+                      <td>{formatQty(row.qtyPieces)}</td>
+                      <td>{row.machineId || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {stockContext === 'inputs' && tab === 'inventario' && (
+        <div className="estoque-card">
+          <div className="estoque-card-head">
+            <h3>Inventário</h3>
+            <div className="estoque-inventory-controls">
+              {!allowedClientNormalized && (
+                <select
+                  className="estoque-filter-select"
+                  value={inventoryClientFilter}
+                  onChange={(e) => setInventoryClientFilter(e.target.value)}
+                  aria-label="Filtrar inventário por cliente"
+                  disabled={inventoryClientOptions.length === 0}
+                >
+                  <option value="">Todos os clientes</option>
+                  {inventoryClientOptions.map((client) => (
+                    <option key={client} value={client}>{client}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+          {error && <div className="estoque-alert">{error}</div>}
+          <div className="estoque-table-wrap">
+            <table className="estoque-table">
+              <thead>
+                <tr>
+                  <th>Cod Item</th>
+                  <th>Produto</th>
+                  <th>Cliente</th>
+                  <th>Estoque</th>
+                  <th>Mínimo</th>
+                  <th>Situação</th>
+                  <th>Última atualização</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inventoryRows.length === 0 && (
+                  <tr>
+                    <td colSpan="7" className="estoque-empty">
+                      {loading ? 'Carregando insumos…' : 'Nenhum insumo encontrado no cadastro de itens.'}
+                    </td>
+                  </tr>
+                )}
+                {inventoryRows.map((row) => (
+                  <tr key={row.id || row.itemCode}>
+                    <td>{row.itemCode || '-'}</td>
+                    <td>
+                      <ProductCellWithHoverImage
+                        itemCode={row.itemCode}
+                        product={row.product}
+                        imageUrl={row.imageUrl}
+                        enablePreview={enableProductImagePreview}
+                      />
+                    </td>
+                    <td>{row.client || '-'}</td>
+                    <td>{row.stock ?? '-'}</td>
+                    <td>{row.min ?? '-'}</td>
+                    <td>{row.status || '-'}</td>
+                    <td>{row.updatedAt || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {stockContext === 'inputs' && tab === 'requisicao' && (
+        <div className="estoque-card">
+          <div className="estoque-card-head">
+            <h3>Requisição</h3>
+          </div>
+
+          {!readOnly && (
+            <form className="estoque-form" onSubmit={handleRequisitionSubmit}>
+              <div className="estoque-form-grid">
+                <label>
+                  O.P
+                  <input
+                    name="op"
+                    value={requisitionForm.op}
+                    onChange={handleRequisitionFieldChange}
+                    placeholder="Ex.: OP-24010"
+                  />
+                </label>
+
+                <label>
+                  Quantidade da O.P
+                  <input
+                    name="opQuantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={requisitionForm.opQuantity}
+                    onChange={handleRequisitionFieldChange}
+                    placeholder="Ex.: 5000"
+                  />
+                </label>
+              </div>
+
+              {requisitionForm.op && (
+                <div className="estoque-alert" style={{ marginBottom: 0 }}>
+                  {requisitionOpContext.loading
+                    ? 'Buscando dados da O.P…'
+                    : (requisitionOpContext.finishedItemCode
+                      ? `Produto: ${requisitionOpContext.product || requisitionOpContext.finishedItemCode} • Cliente: ${requisitionOpContext.client || '-'}`
+                      : 'O.P não encontrada ou sem produto válido para estrutura.')}
+                </div>
+              )}
+
+              <div className="estoque-table-wrap">
+                <table className="estoque-table">
+                  <thead>
+                    <tr>
+                      <th>Cod</th>
+                      <th>Descrição</th>
+                      <th>Unidade</th>
+                      <th>Estoque</th>
+                      <th>Quantidade</th>
+                      <th>Total</th>
+                      <th>Requisição</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requisitionStructureRows.length === 0 && (
+                      <tr>
+                        <td colSpan="7" className="estoque-empty">
+                          Informe a O.P para carregar a estrutura automaticamente.
+                        </td>
+                      </tr>
+                    )}
+
+                    {requisitionStructureRows.map((row) => (
+                      <tr key={row.itemCode}>
+                        <td>{row.itemCode || '-'}</td>
+                        <td>{row.description || '-'}</td>
+                        <td>{row.unidade || '-'}</td>
+                        <td>{formatQtyByUnit(row.availableStock, row.unidade)}</td>
+                        <td>{formatQtyPerPiece(row.qtyPerPiece)}</td>
+                        <td>{formatQtyByUnit(row.totalRequired, row.unidade)}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min={isUnitUN(row.unidade) ? '1' : '0.001'}
+                            step={isUnitUN(row.unidade) ? '1' : '0.001'}
+                            value={row.manualRaw}
+                            onChange={(e) => handleManualRequisitionChange(row.itemCode, e.target.value)}
+                            placeholder={formatQtyByUnit(row.totalRequired, row.unidade)}
+                            style={{ width: 120 }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="estoque-form-actions">
+                <button className="btn primary" type="submit">Requisitar</button>
+              </div>
+            </form>
+          )}
+
+          {readOnly && (
+            <div className="estoque-alert">Visualização habilitada. Lançamentos de requisição estão bloqueados para este perfil.</div>
+          )}
+
+          {requisitionError && <div className="estoque-alert">{requisitionError}</div>}
+          {requisitionInfo && <div className="estoque-alert">{requisitionInfo}</div>}
+
+          <div className="estoque-table-wrap">
+            <table className="estoque-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>O.P</th>
+                  <th>Cod Item</th>
+                  <th>Quantidade</th>
+                  <th>Notas consumidas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requisitionRows.length === 0 && (
+                  <tr>
+                    <td colSpan="5" className="estoque-empty">
+                      Nenhuma requisição registrada.
+                    </td>
+                  </tr>
+                )}
+
+                {requisitionRows.map((row) => {
+                  const sourceItem = itemByCode[normalize(row.itemCode)]
+                  const sourceUnit = sourceItem?.unidade || ''
+                  const notesText = (row.allocations || [])
+                    .map((a) => `${a.invoiceNumber}: ${formatQtyByUnit(a.usedQty, sourceUnit)}`)
+                    .join(' • ')
+
+                  return (
+                    <tr key={row.id}>
+                      <td>{fmtDateTime(row.createdAt) || '-'}</td>
+                      <td>{row.op || '-'}</td>
+                      <td>{row.itemCode || '-'}</td>
+                      <td>{formatQtyByUnit(row.quantity, sourceUnit)}</td>
+                      <td>{notesText || '-'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {stockContext === 'inputs' && tab === 'retorno' && (
+        <div className="estoque-card">
+          <div className="estoque-card-head">
+            <h3>Retorno</h3>
+          </div>
+
+          {!readOnly && (
+            <form className="estoque-form" onSubmit={handleReturnSubmit}>
+              <div className="estoque-form-grid">
+                <label>
+                  O.P
+                  <input
+                    name="op"
+                    value={returnForm.op}
+                    onChange={handleReturnFieldChange}
+                    placeholder="Ex.: OP-24010"
+                  />
+                </label>
+
+                <label>
+                  Item
+                  <input
+                    name="itemCode"
+                    value={returnForm.itemCode}
+                    onChange={handleReturnFieldChange}
+                    list="retorno-codes"
+                    placeholder="Ex.: 40123"
+                  />
+                  <datalist id="retorno-codes">
+                    {purchasableItems.map((item) => {
+                      const code = normalize(item?.code)
+                      if (!code) return null
+                      return <option key={code} value={code} />
+                    })}
+                  </datalist>
+                </label>
+
+                <label>
+                  Descrição Item
+                  <input
+                    name="itemDescription"
+                    value={returnForm.itemDescription}
+                    onChange={handleReturnFieldChange}
+                    placeholder="Descrição do item"
+                  />
+                </label>
+
+                <label>
+                  Quantidade retornada
+                  <input
+                    name="quantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={returnForm.quantity}
+                    onChange={handleReturnFieldChange}
+                    placeholder="Ex.: 3.5"
+                  />
+                </label>
+              </div>
+
+              <div className="estoque-form-actions">
+                <button className="btn primary" type="submit">Lançar retorno</button>
+              </div>
+            </form>
+          )}
+
+          {readOnly && (
+            <div className="estoque-alert">Visualização habilitada. Lançamentos de retorno estão bloqueados para este perfil.</div>
+          )}
+
+          {returnError && <div className="estoque-alert">{returnError}</div>}
+          {returnInfo && <div className="estoque-alert">{returnInfo}</div>}
+
+          <div className="estoque-table-wrap">
+            <table className="estoque-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>O.P</th>
+                  <th>Item</th>
+                  <th>Descrição Item</th>
+                  <th>Quantidade retornada</th>
+                </tr>
+              </thead>
+              <tbody>
+                {returnRows.length === 0 && (
+                  <tr>
+                    <td colSpan="5" className="estoque-empty">Nenhum retorno registrado.</td>
+                  </tr>
+                )}
+                {returnRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.createdAt ? fmtDateTime(row.createdAt) : '-'}</td>
+                    <td>{row.op || '-'}</td>
+                    <td>{row.itemCode || '-'}</td>
+                    <td>{row.itemDescription || '-'}</td>
+                    <td>{formatQty(row.quantity)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {stockContext === 'inputs' && tab === 'compras' && (
+        <div className="estoque-card">
+          <div className="estoque-card-head">
+            <h3>Compras</h3>
+            {!readOnly && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    if (showPurchaseForm && purchaseEntryMode === 'nf') {
+                      setShowPurchaseForm(false)
+                      setPurchaseError('')
+                      return
+                    }
+                    openPurchaseForm('nf')
+                  }}
+                  type="button"
+                >
+                  {showPurchaseForm && purchaseEntryMode === 'nf' ? 'Fechar entrada' : 'Nova entrada (NF)'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {!readOnly && showPurchaseForm && (
+            <form className="estoque-form" onSubmit={handlePurchaseSubmit}>
+              <div className="estoque-form-grid">
+                <label>
+                  Data
+                  <input
+                    name="date"
+                    type="date"
+                    value={purchaseForm.date}
+                    onChange={handlePurchaseFieldChange}
+                  />
+                </label>
+
+                <label>
+                  Nota Fiscal
+                  <input
+                    name="invoiceNumber"
+                    value={purchaseForm.invoiceNumber}
+                    onChange={handlePurchaseFieldChange}
+                    placeholder={purchaseEntryMode === 'manual' ? MANUAL_PURCHASE_INVOICE : 'Ex.: 000123'}
+                    readOnly={purchaseEntryMode === 'manual'}
+                  />
+                </label>
+
+                <label>
+                  Cod Item
+                  <input
+                    name="itemCode"
+                    value={purchaseForm.itemCode}
+                    onChange={handlePurchaseFieldChange}
+                    placeholder="Ex.: 40123"
+                    list="compras-codes"
+                  />
+                  <datalist id="compras-codes">
+                    {purchasableItems.map((item) => {
+                      const code = normalize(item?.code)
+                      if (!code) return null
+                      return <option key={code} value={code} />
+                    })}
+                  </datalist>
+                </label>
+
+                <label>
+                  Produto
+                  <input
+                    name="product"
+                    value={purchaseForm.product}
+                    onChange={handlePurchaseFieldChange}
+                    placeholder="Descrição do item"
+                  />
+                </label>
+
+                <label>
+                  Cliente
+                  <input
+                    name="client"
+                    value={purchaseForm.client}
+                    onChange={handlePurchaseFieldChange}
+                    placeholder="Cliente"
+                  />
+                </label>
+
+                <label>
+                  Quantidade
+                  <input
+                    name="quantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={purchaseForm.quantity}
+                    onChange={handlePurchaseFieldChange}
+                    placeholder="Ex.: 15"
+                  />
+                </label>
+
+                <label>
+                  Valor unitário
+                  <input
+                    name="unitValue"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={purchaseForm.unitValue}
+                    onChange={handlePurchaseFieldChange}
+                    placeholder="Ex.: 9.80"
+                  />
+                </label>
+              </div>
+
+              <div className="estoque-form-actions" style={{ gap: 8 }}>
+                <button
+                  className="btn ghost"
+                  type="button"
+                  onClick={() => {
+                    resetPurchaseForm()
+                    setShowPurchaseForm(false)
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button className="btn primary" type="submit">Dar entrada</button>
+              </div>
+            </form>
+          )}
+
+          {readOnly && (
+            <div className="estoque-alert">Visualização habilitada. Lançamentos de compra estão bloqueados para este perfil.</div>
+          )}
+
+          {purchaseError && <div className="estoque-alert">{purchaseError}</div>}
+
+          <div className="estoque-table-wrap">
+            <table className="estoque-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Nota Fiscal</th>
+                  <th>Cod Item</th>
+                  <th>Produto</th>
+                  <th>Cliente</th>
+                  <th>Quantidade</th>
+                  <th>Valor unitário</th>
+                  <th>Saldo</th>
+                  <th>Entregue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchaseRows.length === 0 && (
+                  <tr>
+                    <td colSpan="9" className="estoque-empty">
+                      Nenhuma compra registrada.
+                    </td>
+                  </tr>
+                )}
+
+                {purchaseRows.map((row) => {
+                  const quantityNum = Number(row?.quantity)
+                  const balanceNum = Number(row?.balance)
+                  const usedQty = Number.isFinite(quantityNum) && Number.isFinite(balanceNum)
+                    ? Math.max(0, quantityNum - balanceNum)
+                    : null
+                  const hasUsage = Number(usedQty) > 0
+                  const hasHistory = purchaseHistoryIds.has(normalize(row?.id))
+                  const itemImageUrl = normalize(itemByCode[normalize(row?.itemCode)]?.image_url)
+
+                  return (
+                    <tr key={row.id}>
+                      <td>{row.date ? new Date(row.date).toLocaleDateString('pt-BR') : '-'}</td>
+                      <td>{row.invoiceNumber || '-'}</td>
+                      <td>{row.itemCode || '-'}</td>
+                      <td>
+                        <ProductCellWithHoverImage
+                          itemCode={row.itemCode}
+                          product={row.product}
+                          imageUrl={itemImageUrl}
+                          enablePreview={enableProductImagePreview}
+                        />
+                      </td>
+                      <td>{row.client || '-'}</td>
+                      <td>{formatQty(row.quantity)}</td>
+                      <td>R$ {formatMoney(row.unitValue)}</td>
+                      <td>{formatQty(row.balance)}</td>
+                      <td>
+                        {hasHistory || hasUsage ? (
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            onClick={() => openUsageModal(row)}
+                            style={{ padding: '4px 8px' }}
+                          >
+                            {formatQty(usedQty)}
+                          </button>
+                        ) : (
+                          formatQty(usedQty)
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <Modal
+        open={manualInventoryModalOpen}
+        onClose={closeManualInventoryModal}
+        title="Lançamento manual de inventário"
+      >
+        <div className="estoque-form" style={{ marginBottom: 0 }}>
+          <div className="estoque-form-grid" style={{ gridTemplateColumns: '220px 1fr' }}>
+            <label>
+              Data
+              <input
+                type="date"
+                value={manualInventoryDate}
+                onChange={(e) => setManualInventoryDate(e.target.value)}
+              />
+            </label>
+
+            <label>
+              Nota Fiscal
+              <input value={MANUAL_PURCHASE_INVOICE} readOnly />
+            </label>
+          </div>
+
+          {manualInventoryError && <div className="estoque-alert">{manualInventoryError}</div>}
+
+          <div className="estoque-table-wrap">
+            <table className="estoque-table">
+              <thead>
+                <tr>
+                  <th>Cod Item</th>
+                  <th>Produto</th>
+                  <th>Cliente</th>
+                  <th>Unidade</th>
+                  <th>Estoque atual</th>
+                  <th>Quantidade (lançar)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchasableItems.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="estoque-empty">Nenhum insumo disponível para lançamento manual.</td>
+                  </tr>
+                )}
+                {purchasableItems.map((item) => {
+                  const code = normalize(item?.code)
+                  const unit = normalize(item?.unidade)
+                  const currentStock = Number(purchaseBalanceByCode[code] || 0)
+                  return (
+                    <tr key={item.id || code}>
+                      <td>{code || '-'}</td>
+                      <td>{item?.description || '-'}</td>
+                      <td>{item?.cliente || item?.client || '-'}</td>
+                      <td>{unit || '-'}</td>
+                      <td>{formatQtyByUnit(currentStock, unit)}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min={isUnitUN(unit) ? '1' : '0.001'}
+                          step={isUnitUN(unit) ? '1' : '0.001'}
+                          value={manualInventoryQtyByCode[code] ?? ''}
+                          onChange={(e) => handleManualInventoryQtyChange(code, e.target.value)}
+                          placeholder="0"
+                          style={{ width: 140 }}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="estoque-form-actions" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={closeManualInventoryModal} disabled={manualInventorySaving}>
+              Cancelar
+            </button>
+            <button className="btn primary" type="button" onClick={handleManualInventorySubmit} disabled={manualInventorySaving}>
+              {manualInventorySaving ? 'Salvando…' : 'Salvar todos'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={usageModal.open}
+        onClose={() => setUsageModal({ open: false, purchase: null, rows: [] })}
+        title={usageModal?.purchase ? `Material utilizado em • NF ${usageModal.purchase.invoiceNumber}` : 'Material utilizado em'}
+      >
+        <div className="estoque-table-wrap">
+          <table className="estoque-table">
+            <thead>
+              <tr>
+                <th>Data Requisição</th>
+                <th>O.P</th>
+                <th>Cliente</th>
+                <th>Descrição</th>
+                <th>Cor</th>
+                <th>Movimento</th>
+                <th>Quantidade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usageModal.rows.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="estoque-empty">Nenhum consumo/retorno registrado para esta nota.</td>
+                </tr>
+              )}
+              {usageModal.rows.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.requisitionDate ? fmtDateTime(row.requisitionDate) : '-'}</td>
+                  <td>{row.op || '-'}</td>
+                  <td>{row.client || '-'}</td>
+                  <td>{row.productDescription || '-'}</td>
+                  <td>{row.productColor || '-'}</td>
+                  <td>{row.movementType === 'retorno' ? 'Retorno' : 'Utilização'}</td>
+                  <td>{formatQty(row.qty)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
+      <Modal
+        open={finishedScanConfirm.open}
+        onClose={closeFinishedScanConfirm}
+        title="Caixa sem padrão definido"
+        closeOnBackdrop={!finishedScanSubmitting}
+      >
+        <div className="estoque-form" style={{ marginBottom: 0, minWidth: 320 }}>
+          <div>
+            A O.S {normalize(finishedScanConfirm?.order?.code) || '-'} não possui padrão de peças por caixa definido.
+            Confirme a bipagem da caixa {Number.isFinite(finishedScanConfirm?.boxNumber) ? String(finishedScanConfirm.boxNumber).padStart(3, '0') : '-'} e informe a quantidade de peças.
+          </div>
+
+          <label>
+            Peças nesta caixa
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={finishedScanConfirm.manualQty}
+              onChange={(e) => setFinishedScanConfirm((prev) => ({ ...prev, manualQty: e.target.value, error: '' }))}
+              placeholder="Ex.: 120"
+            />
+          </label>
+
+          {finishedScanConfirm.error ? <div className="estoque-alert">{finishedScanConfirm.error}</div> : null}
+
+          <div className="estoque-form-actions" style={{ gap: 8 }}>
+            <button className="btn ghost" type="button" onClick={closeFinishedScanConfirm} disabled={finishedScanSubmitting}>
+              Cancelar
+            </button>
+            <button className="btn primary" type="button" onClick={handleConfirmFinishedScanQty} disabled={finishedScanSubmitting}>
+              {finishedScanSubmitting ? 'Confirmando…' : 'Confirmar bipagem'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}

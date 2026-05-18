@@ -1,0 +1,23 @@
+{
+  "name": "ARGOS - Sistema de Controle de Producao Industrial",
+  "short_name": "ARGOS",
+  "description": "Sistema de controle de producao industrial para monitoramento de maquinas e gestao operacional.",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

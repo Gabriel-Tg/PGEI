@@ -1,0 +1,112 @@
+// src/abas/Login.jsx
+import { useEffect, useState } from 'react'
+import { supabase } from '../lib/supabaseClient.js'
+
+export default function Login({
+  onAuthenticated,
+  authenticatedTitle = 'Você está autenticado',
+  authenticatedDescription,
+  showAdminShortcut = true,
+  allowContinueWhenAuthenticated = true,
+}) {
+  const isMissingSessionError = (err) => String(err?.message || '').toLowerCase().includes('auth session missing')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!active) return
+        if (error) {
+          if (!isMissingSessionError(error)) {
+            setError(error.message)
+          } else {
+            setError(null)
+          }
+          setUser(null)
+          return
+        }
+        setUser(data?.user ?? null)
+      } catch {
+        if (!active) return
+        setError('Falha de conexão com o Supabase. Verifique a URL/chave do projeto no .env/.env.local e sua internet.')
+        setUser(null)
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  async function signIn(e) {
+    e.preventDefault()
+    setError(null)
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) { setError(error.message); return }
+      setUser(data.user)
+      if (typeof onAuthenticated === 'function' && data?.user) {
+        onAuthenticated(data.user)
+      }
+    } catch {
+      setError('Falha de conexão com o Supabase. Verifique a URL/chave do projeto no .env/.env.local e sua internet.')
+    }
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    setUser(null)
+  }
+
+  if (loading) return <div style={{ padding: 24 }}>Verificando sessão…</div>
+
+  if (user) {
+    return (
+      <div style={{ padding: 24, display: 'grid', gap: 12, maxWidth: 420 }}>
+        <h2 style={{ margin: 0 }}>{authenticatedTitle}</h2>
+        {authenticatedDescription ? <div>{authenticatedDescription}</div> : null}
+        <div><b>E-mail:</b> {user.email}</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {showAdminShortcut ? (
+            <button className="btn primary" onClick={() => { location.href = '/admin/itens' }}>
+              Ir para Cadastro de Itens
+            </button>
+          ) : allowContinueWhenAuthenticated ? (
+            <button className="btn primary" onClick={() => { if (typeof onAuthenticated === 'function') onAuthenticated(user) }}>
+              Continuar
+            </button>
+          ) : null}
+          <button className="btn ghost" onClick={signOut}>Sair</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: 24, display: 'grid', gap: 12, maxWidth: 420 }}>
+      <h2 style={{ margin: 0 }}>Entrar</h2>
+      {error && <div style={{ background: '#ffecec', color: '#a80000', padding: 10, borderRadius: 10 }}>{error}</div>}
+      <form onSubmit={signIn} style={{ display: 'grid', gap: 10 }}>
+        <label style={{ display: 'grid', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>E-mail</span>
+          <input className="input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com" required />
+        </label>
+        <label style={{ display: 'grid', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>Senha</span>
+          <input className="input" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" required />
+        </label>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn primary" type="submit">Entrar</button>
+        </div>
+      </form>
+      <div style={{ fontSize: 12, opacity: 0.8 }}>
+        Precisa de acesso? Cadastre o e-mail via solicitação WhatsApp.
+      </div>
+    </div>
+  )
+}
