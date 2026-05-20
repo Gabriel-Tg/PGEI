@@ -9,7 +9,6 @@ import ClientsTable from './components/ClientsTable'
 import MachinesSection from './components/MachinesSection'
 
 const ADMIN_LOGIN = 'gabrielalvesdesiqueira683@gmail.com'
-const ADMIN_PASSWORD = 'gabrielalvesdesiqueira683@gmail.com'
 
 const MENU_ITEMS = [
   { key: 'dashboard', label: 'Dashboard geral', description: 'Visao de operacao e clientes' },
@@ -24,32 +23,66 @@ export default function AdminPanel() {
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState('')
   const [credentials, setCredentials] = useState({ login: '', password: '' })
+  const [adminEmail, setAdminEmail] = useState('')
   const [authError, setAuthError] = useState('')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [showClientModal, setShowClientModal] = useState(false)
   const [showMachineModal, setShowMachineModal] = useState(false)
   const [editingClientId, setEditingClientId] = useState(null)
   const [editingMachineId, setEditingMachineId] = useState(null)
-  const [clientForm, setClientForm] = useState({ name: '', subdomain: '', active: true, is_demo: false })
-  const [machineForm, setMachineForm] = useState({ client_id: '', machine_code: '', machine_name: '', route_slug: '', sector: '', active: true })
+  const [clientForm, setClientForm] = useState({
+    name: '',
+    subdomain: '',
+    active: true,
+    is_demo: false,
+    admin_username: 'admin',
+    admin_password: '',
+  })
+  const [machineForm, setMachineForm] = useState({ company_id: '', machine_code: '', machine_name: '', route_slug: '', sector: '', active: true })
+
+  function normalizeEdgeFunctionError(err) {
+    const message = String(err?.message || '')
+    const lower = message.toLowerCase()
+    if (lower.includes('failed to send a request to the edge function')) {
+      return 'Falha de integração: a função create-client-access-user não está publicada no Supabase (ou está inacessível). Faça o deploy da Edge Function e tente novamente.'
+    }
+    if (lower.includes('not found') || lower.includes('404')) {
+      return 'A função create-client-access-user não foi encontrada no Supabase. Publique a Edge Function e tente novamente.'
+    }
+    return message || 'Falha ao criar usuário admin inicial do cliente.'
+  }
 
   function handleAuthInput(event) {
     const { name, value } = event.target
     setCredentials((prev) => ({ ...prev, [name]: value }))
   }
 
-  function handleAuthenticate(event) {
+  async function handleAuthenticate(event) {
     event.preventDefault()
     const login = String(credentials.login || '').trim().toLowerCase()
     const password = String(credentials.password || '').trim()
 
-    if (login === ADMIN_LOGIN && password === ADMIN_PASSWORD) {
-      setIsAuthenticated(true)
-      setAuthError('')
+    if (login !== ADMIN_LOGIN) {
+      setAuthError('Acesso permitido somente para o e-mail administrador principal.')
       return
     }
 
-    setAuthError('Credenciais invalidas. Verifique login e senha.')
+    const { data, error } = await supabase.auth.signInWithPassword({ email: login, password })
+    if (error) {
+      setAuthError(`Falha ao autenticar no Supabase: ${error.message}. Use a senha definida no Supabase para este e-mail.`)
+      return
+    }
+
+    const sessionEmail = String(data?.user?.email || login).trim().toLowerCase()
+    if (sessionEmail !== ADMIN_LOGIN) {
+      await supabase.auth.signOut()
+      setAuthError('Sessão autenticada sem permissão para o painel administrativo.')
+      return
+    }
+
+    setAdminEmail(sessionEmail)
+    setIsAuthenticated(true)
+    setAuthError('')
   }
 
   async function loadData() {
@@ -57,8 +90,8 @@ export default function AdminPanel() {
     setDataError('')
     try {
       const [{ data: clientsData, error: clientsErr }, { data: machinesData, error: machinesErr }] = await Promise.all([
-        supabase.from('clients').select('id, name, slug, subdomain, active, is_demo, created_at').order('created_at', { ascending: false }),
-        supabase.from('machines').select('id, client_id, machine_code, machine_name, route_slug, sector, active, created_at').order('created_at', { ascending: false }),
+        supabase.from('companies').select('id, name, slug, subdomain, active, is_demo, created_at').order('created_at', { ascending: false }),
+        supabase.from('machines').select('id, company_id, machine_code, machine_name, route_slug, sector, active, created_at').order('created_at', { ascending: false }),
       ])
 
       if (clientsErr) throw clientsErr
@@ -68,7 +101,7 @@ export default function AdminPanel() {
       const machineList = Array.isArray(machinesData) ? machinesData : []
 
       const countByClient = machineList.reduce((acc, row) => {
-        const key = String(row.client_id || '')
+        const key = String(row.company_id || '')
         if (!key) return acc
         acc[key] = (acc[key] || 0) + 1
         return acc
@@ -80,13 +113,33 @@ export default function AdminPanel() {
       }, {})
 
       setClients(clientList.map((item) => ({ ...item, machine_count: countByClient[String(item.id)] || 0 })))
-      setMachines(machineList.map((item) => ({ ...item, client_name: nameByClient[String(item.client_id)] || '-' })))
+      setMachines(machineList.map((item) => ({ ...item, client_name: nameByClient[String(item.company_id)] || '-' })))
     } catch (err) {
       setDataError(err?.message || 'Falha ao carregar dados do painel.')
     } finally {
       setLoadingData(false)
     }
   }
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      const { data } = await supabase.auth.getUser()
+      const email = String(data?.user?.email || '').trim().toLowerCase()
+      if (!active) return
+
+      if (email === ADMIN_LOGIN) {
+        setAdminEmail(email)
+        setIsAuthenticated(true)
+      } else {
+        setIsAuthenticated(false)
+        if (email) {
+          await supabase.auth.signOut()
+        }
+      }
+    })()
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -118,16 +171,43 @@ export default function AdminPanel() {
       .replace(/^-+|-+$/g, '')
   }
 
+  function normalizeSubdomainInput(value) {
+    const raw = String(value || '').trim().toLowerCase()
+    if (!raw) return ''
+
+    const clean = raw
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/^\.+/, '')
+
+    const firstLabel = clean.split('.')[0] || ''
+    return normalizeSlug(firstLabel)
+  }
+
+  function normalizeUsernameInput(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]/g, '')
+  }
+
   function openClientModal() {
     setEditingClientId(null)
-    setClientForm({ name: '', subdomain: '', active: true, is_demo: false })
+    setClientForm({
+      name: '',
+      subdomain: '',
+      active: true,
+      is_demo: false,
+      admin_username: 'admin',
+      admin_password: '',
+    })
     setShowClientModal(true)
   }
 
   function openMachineModal(client) {
     setEditingMachineId(null)
     setMachineForm({
-      client_id: client?.id || '',
+      company_id: client?.id || '',
       machine_code: '',
       machine_name: '',
       route_slug: '',
@@ -144,6 +224,8 @@ export default function AdminPanel() {
       subdomain: client.subdomain || '',
       active: !!client.active,
       is_demo: !!client.is_demo,
+      admin_username: '',
+      admin_password: '',
     })
     setShowClientModal(true)
   }
@@ -151,7 +233,7 @@ export default function AdminPanel() {
   function openEditMachineModal(machine) {
     setEditingMachineId(machine.id)
     setMachineForm({
-      client_id: machine.client_id || '',
+      company_id: machine.company_id || '',
       machine_code: machine.machine_code || '',
       machine_name: machine.machine_name || '',
       route_slug: machine.route_slug || '',
@@ -165,7 +247,7 @@ export default function AdminPanel() {
     const current = clients.find((item) => item.id === clientId)
     if (!current) return
     const next = !current.active
-    const { error } = await supabase.from('clients').update({ active: next }).eq('id', clientId)
+    const { error } = await supabase.from('companies').update({ active: next }).eq('id', clientId)
     if (error) {
       alert(error.message || 'Falha ao alterar status do cliente.')
       return
@@ -176,7 +258,7 @@ export default function AdminPanel() {
   async function handleCreateClient(event) {
     event.preventDefault()
     const name = String(clientForm.name || '').trim()
-    const subdomain = normalizeSlug(clientForm.subdomain)
+    const subdomain = normalizeSubdomainInput(clientForm.subdomain) || normalizeSlug(name)
     const slug = subdomain
 
     if (!name || !subdomain) {
@@ -194,18 +276,51 @@ export default function AdminPanel() {
 
     let clientId = editingClientId
     if (editingClientId) {
-      const { error } = await supabase.from('clients').update(payload).eq('id', editingClientId)
+      const { error } = await supabase.from('companies').update(payload).eq('id', editingClientId)
       if (error) {
         alert(error.message || 'Falha ao atualizar cliente.')
         return
       }
     } else {
-      const { data, error } = await supabase.from('clients').insert([payload]).select('id').maybeSingle()
+      const adminUsername = normalizeUsernameInput(clientForm.admin_username)
+      const adminPassword = String(clientForm.admin_password || '').trim()
+      if (!adminUsername) {
+        alert('Informe o usuário admin inicial da empresa.')
+        return
+      }
+      if (!adminPassword) {
+        alert('Informe a senha do admin inicial da empresa.')
+        return
+      }
+
+      const { data, error } = await supabase.from('companies').insert([payload]).select('id').maybeSingle()
       if (error) {
         alert(error.message || 'Falha ao cadastrar cliente.')
         return
       }
       clientId = data?.id || null
+
+      if (!clientId) {
+        alert('Cliente criado sem identificador. Tente novamente.')
+        return
+      }
+
+      const { data: userData, error: userError } = await supabase.functions.invoke('create-client-access-user', {
+        body: {
+          clientId,
+          username: adminUsername,
+          fullName: `${name} - Admin`,
+          password: adminPassword,
+          role: 'admin',
+        },
+      })
+
+      if (userError || userData?.error) {
+        await supabase.from('companies').delete().eq('id', clientId)
+        const edgeMessage = userError ? normalizeEdgeFunctionError(userError) : String(userData?.error || '')
+        alert(edgeMessage || 'Falha ao criar usuário admin inicial do cliente.')
+        return
+      }
     }
 
     setShowClientModal(false)
@@ -218,7 +333,7 @@ export default function AdminPanel() {
     event.preventDefault()
 
     const payload = {
-      client_id: machineForm.client_id,
+      company_id: machineForm.company_id,
       machine_code: String(machineForm.machine_code || '').trim().toUpperCase(),
       machine_name: String(machineForm.machine_name || '').trim() || null,
       route_slug: normalizeSlug(machineForm.route_slug || machineForm.machine_code),
@@ -226,7 +341,7 @@ export default function AdminPanel() {
       active: !!machineForm.active,
     }
 
-    if (!payload.client_id || !payload.machine_code) {
+    if (!payload.company_id || !payload.machine_code) {
       alert('Selecione um cliente e informe o código da máquina.')
       return
     }
@@ -268,14 +383,14 @@ export default function AdminPanel() {
       'item_structures',
       'estoque_purchases',
       'orders',
-      'client_users',
+      'company_users',
       'machines',
       'items',
       'item',
     ]
 
     async function deleteByClientId(table) {
-      const { error } = await supabase.from(table).delete().eq('client_id', clientId)
+      const { error } = await supabase.from(table).delete().eq('company_id', clientId)
       if (!error) return null
 
       const msg = String(error.message || '').toLowerCase()
@@ -299,7 +414,7 @@ export default function AdminPanel() {
       }
     }
 
-    const { error: deleteClientErr } = await supabase.from('clients').delete().eq('id', clientId)
+    const { error: deleteClientErr } = await supabase.from('companies').delete().eq('id', clientId)
     if (deleteClientErr) {
       alert(deleteClientErr.message || 'Falha ao excluir cliente.')
       return
@@ -352,11 +467,11 @@ export default function AdminPanel() {
         <section className="admin-auth-card" aria-label="Acesso administrativo">
           <p className="admin-eyebrow">Painel restrito</p>
           <h2>Acesso ao ARGOS Admin</h2>
-          <p className="admin-auth-subtitle">Entre com login e senha autorizados para painel.techargos.com.br.</p>
+          <p className="admin-auth-subtitle">Entre com o e-mail administrador principal e a senha do Supabase.</p>
 
           <form className="admin-auth-form" onSubmit={handleAuthenticate}>
             <label>
-              Login
+              E-mail
               <input
                 name="login"
                 type="email"
@@ -396,7 +511,7 @@ export default function AdminPanel() {
         sidebar={<Sidebar items={MENU_ITEMS} activeSection={activeSection} onChangeSection={setActiveSection} />}
         topbar={
           <Topbar
-            adminName={credentials.login || 'Equipe ARGOS'}
+            adminName={adminEmail || credentials.login || 'Equipe ARGOS'}
             hostLabel={window.location.hostname}
             quickStats={{ activeUsersNow: clients.length, openAlerts: 0 }}
             onOpenNewClient={openClientModal}
@@ -442,6 +557,31 @@ export default function AdminPanel() {
                   </select>
                 </label>
 
+                {!editingClientId ? (
+                  <>
+                    <label>
+                      Usuário Admin inicial
+                      <input
+                        value={clientForm.admin_username}
+                        onChange={(e) => setClientForm((prev) => ({ ...prev, admin_username: e.target.value }))}
+                        placeholder="admin"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      Senha Admin inicial
+                      <input
+                        type="password"
+                        value={clientForm.admin_password}
+                        onChange={(e) => setClientForm((prev) => ({ ...prev, admin_password: e.target.value }))}
+                        placeholder="Minimo 8 caracteres"
+                        required
+                      />
+                    </label>
+                  </>
+                ) : null}
+
                 <div className="full-width admin-form-actions">
                   <button type="button" className="btn-secondary" onClick={() => setShowClientModal(false)}>
                     Cancelar
@@ -463,8 +603,8 @@ export default function AdminPanel() {
                 <label>
                   Cliente
                   <select
-                    value={machineForm.client_id}
-                    onChange={(e) => setMachineForm((prev) => ({ ...prev, client_id: e.target.value }))}
+                    value={machineForm.company_id}
+                    onChange={(e) => setMachineForm((prev) => ({ ...prev, company_id: e.target.value }))}
                     required
                   >
                     <option value="">Selecione...</option>
@@ -538,3 +678,4 @@ export default function AdminPanel() {
     </div>
   )
 }
+

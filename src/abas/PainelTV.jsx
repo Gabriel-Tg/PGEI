@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
-import { MAQUINAS } from "../lib/constants";
+import { MAQUINAS } from "../domain/constants";
 import { statusClass } from "../lib/utils";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/PainelTV.css";

@@ -4,22 +4,20 @@ import { supabase } from '../lib/supabaseClient'
 import {
   ADMIN_EMAILS,
   PRODUCAO_EMAILS,
-} from '../lib/constants'
+} from '../domain/constants'
+import {
+  PERMISSIONS,
+  USER_ROLES,
+  normalizeUserRole,
+  permissionSetForRole,
+} from '../domain/rbac'
 
-export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = false } = {}){
+export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = false } = {}){
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [tenantAccess, setTenantAccess] = useState(false)
   const [tenantRole, setTenantRole] = useState(null)
   const [tenantAccessChecked, setTenantAccessChecked] = useState(false)
-
-  function normalizeRole(role) {
-    const normalized = String(role || '').trim().toLowerCase()
-    if (normalized === 'pcp') return 'pcp'
-    if (normalized === 'fabrica' || normalized === 'operator') return 'fabrica'
-    if (normalized === 'gestao' || normalized === 'manager' || normalized === 'admin') return 'gestao'
-    return null
-  }
 
   useEffect(() => {
     let active = true
@@ -78,7 +76,7 @@ export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = fal
 
       if (isAdmin) {
         setTenantAccess(true)
-        setTenantRole('gestao')
+        setTenantRole(USER_ROLES.ADMIN)
         setTenantAccessChecked(true)
         return
       }
@@ -86,19 +84,20 @@ export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = fal
       if (isDemoTenant) {
         const email = String(authUser?.email || '').trim().toLowerCase()
         setTenantAccess(!!email)
-        setTenantRole(email ? 'gestao' : null)
+        setTenantRole(email ? USER_ROLES.MANAGER : null)
         setTenantAccessChecked(true)
         return
       }
 
-      if (!tenantClientId) {
+      if (!tenantCompanyId) {
         setTenantAccess(isProducao)
-        setTenantRole(isProducao ? 'fabrica' : null)
+        setTenantRole(isProducao ? USER_ROLES.OPERATOR : null)
         setTenantAccessChecked(true)
         return
       }
 
       const email = String(authUser?.email || '').trim().toLowerCase()
+      const userId = String(authUser?.id || '').trim()
       if (!email) {
         setTenantAccess(false)
         setTenantRole(null)
@@ -106,14 +105,19 @@ export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = fal
         return
       }
 
-      const { data, error } = await supabase
-        .from('client_users')
+      let q = supabase
+        .from('company_users')
         .select('id, role')
-        .eq('client_id', tenantClientId)
+        .eq('company_id', tenantCompanyId)
         .eq('active', true)
-        .ilike('email', email)
-        .limit(1)
-        .maybeSingle()
+
+      if (userId) {
+        q = q.or(`user_id.eq.${userId},email.ilike.${email}`)
+      } else {
+        q = q.ilike('email', email)
+      }
+
+      const { data, error } = await q.limit(1).maybeSingle()
 
       if (cancelled) return
 
@@ -126,13 +130,13 @@ export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = fal
       }
 
       setTenantAccess(!!data?.id)
-      setTenantRole(data?.id ? normalizeRole(data?.role) : null)
+      setTenantRole(data?.id ? normalizeUserRole(data?.role) : null)
       setTenantAccessChecked(true)
     }
 
     checkTenantAccess()
     return () => { cancelled = true }
-  }, [authChecked, authUser, isAdmin, isProducao, isDemoTenant, tenantClientId])
+  }, [authChecked, authUser, isAdmin, isProducao, isDemoTenant, tenantCompanyId])
 
   const hasAccess = useMemo(() => {
     if (isAdmin) return true
@@ -140,25 +144,57 @@ export default function useAuthAdmin(tenantClientId = null, { isDemoTenant = fal
   }, [isAdmin, tenantAccess])
 
   const accessLevel = useMemo(() => {
-    if (isAdmin) return 'gestao'
+    if (isAdmin) return USER_ROLES.ADMIN
     return tenantRole
   }, [isAdmin, tenantRole])
 
   const permissions = useMemo(() => {
-    const isGestao = accessLevel === 'gestao'
-    const isPcp = accessLevel === 'pcp'
-    const isFabrica = accessLevel === 'fabrica'
+    const role = normalizeUserRole(accessLevel)
+    const set = permissionSetForRole(role)
+    const has = (perm) => set.has(perm)
+    const isTv = role === USER_ROLES.TV
+    const isOperator = role === USER_ROLES.OPERATOR
+    const isSupervisor = role === USER_ROLES.SUPERVISOR
+    const isManager = role === USER_ROLES.MANAGER
+    const roleIsAdmin = role === USER_ROLES.ADMIN
     return {
-      isGestao,
-      isPcp,
-      isFabrica,
-      canAccessGestao: isGestao,
-      canCreateOrder: isGestao || isPcp,
-      canEditQueue: isGestao || isPcp,
-      canEditOrder: isGestao || isPcp,
-      canViewRastreio: isGestao || isPcp,
+      role,
+      isTv,
+      isOperator,
+      isSupervisor,
+      isManager,
+      isAdmin: roleIsAdmin,
+      hasPermission: has,
+      canViewDashboard: has(PERMISSIONS.VIEW_DASHBOARD),
+      canViewTvPanel: has(PERMISSIONS.VIEW_TV_PANEL),
+      canViewReports: has(PERMISSIONS.VIEW_REPORTS),
+      canRegisterProduction: has(PERMISSIONS.REGISTER_PRODUCTION),
+      canMakeApontamentos: has(PERMISSIONS.MAKE_APONTAMENTOS),
+      canReportStops: has(PERMISSIONS.REPORT_STOPS),
+      canApproveOperational: has(PERMISSIONS.APPROVE_OPERATIONAL),
+      canManageOperational: has(PERMISSIONS.MANAGE_OPERATIONAL),
+      canCreateOrder: has(PERMISSIONS.CREATE_ORDER),
+      canEditQueue: has(PERMISSIONS.REORDER_QUEUE),
+      canEditOrder: has(PERMISSIONS.EDIT_ORDER),
+      canViewRastreio: has(PERMISSIONS.VIEW_RASTREIO),
+      canAccessGestao: has(PERMISSIONS.ACCESS_GESTAO),
+      canManageMachines: has(PERMISSIONS.MANAGE_MACHINES),
+      canManageUsers: has(PERMISSIONS.MANAGE_USERS),
+      canManageCompanySettings: has(PERMISSIONS.MANAGE_COMPANY_SETTINGS),
+      canManagePermissions: has(PERMISSIONS.MANAGE_PERMISSIONS),
+      canManageCatalog: has(PERMISSIONS.MANAGE_CATALOG),
     }
   }, [accessLevel])
 
-  return { authUser, authChecked, isAdmin, isProducao, hasAccess, tenantAccessChecked, tenantRole: accessLevel, permissions }
+  return {
+    authUser,
+    authChecked,
+    isAdmin: isAdmin || permissions.isAdmin,
+    isProducao,
+    hasAccess,
+    tenantAccessChecked,
+    tenantRole: accessLevel,
+    permissions,
+  }
 }
+

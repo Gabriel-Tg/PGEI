@@ -10,6 +10,21 @@ function formatDate(iso) {
 }
 
 export default function ClientsTable({ clients, onToggleStatus, onOpenAddMachine, onEditClient, onDeleteClient }) {
+  function resolveTenantLabel(client) {
+    const sub = String(client?.subdomain || '').trim()
+    const slug = String(client?.slug || '').trim()
+    const label = sub || slug || '-'
+    if (label === '-') return '-'
+    return `${label}.techargos.com.br`
+  }
+
+  function resolveLocalhostLabel(client) {
+    const sub = String(client?.subdomain || '').trim()
+    const slug = String(client?.slug || '').trim()
+    const label = sub || slug || ''
+    return label ? `${label}.localhost` : '-'
+  }
+
   return (
     <section className="admin-section-card">
       <div className="admin-section-head">
@@ -36,7 +51,10 @@ export default function ClientsTable({ clients, onToggleStatus, onOpenAddMachine
                   <strong>{client.name}</strong>
                   <small>{client.slug}</small>
                 </td>
-                <td>{client.subdomain}.techargos.com.br</td>
+                <td>
+                  <div>{resolveTenantLabel(client)}</div>
+                  <small>{resolveLocalhostLabel(client)}</small>
+                </td>
                 <td>
                   <span className={`badge ${client.active ? 'active' : 'inactive'}`}>{client.active ? 'Ativa' : 'Inativa'}</span>
                 </td>

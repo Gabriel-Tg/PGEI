@@ -1,46 +1,76 @@
 /* =======================
-  TEMA ARGOS (Light Profissional) + Base
+  TEMA ARGOS (Dark Industrial) + Base
   ======================= */
 
-/* Fonte (pode remover se quiser só system-ui) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Orbitron:wght@500;700&display=swap');
 
-:root{
-  /* Paleta base (extraída da logo ARGOS: azul-marinho + neutros) */
-  --bg:            #EEF3F8;
-  --panel:         #FFFFFF;
-  --card:          #FFFFFF;
-  --card-2:        #F6F9FC;
-  --border:        #D7E2EF;
-  --text:          #0B1A2B;
-  --muted:         #5C7088;
+:root {
+  --bg: #040913;
+  --bg-soft: #091425;
+  --panel: rgba(12, 23, 42, 0.72);
+  --card: rgba(13, 27, 48, 0.86);
+  --card-2: rgba(20, 37, 62, 0.85);
+  --border: rgba(107, 159, 255, 0.28);
+  --border-strong: rgba(43, 222, 255, 0.48);
+  --text: #e9f3ff;
+  --muted: #93a9c8;
 
-  --primary:       #0B1F3B;
-  --primary-700:   #071529;
-  --secondary:     #123A66;
-  --secondary-700: #0E2D4F;
-  --primary-rgb:   11, 31, 59;
-  --secondary-rgb: 18, 58, 102;
+  --primary: #0c5dff;
+  --primary-700: #073bb8;
+  --secondary: #00c8ff;
+  --secondary-700: #0488a9;
+  --accent-green: #38f2a1;
+  --accent-red: #ff5f77;
+  --accent-violet: #8a7bff;
 
-  --green:  #2E7D32;
-  --yellow: #EF6C00;
-  --red:    #C62828;
+  --primary-rgb: 12, 93, 255;
+  --secondary-rgb: 0, 200, 255;
 
-  --shadow: 0 10px 24px rgba(11, 31, 59, .10);
+  --green: #38f2a1;
+  --yellow: #f9bf4f;
+  --red: #ff5f77;
+
+  --shadow: 0 16px 34px rgba(0, 4, 13, 0.48);
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; }
-body{
-  margin:0;
-  background: linear-gradient(180deg, #F4F7FB 0%, var(--bg) 100%);
-  color: var(--text);
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-  font-size: 17px;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
-/* Remover limites do template Vite */
-#root { max-width: none; padding: 0; text-align: initial; }
-.app  { padding: 24px; }
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: Manrope, "Segoe UI", sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(0, 122, 255, 0.2), transparent 34%),
+    radial-gradient(circle at 84% 10%, rgba(56, 242, 161, 0.14), transparent 30%),
+    radial-gradient(circle at 72% 88%, rgba(138, 123, 255, 0.16), transparent 38%),
+    linear-gradient(165deg, #030712 0%, #040d1b 42%, #041226 100%);
+}
+
+#root {
+  max-width: none;
+  padding: 0;
+  text-align: initial;
+}
+
+.app {
+  min-height: 100%;
+  padding: 20px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: Orbitron, Manrope, sans-serif;
+  letter-spacing: 0.02em;
+}

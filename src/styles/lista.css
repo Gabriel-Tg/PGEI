@@ -11,17 +11,17 @@
 }
 .tablehead{
   font-weight: 800;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(86, 157, 238, 0.35);
   padding-bottom: 8px;
   position: sticky;
   top: 0;
-  background: transparent;
+  background: linear-gradient(180deg, rgba(4, 17, 32, 0.96), rgba(4, 17, 32, 0.62));
   z-index: 1;
   letter-spacing:.3px;
   color: var(--text);
 }
 
-.tableline{ padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.tableline{ padding: 8px 0; border-bottom: 1px dashed rgba(85, 150, 226, 0.28); }
 
 /* O wrapper padrão vira rolável quando a linha for larga */
 .grid{ overflow-x: auto; overscroll-behavior-x: contain; }
@@ -40,9 +40,9 @@
   min-width: 54px;
   padding: 6px 12px;
   border-radius: 12px;
-  background: var(--primary);
+  background: linear-gradient(120deg, #0d64ff, #1b93ff);
   color: #fff;
-  border: none;
+  border: 1px solid rgba(127, 197, 255, 0.35);
   font-weight: 800;
   font-size: 16px;
   box-shadow: 0 4px 10px rgba(var(--primary-rgb),.22);
@@ -75,7 +75,7 @@
 /* Scrollbar discreta para fila */
 .fila::-webkit-scrollbar{ height: 6px; }
 .fila::-webkit-scrollbar-thumb{
-  background: rgba(var(--secondary-rgb),.24);
+  background: rgba(var(--secondary-rgb),.38);
   border-radius: 999px;
 }
 

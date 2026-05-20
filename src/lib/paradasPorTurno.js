@@ -82,7 +82,7 @@ function splitIntervalPorTurno(iniMs, fimMs) {
 }
 
 import { toBrazilTime } from './timezone';
-import { MAQUINAS } from './constants';
+import { MAQUINAS } from '../domain/constants';
 
 export function calcularHorasParadasPorTurno(paradas, turnos, filtroStart, filtroEnd) {
   // paradas: array de registros de parada (machine_stops)

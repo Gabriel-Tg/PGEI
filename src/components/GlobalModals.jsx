@@ -1,7 +1,7 @@
 // src/components/GlobalModals.jsx
 import React, { useEffect } from 'react'
 import Modal from '../components/Modal'
-import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
+import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { DateTime } from 'luxon'
 
 function safeDate(val){

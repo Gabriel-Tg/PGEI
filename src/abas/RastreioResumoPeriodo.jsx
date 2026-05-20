@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { DateTime } from 'luxon'
 import Modal from '../components/Modal'
-import { MAQUINAS } from '../lib/constants'
+import { MAQUINAS } from '../domain/constants'
 import {
   ACTIVE_TURNOS,
   SHIFT_ZONE,

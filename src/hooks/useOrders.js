@@ -1,21 +1,22 @@
 // src/hooks/useOrders.js
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { MAQUINAS, MOTIVOS_PARADA } from '../lib/constants'
+import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
+import { mapOrder } from '../domain/entities'
 
 export default function useOrders(clientId = null){
-  const [ordens,setOrdens] = useState([])
-  const [finalizadas, setFinalizadas] = useState([])
-  const [paradas, setParadas] = useState([])
+  const [orders, setOrders] = useState([])
+  const [finalizedOrders, setFinalizedOrders] = useState([])
+  const [stops, setStops] = useState([])
 
-  // map local para guardar session id dos logs de baixa eficiência (key = `order_<order_id>`)
+  // local map to store low efficiency session ids by order key
   const [lowEffSessions, setLowEffSessions] = useState({})
 
-  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query)
+  const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query)
 
   // basic fetchers
-  async function fetchOrdensAbertas(){
+  async function fetchOpenOrders(){
     // NOTE: scanned_count:production_scans(count) -> agrega o count de production_scans por order_id
     const res = await withClient(supabase
       .from('orders')
@@ -30,55 +31,54 @@ export default function useOrders(clientId = null){
     if(!res.error) {
       const normalized = (res.data || []).map(row => {
         const sc = row.scanned_count;
-        if (Array.isArray(sc) && sc.length > 0 && typeof sc[0].count !== 'undefined') {
-          return { ...row, scanned_count: Number(sc[0].count || 0) };
-        }
-        if (sc && typeof sc === 'object' && typeof sc.count !== 'undefined') {
-          return { ...row, scanned_count: Number(sc.count || 0) };
-        }
-        return { ...row, scanned_count: typeof sc === 'number' ? sc : Number(sc || 0) };
+        const scannedCount = Array.isArray(sc)
+          ? Number(sc[0]?.count || 0)
+          : (sc && typeof sc === 'object' && typeof sc.count !== 'undefined')
+            ? Number(sc.count || 0)
+            : (typeof sc === 'number' ? sc : Number(sc || 0));
+        return mapOrder({ ...row, scanned_count: scannedCount })
       });
 
-      setOrdens(normalized)
+      setOrders(normalized)
     }
   }
 
-  async function fetchOrdensFinalizadas(){
+  async function fetchFinalizedOrders(){
     const res = await withClient(supabase.from('orders').select('*')).eq('finalized', true).order('finalized_at',{ascending:false}).limit(500)
-    if(!res.error) setFinalizadas(res.data||[])
+    if(!res.error) setFinalizedOrders((res.data || []).map(mapOrder))
   }
-  async function fetchParadas(){
+  async function fetchStops(){
     const res = await withClient(supabase.from('machine_stops').select('*')).order('started_at',{ascending:false}).limit(1000)
-    if(!res.error) setParadas(res.data||[])
+    if(!res.error) setStops(res.data||[])
   }
 
   useEffect(()=>{ 
-    fetchOrdensAbertas(); fetchOrdensFinalizadas(); fetchParadas()
+    fetchOpenOrders(); fetchFinalizedOrders(); fetchStops()
     const chOrders = supabase.channel('orders-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, (p)=>{
         const r = p.new; if(!r) return;
-        if (clientId && r.client_id !== clientId) return
+        if (clientId && r.company_id !== clientId) return
 
-        setOrdens(prev=>{
+        setOrders(prev=>{
           const i=prev.findIndex(o=>o.id===r.id)
           const preservedScanned = i>=0 ? prev[i].scanned_count : undefined
-          const merged = preservedScanned !== undefined ? { ...r, scanned_count: preservedScanned } : r
+          const merged = mapOrder({ ...r, scanned_count: preservedScanned !== undefined ? preservedScanned : r.scanned_count })
 
           if (r.finalized) { if(i>=0){const cp=[...prev]; cp.splice(i,1); return cp} return prev }
           if (i>=0){ const cp=[...prev]; cp[i]={...cp[i],...merged}; return cp }
           return [...prev, merged]
         })
-        if (r.finalized) setFinalizadas(prev=>{
+        if (r.finalized) setFinalizedOrders(prev=>{
           const i=prev.findIndex(x=>x.id===r.id)
-          if(i>=0){const cp=[...prev]; cp[i]=r; return cp}
-          return [r,...prev]
+          if(i>=0){const cp=[...prev]; cp[i]=mapOrder(r); return cp}
+          return [mapOrder(r),...prev]
         })
       }).subscribe()
     const chStops = supabase.channel('stops-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'machine_stops' }, (p)=>{
         const r = p.new; if(!r) return;
-        if (clientId && r.client_id !== clientId) return
-        setParadas(prev=>{
+        if (clientId && r.company_id !== clientId) return
+        setStops(prev=>{
           const i=prev.findIndex(x=>x.id===r.id)
           if(i>=0){const cp=[...prev]; cp[i]=r; return cp}
           return [r,...prev]
@@ -88,115 +88,115 @@ export default function useOrders(clientId = null){
   },[clientId])
 
   // helpers
-  function patchOrdemLocal(id, patch) { setOrdens(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o)); }
-  function removeOrdemLocal(id) { setOrdens(prev => prev.filter(o => o.id !== id)); }
-  function upsertFinalizadaLocal(row) { setFinalizadas(prev => { const i=prev.findIndex(o=>o.id===row.id); if(i>=0){const cp=[...prev]; cp[i]=row; return cp} return [row,...prev] }) }
+  function patchOrderLocal(id, patch) { setOrders(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o)); }
+  function removeOrderLocal(id) { setOrders(prev => prev.filter(o => o.id !== id)); }
+  function upsertFinalizedLocal(row) { setFinalizedOrders(prev => { const i=prev.findIndex(o=>o.id===row.id); if(i>=0){const cp=[...prev]; cp[i]=row; return cp} return [row,...prev] }) }
 
   // expose derived data
-  const ativosPorMaquina = useMemo(()=>{
+  const activeByMachine = useMemo(()=>{
     const map = Object.fromEntries(MAQUINAS.map(m=>[m,[]]))
-    ordens.forEach(o=>{ if(!o.finalized) map[o.machine_id]?.push(o) })
+    orders.forEach(o=>{ if(!o.finalized) map[o.machine_id]?.push(o) })
     for(const m of MAQUINAS) map[m]=[...map[m]].sort((a,b)=>(a.pos??999)-(b.pos??999))
     return map
-  },[ordens])
+  },[orders])
 
-  const lastFinalizadoPorMaquina = useMemo(()=>{
+  const lastFinalizedByMachine = useMemo(()=>{
     const map = Object.fromEntries(MAQUINAS.map(m=>[m,null]))
-    for(const o of finalizadas){ if(!o.machine_id||!o.finalized_at) continue; const prev = map[o.machine_id] ? new Date(map[o.machine_id]).getTime() : 0; const cur = new Date(o.finalized_at).getTime(); if(cur>prev) map[o.machine_id]=o.finalized_at }
+    for(const o of finalizedOrders){ if(!o.machine_id||!o.finalized_at) continue; const prev = map[o.machine_id] ? new Date(map[o.machine_id]).getTime() : 0; const cur = new Date(o.finalized_at).getTime(); if(cur>prev) map[o.machine_id]=o.finalized_at }
     return map
-  },[finalizadas])
+  },[finalizedOrders])
 
-  const registroGrupos = useMemo(()=>{
+  const orderRecordGroups = useMemo(()=>{
     const byId = new Map(); const push = (o)=>{ if(!o) return; byId.set(o.id,{...o}) }
-    finalizadas.forEach(push); ordens.forEach(o=>{ if(o.started_at) push(o) })
-    const stopsByOrder = paradas.reduce((acc,st)=>{ (acc[st.order_id] ||= []).push(st); return acc },{})
+    finalizedOrders.forEach(push); orders.forEach(o=>{ if(o.started_at) push(o) })
+    const stopsByOrder = stops.reduce((acc,st)=>{ (acc[st.order_id] ||= []).push(st); return acc },{})
     const arr = Array.from(byId.values())
     arr.sort((a,b)=>{
       const ta = new Date(a.finalized_at||a.restarted_at||a.interrupted_at||a.started_at||a.created_at||0).getTime()
       const tb = new Date(b.finalized_at||b.restarted_at||b.interrupted_at||b.started_at||b.created_at||0).getTime()
       return tb-ta
     })
-    return arr.map(o=>({ ordem:o, stops:(stopsByOrder[o.id]||[]).sort((a,b)=>new Date(a.started_at)-new Date(b.started_at)) }))
-  },[finalizadas, ordens, paradas])
+    return arr.map(o=>({ order:o, ordem:o, stops:(stopsByOrder[o.id]||[]).sort((a,b)=>new Date(a.started_at)-new Date(b.started_at)) }))
+  },[finalizedOrders, orders, stops])
 
   // ========================= Helpers/Actions internas =========================
-  async function setStatus(ordem, novoStatus) {
-    const patch = { status: novoStatus, stopped_at: null }
-    if (novoStatus === 'PARADA') patch.stopped_at = new Date().toISOString()
-    const before = { status: ordem.status, stopped_at: ordem.stopped_at }
-    patchOrdemLocal(ordem.id, patch)
-    const res = await supabase.from('orders').update(patch).eq('id', ordem.id).select('*').maybeSingle()
-    if (res.error) { alert('Erro ao alterar status: ' + res.error.message); patchOrdemLocal(ordem.id, before) }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
+  async function setStatus(order, newStatus) {
+    const patch = { status: newStatus, stopped_at: null }
+    if (newStatus === 'PARADA') patch.stopped_at = new Date().toISOString()
+    const before = { status: order.status, stopped_at: order.stopped_at }
+    patchOrderLocal(order.id, patch)
+    const res = await supabase.from('orders').update(patch).eq('id', order.id).select('*').maybeSingle()
+    if (res.error) { alert('Erro ao alterar status: ' + res.error.message); patchOrderLocal(order.id, before) }
+    if (res.data) patchOrderLocal(res.data.id, res.data)
     return res
   }
 
   // ========================= Ações públicas (assinaturas mantidas) =========================
 
-  async function criarOrdem(form, setForm, setTab){
+  async function createOrder(form, setForm, setTab){
     if(!form.code.trim()) return
     const { data: last, error: maxErr } = await withClient(supabase.from('orders').select('pos')).eq('machine_id', form.machine_id).eq('finalized', false).order('pos',{ascending:false}).limit(1).maybeSingle()
     if (maxErr) { alert('Erro ao obter posição: ' + maxErr.message); return; }
     const nextPos = (last?.pos ?? -1) + 1
-    const novo = { client_id: clientId, machine_id: form.machine_id, code: form.code, customer: form.customer, product: form.product, color: form.color, qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes, status: 'AGUARDANDO', pos: nextPos, finalized:false, started_at:null, started_by:null, restarted_at:null, restarted_by:null, interrupted_at:null, interrupted_by:null }
+    const novo = { company_id: clientId, machine_id: form.machine_id, code: form.code, customer: form.customer, product: form.product, color: form.color, qty: form.qty, boxes: form.boxes, standard: form.standard, due_date: form.due_date || null, notes: form.notes, status: 'AGUARDANDO', pos: nextPos, finalized:false, started_at:null, started_by:null, restarted_at:null, restarted_by:null, interrupted_at:null, interrupted_by:null }
     const tempId = `tmp-${crypto.randomUUID()}`
-    setOrdens(prev=>[...prev,{id:tempId, ...novo}])
+    setOrders(prev=>[...prev,{id:tempId, ...novo}])
     const res = await supabase.from('orders').insert([novo]).select('*').maybeSingle()
-    if (res.error) { setOrdens(prev => prev.filter(o => o.id !== tempId)); alert('Erro ao criar ordem: ' + res.error.message); return }
-    if (res.data) setOrdens(prev => prev.map(o => o.id === tempId ? res.data : o))
+    if (res.error) { setOrders(prev => prev.filter(o => o.id !== tempId)); alert('Erro ao criar ordem: ' + res.error.message); return }
+    if (res.data) setOrders(prev => prev.map(o => o.id === tempId ? res.data : o))
     setForm({code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'})
     setTab('painel')
   }
 
-  async function atualizar(ordemParcial){
-    const before = ordens.find(o => o.id === ordemParcial.id)
+  async function updateOrder(orderPartial){
+    const before = orders.find(o => o.id === orderPartial.id)
     if (!before) return
-    if (before.machine_id !== ordemParcial.machine_id) {
-      patchOrdemLocal(ordemParcial.id, { ...before, ...ordemParcial })
-      const { data, error } = await supabase.rpc('orders_move_to_machine', { p_order_id: ordemParcial.id, p_target_machine: ordemParcial.machine_id, p_insert_at: null })
-      if (error) { alert('Erro ao mover ordem de máquina: ' + error.message); patchOrdemLocal(before.id, before); return }
-      if (data && data[0]) patchOrdemLocal(data[0].id, data[0])
+    if (before.machine_id !== orderPartial.machine_id) {
+      patchOrderLocal(orderPartial.id, { ...before, ...orderPartial })
+      const { data, error } = await supabase.rpc('orders_move_to_machine', { p_order_id: orderPartial.id, p_target_machine: orderPartial.machine_id, p_insert_at: null })
+      if (error) { alert('Erro ao mover ordem de máquina: ' + error.message); patchOrderLocal(before.id, before); return }
+      if (data && data[0]) patchOrderLocal(data[0].id, data[0])
       return
     }
 
-    patchOrdemLocal(ordemParcial.id, { ...ordemParcial })
+    patchOrderLocal(orderPartial.id, { ...orderPartial })
     const res = await supabase.from('orders').update({
-      machine_id: ordemParcial.machine_id,
-      code: ordemParcial.code, customer: ordemParcial.customer, product: ordemParcial.product, color: ordemParcial.color,
-      qty: ordemParcial.qty, boxes: ordemParcial.boxes, standard: ordemParcial.standard, due_date: ordemParcial.due_date || null,
-      notes: ordemParcial.notes, status: ordemParcial.status, pos: ordemParcial.pos ?? null,
-      started_at: ordemParcial.started_at ?? null, started_by: ordemParcial.started_by ?? null,
-      restarted_at: ordemParcial.restarted_at ?? null, restarted_by: ordemParcial.restarted_by ?? null,
-      interrupted_at: ordemParcial.interrupted_at ?? null, interrupted_by: ordemParcial.interrupted_by ?? null,
+      machine_id: orderPartial.machine_id,
+      code: orderPartial.code, customer: orderPartial.customer, product: orderPartial.product, color: orderPartial.color,
+      qty: orderPartial.qty, boxes: orderPartial.boxes, standard: orderPartial.standard, due_date: orderPartial.due_date || null,
+      notes: orderPartial.notes, status: orderPartial.status, pos: orderPartial.pos ?? null,
+      started_at: orderPartial.started_at ?? null, started_by: orderPartial.started_by ?? null,
+      restarted_at: orderPartial.restarted_at ?? null, restarted_by: orderPartial.restarted_by ?? null,
+      interrupted_at: orderPartial.interrupted_at ?? null, interrupted_by: orderPartial.interrupted_by ?? null,
       // NOTE: não alteramos mais campos relacionados a baixa eficiência na tabela `orders`
-    }).eq('id', ordemParcial.id).select('*').maybeSingle()
+    }).eq('id', orderPartial.id).select('*').maybeSingle()
 
-    if (res.error) { alert('Erro ao atualizar: ' + res.error.message); if (before) patchOrdemLocal(before.id, before); return }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
+    if (res.error) { alert('Erro ao atualizar: ' + res.error.message); if (before) patchOrderLocal(before.id, before); return }
+    if (res.data) patchOrderLocal(res.data.id, res.data)
   }
 
-  async function finalizar(ordem, payload){
+  async function finalizeOrder(order, payload){
     const iso = localDateTimeToISO(payload.data, payload.hora)
     const p = { finalized:true, finalized_by: payload.por, finalized_at: iso }
-    const before = ordens.find(o=>o.id===ordem.id)
+    const before = orders.find(o=>o.id===order.id)
 
     // Se houver baixa eficiência aberta, encerra o log no mesmo timestamp da finalização
     try {
-      if (ordem.status === 'BAIXA_EFICIENCIA') {
-        const key = `order_${ordem.id}`
+      if (order.status === 'BAIXA_EFICIENCIA') {
+        const key = `order_${order.id}`
         const sessionId = lowEffSessions?.[key]
         if (sessionId) {
           const upd = await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('id', sessionId)
           if (upd.error) {
             // fallback: encerra por order_id quaisquer registros abertos
-            await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('order_id', ordem.id).is('ended_at', null)
+            await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('order_id', order.id).is('ended_at', null)
           } else {
             // remove mapeamento local
             setLowEffSessions(prev => { const c = { ...prev }; delete c[key]; return c })
           }
         } else {
           // fallback direto
-          await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('order_id', ordem.id).is('ended_at', null)
+          await supabase.from('low_efficiency_logs').update({ ended_at: iso }).eq('order_id', order.id).is('ended_at', null)
         }
       }
     } catch (e) {
@@ -205,9 +205,9 @@ export default function useOrders(clientId = null){
 
     // Se houver PARADA aberta, encerra (resumed_at) no mesmo timestamp da finalização
     try {
-      if (ordem.status === 'PARADA') {
+      if (order.status === 'PARADA') {
         const sel = await supabase.from('machine_stops').select('*')
-          .eq('order_id', ordem.id).is('resumed_at', null)
+          .eq('order_id', order.id).is('resumed_at', null)
           .order('started_at', { ascending:false })
           .limit(1).maybeSingle()
         if (sel.data) {
@@ -219,35 +219,35 @@ export default function useOrders(clientId = null){
       console.warn('Falha ao encerrar parada ao finalizar ordem:', e)
     }
 
-    removeOrdemLocal(ordem.id)
-    upsertFinalizadaLocal({...ordem,...p})
-    const res = await supabase.from('orders').update(p).eq('id', ordem.id).select('*').maybeSingle()
-    if (res.error) { alert('Erro ao finalizar: ' + res.error.message); if(before) setOrdens(prev=>[before,...prev]); setFinalizadas(prev=>prev.filter(o=>o.id!==ordem.id)); return }
-    if (res.data) upsertFinalizadaLocal(res.data)
+    removeOrderLocal(order.id)
+    upsertFinalizedLocal({...order,...p})
+    const res = await supabase.from('orders').update(p).eq('id', order.id).select('*').maybeSingle()
+    if (res.error) { alert('Erro ao finalizar: ' + res.error.message); if(before) setOrders(prev=>[before,...prev]); setFinalizedOrders(prev=>prev.filter(o=>o.id!==order.id)); return }
+    if (res.data) upsertFinalizedLocal(res.data)
   }
 
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
-  async function enviarParaFila(ordemAtiva, opts) {
+  async function sendToQueue(orderActive, opts) {
     const operador = opts?.operador?.trim()
     const data = opts?.data
     const hora = opts?.hora
-    const maquina = ordemAtiva.machine_id
-    const lista = [...ordens]
+    const maquina = orderActive.machine_id
+    const lista = [...orders]
       .filter(o => !o.finalized && o.machine_id === maquina)
       .sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999))
 
     if (!lista.length) return
 
-    const ativa = lista[0]
-    const fila = lista.slice(1)
+    const activeOrder = lista[0]
+    const queue = lista.slice(1)
 
-    if (!fila.length) {
+    if (!queue.length) {
       alert('Não há itens na fila para promover.')
       return
     }
 
-    const novoPainel = fila[0]
-    const novaFilaRestante = fila.slice(1)
+    const nextPanelOrder = queue[0]
+    const remainingQueue = queue.slice(1)
 
     // 1) posições temporárias altas para evitar UNIQUE
     const BASE = 1_000_000
@@ -263,27 +263,27 @@ export default function useOrders(clientId = null){
       const r = await supabase.from('orders').update({
         pos: 0,
         status: 'AGUARDANDO'
-      }).eq('id', novoPainel.id)
+      }).eq('id', nextPanelOrder.id)
       if (r.error) { alert('Erro ao promover item para o painel: ' + r.error.message); return }
     }
 
     // 3) reindexar fila 1..N
-    for (let i = 0; i < novaFilaRestante.length; i++) {
-      const o = novaFilaRestante[i]
+    for (let i = 0; i < remainingQueue.length; i++) {
+      const o = remainingQueue[i]
       const r = await supabase.from('orders').update({ pos: i + 1 }).eq('id', o.id)
       if (r.error) { alert('Erro ao reordenar fila: ' + r.error.message); return }
     }
 
     // 4) enviar a atual para o fim e registrar interrupção
     {
-      const finalPos = novaFilaRestante.length + 1;
+      const finalPos = remainingQueue.length + 1;
       const agoraISO = (data && hora)
         ? localDateTimeToISO(data, hora)
         : new Date().toISOString();
       // Se status atual é PARADA, encerra parada aberta
-      if (ativa.status === 'PARADA') {
+      if (activeOrder.status === 'PARADA') {
         const sel = await supabase.from('machine_stops').select('*')
-          .eq('order_id', ativa.id).is('resumed_at', null)
+          .eq('order_id', activeOrder.id).is('resumed_at', null)
           .order('started_at', { ascending:false })
           .limit(1).maybeSingle();
         if (sel.data) {
@@ -292,19 +292,19 @@ export default function useOrders(clientId = null){
         }
       }
       // Se status atual é BAIXA_EFICIENCIA, encerra o log aberto
-      if (ativa.status === 'BAIXA_EFICIENCIA') {
+      if (activeOrder.status === 'BAIXA_EFICIENCIA') {
         try {
-          const key = `order_${ativa.id}`
+          const key = `order_${activeOrder.id}`
           const sessionId = lowEffSessions?.[key]
           if (sessionId) {
             const upd = await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('id', sessionId)
             if (upd.error) {
-              await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('order_id', ativa.id).is('ended_at', null)
+              await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('order_id', activeOrder.id).is('ended_at', null)
             } else {
               setLowEffSessions(prev => { const c = { ...prev }; delete c[key]; return c })
             }
           } else {
-            await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('order_id', ativa.id).is('ended_at', null)
+            await supabase.from('low_efficiency_logs').update({ ended_at: agoraISO }).eq('order_id', activeOrder.id).is('ended_at', null)
           }
         } catch (e) {
           console.warn('Erro ao encerrar baixa eficiência ao enviar para fila:', e)
@@ -315,30 +315,30 @@ export default function useOrders(clientId = null){
         status: 'AGUARDANDO',
         interrupted_at: agoraISO,
         interrupted_by: operador || 'Sistema',
-      }).eq('id', ativa.id);
+      }).eq('id', activeOrder.id);
       if (r.error) { alert('Erro ao enviar a atual para o fim da fila: ' + r.error.message); return; }
     }
 
     // 5) atualizar estado local
-    setOrdens(prev => {
+    setOrders(prev => {
       const map = new Map(prev.map(o => [o.id, { ...o }]))
-      const np = map.get(novoPainel.id)
+      const np = map.get(nextPanelOrder.id)
       if (np) {
         np.pos = 0;
         np.status = 'AGUARDANDO';
         // preserva started_at/started_by (não zera) para manter o histórico no Registro
       }
 
-      novaFilaRestante.forEach((o, i) => {
+      remainingQueue.forEach((o, i) => {
         const it = map.get(o.id); if (it) it.pos = i + 1
       })
 
-      const itAtiva = map.get(ativa.id)
-      if (itAtiva) {
-        itAtiva.pos = novaFilaRestante.length + 1
-        itAtiva.status = 'AGUARDANDO'
-        itAtiva.interrupted_at = (data && hora) ? localDateTimeToISO(data, hora) : new Date().toISOString()
-        itAtiva.interrupted_by = operador || 'Sistema'
+      const itActive = map.get(activeOrder.id)
+      if (itActive) {
+        itActive.pos = remainingQueue.length + 1
+        itActive.status = 'AGUARDANDO'
+        itActive.interrupted_at = (data && hora) ? localDateTimeToISO(data, hora) : new Date().toISOString()
+        itActive.interrupted_by = operador || 'Sistema'
       }
       return Array.from(map.values())
     })
@@ -346,12 +346,12 @@ export default function useOrders(clientId = null){
 
   // ========================= Confirmadores (agora recebem payloads) =========================
 
-  async function confirmarInicio({ ordem, operador, data, hora }) {
+  async function confirmStart({ order, operador, data, hora }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const iso = localDateTimeToISO(data, hora)
 
     // Detecta reinício (já tinha started_at e foi interrompida)
-    const isRestart = !!ordem.started_at && !!ordem.interrupted_at
+    const isRestart = !!order.started_at && !!order.interrupted_at
 
     const payload = isRestart
       ? {
@@ -369,10 +369,10 @@ export default function useOrders(clientId = null){
           interrupted_at: null, interrupted_by: null,
         }
 
-    patchOrdemLocal(ordem.id, payload)
-    const res = await supabase.from('orders').update(payload).eq('id', ordem.id).select('*').maybeSingle()
+    patchOrderLocal(order.id, payload)
+    const res = await supabase.from('orders').update(payload).eq('id', order.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao iniciar: '+res.error.message); return }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
+    if (res.data) patchOrderLocal(res.data.id, res.data)
   }
 
   // Evita registrar parada com horário que se sobrepõe a outra parada da mesma máquina
@@ -421,19 +421,19 @@ export default function useOrders(clientId = null){
     return null
   }
 
-  async function confirmarParada({ ordem, operador, motivo, obs, data, hora, endLowEffAtStopStart }) {
+  async function confirmStop({ order, operador, motivo, obs, data, hora, endLowEffAtStopStart }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     if (!String(motivo || '').trim()) { alert('Selecione o motivo da parada.'); return }
     const started_at = localDateTimeToISO(data, hora)
 
-    const overlapMsg = await validarSobreposicaoParada({ machineId: ordem.machine_id, startedAt: started_at })
+    const overlapMsg = await validarSobreposicaoParada({ machineId: order.machine_id, startedAt: started_at })
     if (overlapMsg) { alert(overlapMsg); return }
 
     // 1) Se vier de baixa eficiência, encerra-a neste mesmo timestamp + limpa observação NO LOG NOVO
     if (endLowEffAtStopStart) {
       // tenta encerrar log associado
       try {
-        const key = `order_${ordem.id}`
+        const key = `order_${order.id}`
         const sessionId = lowEffSessions?.[key]
         if (sessionId) {
           await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('id', sessionId)
@@ -441,7 +441,7 @@ export default function useOrders(clientId = null){
           setLowEffSessions(prev => { const c={...prev}; delete c[key]; return c })
         } else {
           // fallback: encerra registros abertos para essa ordem
-          await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('order_id', ordem.id).is('ended_at', null)
+          await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('order_id', order.id).is('ended_at', null)
         }
       } catch (e) {
         console.warn('Erro ao encerrar baixa eficiência automaticamente ao iniciar parada:', e)
@@ -450,19 +450,19 @@ export default function useOrders(clientId = null){
 
     // 2) Registra parada
     const ins = await supabase.from('machine_stops')
-      .insert([{ client_id: clientId, order_id: ordem.id, machine_id: ordem.machine_id, started_by: operador, started_at, reason: String(motivo).trim(), notes: obs }])
+      .insert([{ company_id: clientId, order_id: order.id, machine_id: order.machine_id, started_by: operador, started_at, reason: String(motivo).trim(), notes: obs }])
       .select('*').maybeSingle()
     if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return }
 
     // 3) Muda status para PARADA
-    await setStatus(ordem, 'PARADA')
+    await setStatus(order, 'PARADA')
   }
 
-  async function confirmarRetomada({ ordem, operador, data, hora, targetStatus }) {
+  async function confirmResume({ order, operador, data, hora, targetStatus }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const resumed_at = localDateTimeToISO(data, hora)
     const sel = await supabase.from('machine_stops').select('*')
-      .eq('order_id', ordem.id).is('resumed_at', null)
+      .eq('order_id', order.id).is('resumed_at', null)
       .order('started_at', { ascending:false })
       .limit(1).maybeSingle()
     if (sel.error) { alert('Erro ao localizar parada aberta: ' + sel.error.message); return }
@@ -471,19 +471,19 @@ export default function useOrders(clientId = null){
         .eq('id', sel.data.id)
       if (upd.error) { alert('Erro ao encerrar parada: ' + upd.error.message); return }
     }
-    await setStatus(ordem, targetStatus || 'PRODUZINDO')
+    await setStatus(order, targetStatus || 'PRODUZINDO')
   }
 
   // ========================= NOVA LÓGICA: Baixa Eficiência no low_efficiency_logs =========================
 
-  async function confirmarBaixaEf({ ordem, operador, data, hora, obs }) {
+  async function confirmLowEfficiency({ order, operador, data, hora, obs }) {
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const started_at = localDateTimeToISO(data, hora);
 
     // Se status anterior era PARADA, encerra-a neste mesmo timestamp + limpa observação
-    if (ordem.status === 'PARADA') {
+    if (order.status === 'PARADA') {
       const sel = await supabase.from('machine_stops').select('*')
-        .eq('order_id', ordem.id).is('resumed_at', null)
+        .eq('order_id', order.id).is('resumed_at', null)
         .order('started_at', { ascending:false })
         .limit(1).maybeSingle();
       if (sel.data) {
@@ -495,9 +495,9 @@ export default function useOrders(clientId = null){
     // 1) Inserir registro na tabela nova low_efficiency_logs
     try {
       const payload = {
-        client_id: clientId,
-        order_id: ordem.id,
-        machine_id: ordem.machine_id,
+        company_id: clientId,
+        order_id: order.id,
+        machine_id: order.machine_id,
         started_at,
         started_by: operador,
         notes: obs || null
@@ -509,7 +509,7 @@ export default function useOrders(clientId = null){
       }
       // salva id da sessão localmente para podermos encerrar exatamente esse registro depois
       if (ins.data && ins.data.id) {
-        const key = `order_${ordem.id}`
+        const key = `order_${order.id}`
         setLowEffSessions(prev => ({ ...prev, [key]: ins.data.id }))
       }
     } catch (e) {
@@ -519,7 +519,7 @@ export default function useOrders(clientId = null){
     }
 
     // 2) Atualiza somente o status da order no banco (não grava campos de baixa no orders)
-    patchOrdemLocal(ordem.id, {
+    patchOrderLocal(order.id, {
       status: 'BAIXA_EFICIENCIA',
       // atualiza localmente campos para UI (não persistimos estes campos em orders)
       loweff_started_at: started_at,
@@ -527,32 +527,32 @@ export default function useOrders(clientId = null){
       loweff_by: operador,
       loweff_notes: obs || null
     })
-    const res = await supabase.from('orders').update({ status: 'BAIXA_EFICIENCIA' }).eq('id', ordem.id).select('*').maybeSingle()
+    const res = await supabase.from('orders').update({ status: 'BAIXA_EFICIENCIA' }).eq('id', order.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao registrar baixa eficiência (status): ' + res.error.message); return; }
-    if (res.data) patchOrdemLocal(res.data.id, res.data);
+    if (res.data) patchOrderLocal(res.data.id, res.data);
   }
 
-  async function confirmarEncerrarBaixaEf({ ordem, targetStatus, data, hora }) {
+  async function confirmEndLowEfficiency({ order, targetStatus, data, hora }) {
     if (!data || !hora) { alert('Preencha data e hora.'); return }
     const ended_at = localDateTimeToISO(data, hora)
 
     // 1) Encerrar o registro em low_efficiency_logs
     try {
-      const key = `order_${ordem.id}`
+      const key = `order_${order.id}`
       const sessionId = lowEffSessions?.[key]
       if (sessionId) {
         const upd = await supabase.from('low_efficiency_logs').update({ ended_at }).eq('id', sessionId)
         if (upd.error) {
           console.warn('Falha ao encerrar log por id, tentando fallback:', upd.error)
           // fallback: encerrar por order_id
-          await supabase.from('low_efficiency_logs').update({ ended_at }).eq('order_id', ordem.id).is('ended_at', null)
+          await supabase.from('low_efficiency_logs').update({ ended_at }).eq('order_id', order.id).is('ended_at', null)
         } else {
           // remove mapping local
           setLowEffSessions(prev => { const c = { ...prev }; delete c[key]; return c })
         }
       } else {
         // fallback: encerra por order_id registros abertos
-        await supabase.from('low_efficiency_logs').update({ ended_at }).eq('order_id', ordem.id).is('ended_at', null)
+        await supabase.from('low_efficiency_logs').update({ ended_at }).eq('order_id', order.id).is('ended_at', null)
       }
     } catch (e) {
       console.warn('Erro ao encerrar baixa eficiência no log:', e)
@@ -565,16 +565,16 @@ export default function useOrders(clientId = null){
       loweff_ended_at: ended_at,
       loweff_notes: null
     }
-    const before = ordens.find(o=>o.id===ordem.id)
-    patchOrdemLocal(ordem.id, patch)
-    const res = await supabase.from('orders').update({ status: patch.status }).eq('id', ordem.id).select('*').maybeSingle()
-    if (res.error) { alert('Erro ao encerrar baixa eficiência (status): ' + res.error.message); if(before) patchOrdemLocal(before.id, before) }
-    if (res.data) patchOrdemLocal(res.data.id, res.data)
+    const before = orders.find(o=>o.id===order.id)
+    patchOrderLocal(order.id, patch)
+    const res = await supabase.from('orders').update({ status: patch.status }).eq('id', order.id).select('*').maybeSingle()
+    if (res.error) { alert('Erro ao encerrar baixa eficiência (status): ' + res.error.message); if(before) patchOrderLocal(before.id, before) }
+    if (res.data) patchOrderLocal(res.data.id, res.data)
   }
 
-  const onStatusChange = async (ordem, targetStatus) => {
-    const atual = ordem.status
-    if (jaIniciou(ordem) && targetStatus === 'AGUARDANDO') {
+  const onStatusChange = async (order, targetStatus) => {
+    const atual = order.status
+    if (jaIniciou(order) && targetStatus === 'AGUARDANDO') {
       return { action: 'alert', message: 'Após iniciar a produção, não é permitido voltar para "Aguardando".' }
     }
 
@@ -583,7 +583,7 @@ export default function useOrders(clientId = null){
       return {
         action: 'openLowEffModal',
         payload: {
-          ordem,
+          order,
           operador: '',
           obs: '',
           data: now.toISOString().slice(0,10),
@@ -597,7 +597,7 @@ export default function useOrders(clientId = null){
       return {
         action: 'openLowEffEndModal',
         payload: {
-          ordem,
+          order,
           targetStatus: 'PRODUZINDO',
           operador: '',
           data: now.toISOString().slice(0,10),
@@ -611,7 +611,7 @@ export default function useOrders(clientId = null){
       return {
         action: 'openStopModal',
         payload: {
-          ordem,
+          order,
           operador:'', motivo: MOTIVOS_PARADA[0], obs:'',
           data: now.toISOString().slice(0,10),
           hora: now.toTimeString().slice(0,5),
@@ -622,7 +622,7 @@ export default function useOrders(clientId = null){
 
     if (targetStatus === 'PARADA' && atual !== 'PARADA') {
       const now=new Date()
-      return { action: 'openStopModal', payload: { ordem, operador:'', motivo: MOTIVOS_PARADA[0], obs:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) } }
+      return { action: 'openStopModal', payload: { order, operador:'', motivo: MOTIVOS_PARADA[0], obs:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) } }
     }
 
     if (atual === 'PARADA' && targetStatus !== 'PARADA') {
@@ -630,7 +630,7 @@ export default function useOrders(clientId = null){
       if (targetStatus === 'BAIXA_EFICIENCIA') {
         try {
           const sel = await supabase.from('machine_stops').select('*')
-            .eq('order_id', ordem.id).is('resumed_at', null)
+            .eq('order_id', order.id).is('resumed_at', null)
             .order('started_at', { ascending:false })
             .limit(1).maybeSingle();
           if (sel.data) {
@@ -640,21 +640,27 @@ export default function useOrders(clientId = null){
         } catch (e) {
           console.warn('Erro ao encerrar parada automaticamente:', e)
         }
-        await setStatus(ordem, targetStatus);
+        await setStatus(order, targetStatus);
         return { action: 'statusSet', newStatus: targetStatus }
       }
-      return { action: 'openResumeModal', payload: { ordem, operador:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5), targetStatus } }
+      return { action: 'openResumeModal', payload: { order, operador:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5), targetStatus } }
     }
 
-    await setStatus(ordem, targetStatus)
+    await setStatus(order, targetStatus)
     return { action: 'statusSet', newStatus: targetStatus }
   }
 
   return {
-    ordens, finalizadas, paradas,
-    fetchOrdensAbertas, fetchOrdensFinalizadas, fetchParadas,
-    criarOrdem, atualizar, enviarParaFila, finalizar,
-    confirmarInicio, confirmarParada, confirmarRetomada, confirmarBaixaEf, confirmarEncerrarBaixaEf,
-    ativosPorMaquina, registroGrupos, lastFinalizadoPorMaquina, onStatusChange
+    orders, finalizedOrders, stops,
+    fetchOpenOrders, fetchFinalizedOrders, fetchStops,
+    createOrder, updateOrder, sendToQueue, finalizeOrder,
+    confirmStart, confirmStop, confirmResume, confirmLowEfficiency, confirmEndLowEfficiency,
+    activeByMachine, orderRecordGroups, lastFinalizedByMachine, onStatusChange,
+    ordens: orders, finalizadas: finalizedOrders, paradas: stops,
+    fetchOrdensAbertas: fetchOpenOrders, fetchOrdensFinalizadas: fetchFinalizedOrders, fetchParadas: fetchStops,
+    criarOrdem: createOrder, atualizar: updateOrder, enviarParaFila: sendToQueue, finalizar: finalizeOrder,
+    confirmarInicio: confirmStart, confirmarParada: confirmStop, confirmarRetomada: confirmResume, confirmarBaixaEf: confirmLowEfficiency, confirmarEncerrarBaixaEf: confirmEndLowEfficiency,
+    ativosPorMaquina: activeByMachine, registroGrupos: orderRecordGroups, lastFinalizadoPorMaquina: lastFinalizedByMachine,
   }
 }
+

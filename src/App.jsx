@@ -6,13 +6,35 @@ import { supabase } from './lib/supabaseClient'
 
 export default function App() {
   const [loadingTenant, setLoadingTenant] = useState(true)
-  const [tenantClient, setTenantClient] = useState(null)
+  const [tenantCompany, setTenantCompany] = useState(null)
 
   const hostname = String(window.location.hostname || '').toLowerCase()
   const demoHosts = new Set(['demo.localhost', 'demo.techargos.com.br'])
   const adminHosts = new Set(['painel.localhost', 'painel.techargos.com.br'])
   const isDemoHost = demoHosts.has(hostname)
   const isAdminHost = adminHosts.has(hostname)
+
+  function normalizeTenantKey(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .split('.')[0]
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+  }
+
+  function normalizeTenantKey(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .split('.')[0]
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -21,7 +43,7 @@ export default function App() {
       setLoadingTenant(true)
       if (isAdminHost) {
         if (!cancelled) {
-          setTenantClient(null)
+          setTenantCompany(null)
           setLoadingTenant(false)
         }
         return
@@ -29,7 +51,7 @@ export default function App() {
 
       if (isDemoHost) {
         const { data } = await supabase
-          .from('clients')
+          .from('companies')
           .select('id, name, slug, subdomain, is_demo, active')
           .or('slug.eq.demo,subdomain.eq.demo')
           .eq('active', true)
@@ -38,7 +60,7 @@ export default function App() {
           .maybeSingle()
 
         if (!cancelled) {
-          setTenantClient(data || null)
+          setTenantCompany(data || null)
           setLoadingTenant(false)
         }
         return
@@ -46,27 +68,43 @@ export default function App() {
 
       const labels = hostname.split('.')
       const subdomain = labels[0] || ''
+      const normalizedSubdomain = normalizeTenantKey(subdomain)
       const isProdTenantDomain = hostname.endsWith('.techargos.com.br') && labels.length >= 4
       const isLocalTenantDomain = hostname.endsWith('.localhost') && labels.length >= 2
       const isTenantDomain = (isProdTenantDomain || isLocalTenantDomain) && subdomain && !['www', 'painel', 'demo'].includes(subdomain)
 
       if (!isTenantDomain) {
         if (!cancelled) {
-          setTenantClient(null)
+          setTenantCompany(null)
           setLoadingTenant(false)
         }
         return
       }
 
-      const { data } = await supabase
-        .from('clients')
-        .select('id, name, slug, subdomain, is_demo, active')
-        .eq('subdomain', subdomain)
-        .eq('active', true)
-        .maybeSingle()
+      let tenantData = null
+
+      if (normalizedSubdomain) {
+        const { data: resolvedData, error: resolveErr } = await supabase
+          .rpc('resolve_public_company_by_subdomain', { target_subdomain: normalizedSubdomain })
+          .maybeSingle()
+
+        tenantData = resolvedData || null
+
+        // fallback para ambientes onde a função ainda não foi aplicada no banco
+        if (!tenantData && resolveErr) {
+          const { data } = await supabase
+            .from('companies')
+            .select('id, name, slug, subdomain, is_demo, active')
+            .or(`subdomain.ilike.${normalizedSubdomain},slug.ilike.${normalizedSubdomain}`)
+            .eq('active', true)
+            .maybeSingle()
+
+          tenantData = data || null
+        }
+      }
 
       if (!cancelled) {
-        setTenantClient(data || null)
+        setTenantCompany(tenantData)
         setLoadingTenant(false)
       }
     }
@@ -83,9 +121,9 @@ export default function App() {
     return <div style={{ padding: 20 }}>Carregando ambiente...</div>
   }
 
-  if (tenantClient) {
-    return <DemoApp tenantClient={tenantClient} isDemoEnvironment={!!tenantClient.is_demo} />
+  if (tenantCompany) {
+    return <DemoApp tenantCompany={tenantCompany} isDemoEnvironment={!!tenantCompany.is_demo} />
   }
 
-  return isDemoHost ? <DemoApp tenantClient={null} isDemoEnvironment /> : <SiteApp />
+  return isDemoHost ? <DemoApp tenantCompany={null} isDemoEnvironment /> : <SiteApp />
 }

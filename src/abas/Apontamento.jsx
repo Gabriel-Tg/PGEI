@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
-import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../lib/constants';
+import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../domain/constants';
 import { isMissingRelationError } from '../lib/productionRuntime';
 import { fmtDateTime, getTurnoAtual } from '../lib/utils';
 import { getShiftWindowsForDay } from '../lib/shifts';
@@ -11,10 +11,10 @@ import { calcularHorasParadasPorTurno, formatMsToHHmm } from '../lib/paradasPorT
 import '../styles/Apontamento.css';
 import Modal from '../components/Modal';
 
-export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clientId = null, machineIds = MAQUINAS }) {
+export default function Apontamento({ isAdmin: isAdminProp = false, clientId = null, machineIds = MAQUINAS }) {
   const adminObj = typeof useAuthAdmin === 'function' ? useAuthAdmin() : { isAdmin: false, authUser: null };
-  const isAdmin = Boolean(adminObj && adminObj.isAdmin); // só libera para admin verdadeiro
-  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
+  const isAdmin = Boolean(isAdminProp || (adminObj && adminObj.isAdmin)); // só libera para admin verdadeiro
+  const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query);
   const [bipagens, setBipagens] = useState([]);
   const [refugos, setRefugos] = useState([]);
   const [apontamentos, setApontamentos] = useState([]); // Produção manual das injetoras
@@ -1221,7 +1221,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
 
                   // 1) Inserir produção manual
                   const prodIns = {
-                    ...(clientId ? { client_id: clientId } : {}),
+                    ...(clientId ? { company_id: clientId } : {}),
                     entry_date: diaZ.toISODate(),
                     created_at: createdAtUtcIso,
                     machine_id: payload.machine,
@@ -1241,7 +1241,7 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
                   // 2) Inserir refugos (scrap_logs), se houver
                   if (payload.scrapEntries.length > 0) {
                     const scrapRows = payload.scrapEntries.map((s) => ({
-                      ...(clientId ? { client_id: clientId } : {}),
+                      ...(clientId ? { company_id: clientId } : {}),
                       created_at: createdAtUtcIso,
                       machine_id: payload.machine,
                       shift: String(payload.turno),
@@ -1291,3 +1291,4 @@ export default function Apontamento({ isAdmin: _unusedIsAdminProp = false, clien
     </div>
   );
 }
+

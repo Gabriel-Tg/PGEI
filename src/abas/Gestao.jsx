@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
-import { MAQUINAS } from '../lib/constants';
+import { MAQUINAS } from '../domain/constants';
 import { formatMsToHHmm } from '../lib/paradasPorTurno';
 import { getTurnoAtual } from '../lib/utils';
 import { machineToTabletCode } from '../lib/tabletCode';
@@ -158,7 +158,7 @@ export default function Gestao({ clientId = null, machineIds = MAQUINAS }) {
   const [valorMachineFiltro, setValorMachineFiltro] = useState('');
   const [tabletStatusRows, setTabletStatusRows] = useState([]);
   const [monitorLoading, setMonitorLoading] = useState(false);
-  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
+  const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query);
 
   const periodoRange = useMemo(() => getPeriodoRange(periodo, selectedDate), [periodo, selectedDate]);
   const filtroStart = periodoRange.start;
@@ -1055,3 +1055,4 @@ export default function Gestao({ clientId = null, machineIds = MAQUINAS }) {
     </div>
   );
 }
+

@@ -1,0 +1,7 @@
+-- schema.sql (deprecated)
+-- Este arquivo foi quebrado em 4 scripts para facilitar execucao e manutencao.
+-- Execute nesta ordem:
+-- 1) supabase/schema/01_core_tables.sql
+-- 2) supabase/schema/02_audit_and_triggers.sql
+-- 3) supabase/schema/03_rls_policies.sql
+-- 4) supabase/schema/04_views_and_docs.sql

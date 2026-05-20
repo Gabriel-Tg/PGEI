@@ -1,7 +1,7 @@
 // src/abas/CadastroItens.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
-import { ADMIN_EMAILS } from '../lib/constants.js'
+import { ADMIN_EMAILS } from '../domain/constants.js'
 import Modal from '../components/Modal.jsx'
 import Papa from 'papaparse'
 
@@ -80,7 +80,7 @@ const getFileExtension = (fileName = '') => {
 
 const sanitizeCodeForPath = (value) => String(value ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
 
-export default function CadastroItens() {
+export default function CadastroItens({ canManage = false }) {
   // ============== AUTH / ADMIN ONLY GATE ==============
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -94,10 +94,11 @@ export default function CadastroItens() {
     })()
     return () => { active = false }
   }, [])
-  const isAdmin = useMemo(() => {
+  const isAdminEmail = useMemo(() => {
     const email = user?.email?.toLowerCase()
     return !!email && Array.isArray(ADMIN_EMAILS) && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email)
   }, [user])
+  const isAllowed = !!canManage || isAdminEmail
 
   // ============== LISTA / FETCH (sempre declarar hooks) ==============
   const [items, setItems] = useState([])
@@ -121,10 +122,10 @@ export default function CadastroItens() {
   }
 
   useEffect(() => {
-    if (!authChecked || !isAdmin) return
+    if (!authChecked || !isAllowed) return
     fetchItems()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authChecked, isAdmin])
+  }, [authChecked, isAllowed])
 
   const isProdutoAcabado = (item) => {
     const type = String(item?.item_type || '').trim().toLowerCase()
@@ -655,14 +656,14 @@ export default function CadastroItens() {
         </div>
       )}
 
-      {authChecked && !isAdmin && (
+      {authChecked && !isAllowed && (
         <div style={{ padding: 24 }}>
           <h3>Não encontrado</h3>
           <p>Esta página não está disponível.</p>
         </div>
       )}
 
-      {authChecked && isAdmin && (
+      {authChecked && isAllowed && (
         <>
           {/* HEADER / AÇÕES */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>

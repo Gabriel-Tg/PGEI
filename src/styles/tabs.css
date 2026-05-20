@@ -20,3 +20,69 @@
   border-color: transparent;
   color: #FFFFFF;
 }
+
+/* =======================
+   Transição entre abas
+   ======================= */
+.app-tab-stage {
+  position: relative;
+  width: 100%;
+}
+
+.tab-panel {
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+  will-change: opacity, transform;
+}
+
+.tab-panel--fade {
+  animation-name: tabFadeIn;
+}
+
+.tab-panel--from-right {
+  animation-name: tabSlideInRight;
+}
+
+.tab-panel--from-left {
+  animation-name: tabSlideInLeft;
+}
+
+@keyframes tabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tabSlideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes tabSlideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-panel {
+    animation: none !important;
+  }
+}

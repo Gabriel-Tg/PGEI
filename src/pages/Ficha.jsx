@@ -1,6 +1,6 @@
 // src/pages/Ficha.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MAQUINAS } from '../lib/constants'
+import { MAQUINAS } from '../domain/constants'
 import {
   fetchSheets,
   createSheetWithRevision,

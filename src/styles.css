@@ -1,5 +1,6 @@
 /* Ordem é importante para garantir overrides corretos */
 @import "./styles/theme.css";
+@import "./styles/dashboard-shell.css";
 @import "./styles/brand.css";
 @import "./styles/tabs.css";
 @import "./styles/helpers.css";

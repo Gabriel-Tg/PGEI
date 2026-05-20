@@ -1,23 +1,23 @@
 /* Botões */
 .btn{
-  background: var(--panel);
+  background: linear-gradient(160deg, rgba(12, 36, 66, 0.9), rgba(9, 25, 46, 0.84));
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(91, 164, 250, 0.36);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
   font-weight: 700;
   transition: transform .05s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
-.btn:hover{ border-color: var(--secondary); box-shadow: 0 6px 14px rgba(var(--secondary-rgb),.18); }
+.btn:hover{ border-color: var(--secondary); box-shadow: 0 8px 18px rgba(var(--secondary-rgb),.2); }
 .btn:active{ transform: translateY(1px); }
 .btn.primary{
-  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  background: linear-gradient(90deg, #0a5fff, #07b7df);
   border-color: transparent;
   color: #FFFFFF;
 }
 .btn.ghost{
-  background: transparent;
-  border-color: var(--border);
+  background: rgba(6, 19, 34, 0.72);
+  border-color: rgba(103, 167, 246, 0.32);
 }
 .btn:disabled{ opacity:.6; cursor:not-allowed; }

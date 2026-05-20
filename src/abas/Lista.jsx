@@ -5,7 +5,7 @@ import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortabl
 import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
 import Modal from '../components/Modal'
-import { MAQUINAS, STATUS } from '../lib/constants'
+import { MAQUINAS, STATUS } from '../domain/constants'
 import { statusClass, jaIniciou } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 import { DateTime } from 'luxon';
@@ -78,7 +78,7 @@ export default function Lista({
         .select('code, cycle_seconds, cavities')
         .in('code', activeItemCodes)
 
-      if (clientId) query = query.eq('client_id', clientId)
+      if (clientId) query = query.eq('company_id', clientId)
 
       const { data, error } = await query
 
@@ -372,3 +372,4 @@ await supabase.rpc('reorder_machine_queue', {
     </>
   )
 }
+

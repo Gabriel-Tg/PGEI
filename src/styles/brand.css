@@ -8,10 +8,11 @@
   gap: 22px;
   margin: 8px 0 18px;
   padding: 14px 18px;
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-700) 100%);
-  border: 1px solid rgba(var(--secondary-rgb), .35);
+  background: linear-gradient(135deg, rgba(11, 52, 121, 0.88) 0%, rgba(6, 26, 59, 0.88) 100%);
+  border: 1px solid rgba(var(--secondary-rgb), .42);
   border-radius: 14px;
-  box-shadow: 0 14px 28px rgba(var(--primary-rgb), .22);
+  box-shadow: 0 14px 28px rgba(0, 8, 20, 0.4);
+  backdrop-filter: blur(8px);
   text-align: left;
 }
 
@@ -33,10 +34,10 @@
   line-height: 1.15;
   font-weight: 800;
   letter-spacing:.2px;
-  color: var(--panel);
+  color: #f2f8ff;
 }
 .brand-sub{
   font-size: 15px;
-  color: var(--card-2);
+  color: #b7d4f8;
   font-weight: 600;
 }

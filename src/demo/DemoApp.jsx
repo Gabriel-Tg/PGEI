@@ -1,9 +1,9 @@
 // src/App.jsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { MAQUINAS } from '../lib/constants'
+import { MAQUINAS } from '../domain/constants'
 import CadastroItens from '../abas/CadastroItens'
 import Login from '../abas/Login'
 import Painel from '../abas/Painel'
@@ -18,13 +18,20 @@ import Prioridade from '../pages/Prioridade'
 import useOrders from '../hooks/useOrders'
 import useAuthAdmin from '../hooks/useAuthAdmin'
 import GlobalModals from '../components/GlobalModals'
+import TabTransition, { getTabDirection } from '../components/TabTransition'
 import Apontamento from '../abas/Apontamento'
+import Usuarios from '../abas/Usuarios'
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient'
+import { canAccessPath } from '../domain/rbac'
 
 
-export default function DemoApp({ tenantClient = null, isDemoEnvironment = false }){
-  const [tab,setTab] = useState('login')
+export default function DemoApp({ tenantCompany = null, isDemoEnvironment = false }){
+  const [tab, setTab] = useState('login')
+  const [tabDirection, setTabDirection] = useState(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [quickSearch, setQuickSearch] = useState('')
+  const [nowLabel, setNowLabel] = useState(() => DateTime.now().setZone('America/Sao_Paulo').toFormat('dd/LL/yyyy HH:mm:ss'))
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
   const sensors = useSensors(mouseSensor, touchSensor)
@@ -47,6 +54,13 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
   const [tick, setTick] = useState(0)
   useEffect(()=>{ const id=setInterval(()=>setTick(t=>t+1),1000); return ()=>clearInterval(id) },[])
 
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowLabel(DateTime.now().setZone('America/Sao_Paulo').toFormat('dd/LL/yyyy HH:mm:ss'))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
+
   const [openSet, setOpenSet] = useState(()=>new Set())
   function toggleOpen(id){ setOpenSet(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n }) }
 
@@ -56,37 +70,96 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
   const [tenantMachines, setTenantMachines] = useState([])
   const [machinesLoading, setMachinesLoading] = useState(false)
   const [machinesResolved, setMachinesResolved] = useState(false)
-  const tenantClientId = tenantClient?.id || null
+  const tenantCompanyId = tenantCompany?.id || null
   const machineIds = useMemo(() => {
-    if (!tenantClientId) return MAQUINAS
+    if (!tenantCompanyId) return MAQUINAS
     return tenantMachines
       .map((m) => String(m.machine_code || '').toUpperCase())
       .filter(Boolean)
-  }, [tenantClientId, tenantMachines])
-  const tenantMachinesReady = !tenantClientId || machinesResolved
+  }, [tenantCompanyId, tenantMachines])
+  const tenantMachinesReady = !tenantCompanyId || machinesResolved
 
-  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantClientId, { isDemoTenant: isDemoEnvironment })
+  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantCompanyId, { isDemoTenant: isDemoEnvironment })
+  const canViewDashboard = !!authUser && !!permissions?.canViewDashboard
+  const canUseProduction = !!permissions?.canRegisterProduction
+  const canMakeApontamentos = !!permissions?.canMakeApontamentos
+  const canApproveOperational = !!permissions?.canApproveOperational
   const hasGestaoAccess = !!authUser && !!permissions?.canAccessGestao
   const canCreateOrder = !!permissions?.canCreateOrder
   const canEditQueue = !!permissions?.canEditQueue
   const canEditOrder = !!permissions?.canEditOrder
   const canViewRastreio = !!permissions?.canViewRastreio
+  const canManageCatalog = !!permissions?.canManageCatalog
+  const canManageUsers = !!permissions?.canManageUsers
+  const canViewTvPanel = !!permissions?.canViewTvPanel
+  const canManageOperational = !!permissions?.canManageOperational
+  const canAccessList = canUseProduction || canApproveOperational || canManageOperational
+  const isTvOnly = !!permissions?.isTv
+  const mustChangePassword = !!authUser?.user_metadata?.must_change_password
+
+  const tabNavOrder = useMemo(() => {
+    const ids = []
+    if (canViewDashboard) ids.push('painel')
+    if (canAccessList) ids.push('lista')
+    if (canMakeApontamentos) ids.push('apontamento')
+    if (canCreateOrder) ids.push('nova')
+    if (canViewRastreio) ids.push('rastreio')
+    if (hasGestaoAccess) ids.push('gestao')
+    if (canManageUsers) ids.push('usuarios')
+    if (canManageCatalog) ids.push('admin-itens')
+    return ids
+  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
+
+  const tabItems = useMemo(() => {
+    const items = []
+    if (canViewDashboard) items.push({ id: 'painel', label: 'Dashboard', short: 'DB' })
+    if (canAccessList) items.push({ id: 'lista', label: 'Producao', short: 'PD' })
+    if (canMakeApontamentos) items.push({ id: 'apontamento', label: 'Apontamento', short: 'AP' })
+    if (canCreateOrder) items.push({ id: 'nova', label: 'Ordens', short: 'OP' })
+    if (canViewRastreio) items.push({ id: 'rastreio', label: 'Rastreio', short: 'RT' })
+    if (hasGestaoAccess) items.push({ id: 'gestao', label: 'Gestao', short: 'GS' })
+    if (canManageUsers) items.push({ id: 'usuarios', label: 'Usuarios', short: 'US' })
+    if (canManageCatalog) items.push({ id: 'admin-itens', label: 'Cadastro Itens', short: 'IT' })
+    return items
+  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
+
+  const currentTabLabel = useMemo(() => {
+    if (tab === 'admin-itens') return 'Cadastro de Itens'
+    if (tab === 'apontamento') return 'Apontamento'
+    const current = tabItems.find((item) => item.id === tab)
+    return current?.label || 'Painel'
+  }, [tab, tabItems])
+
+  const goToTab = useCallback((next) => {
+    setTab((current) => {
+      if (current !== next) {
+        setTabDirection(getTabDirection(current, next, tabNavOrder))
+      }
+      return next
+    })
+  }, [tabNavOrder])
+
+  const setTabInstant = useCallback((next) => {
+    setTabDirection(0)
+    setTab(next)
+  }, [])
 
   const {
-    ordens, paradas,
-    fetchOrdensAbertas,
-    fetchOrdensFinalizadas, fetchParadas,
-    criarOrdem, atualizar, enviarParaFila, finalizar,
-    confirmarInicio, confirmarParada, confirmarRetomada, confirmarBaixaEf, confirmarEncerrarBaixaEf,
-    ativosPorMaquina, registroGrupos, lastFinalizadoPorMaquina, onStatusChange
-  } = useOrders(tenantClientId)
+    orders, stops,
+    fetchOpenOrders,
+    fetchFinalizedOrders, fetchStops,
+    createOrder, updateOrder, sendToQueue, finalizeOrder,
+    confirmStart, confirmStop, confirmResume, confirmLowEfficiency, confirmEndLowEfficiency,
+    activeByMachine, orderRecordGroups, lastFinalizedByMachine, onStatusChange
+  } = useOrders(tenantCompanyId)
+  const ativosPorMaquina = activeByMachine || {}
 
   useEffect(() => {
     if (!authChecked || !tenantAccessChecked || !authUser || !hasAccess) return
-    fetchOrdensAbertas()
-    fetchOrdensFinalizadas()
-    fetchParadas()
-  }, [authChecked, tenantAccessChecked, authUser, hasAccess, tenantClientId])
+    fetchOpenOrders()
+    fetchFinalizedOrders()
+    fetchStops()
+  }, [authChecked, tenantAccessChecked, authUser, hasAccess, tenantCompanyId])
 
   useEffect(()=>{
      const nowBR = DateTime.now().setZone('America/Sao_Paulo')
@@ -118,7 +191,7 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
 
     async function loadTenantMachines() {
       setMachinesResolved(false)
-      if (!tenantClientId) {
+      if (!tenantCompanyId) {
         setTenantMachines([])
         setMachinesResolved(true)
         return
@@ -127,8 +200,8 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
       setMachinesLoading(true)
       const { data, error } = await supabase
         .from('machines')
-        .select('id, client_id, machine_code, route_slug, active')
-        .eq('client_id', tenantClientId)
+        .select('id, company_id, machine_code, route_slug, active')
+        .eq('company_id', tenantCompanyId)
         .eq('active', true)
         .order('machine_code', { ascending: true })
 
@@ -146,7 +219,7 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
 
     loadTenantMachines()
     return () => { cancelled = true }
-  }, [tenantClientId])
+  }, [tenantCompanyId])
 
   // Busca prioridades do Supabase
   useEffect(() => {
@@ -158,7 +231,7 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
           .select('machine_id, priority')
           .order('machine_id', { ascending: true })
 
-        if (tenantClientId) q = q.eq('client_id', tenantClientId)
+        if (tenantCompanyId) q = q.eq('company_id', tenantCompanyId)
 
         const { data, error } = await q
 
@@ -191,7 +264,7 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
         (payload) => {
           const row = payload.new || payload.old
           if (!row) return
-          if (tenantClientId && row.client_id !== tenantClientId) return
+          if (tenantCompanyId && row.company_id !== tenantCompanyId) return
           setMachinePriorities((prev) => {
             const next = { ...prev }
             if (payload.eventType === 'DELETE') {
@@ -214,18 +287,17 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
         console.warn('Falha ao remover canal de prioridades:', err)
       }
     }
-  }, [tenantClientId])
+  }, [tenantCompanyId])
 
   async function handlePriorityChange(machineId, priorityValue) {
-    const userEmail = String(authUser?.email || '').toLowerCase();
-    if (userEmail !== 'gabrielalvesdesiqueira683@gmail.com') {
-      alert('Apenas o e-mail autorizado pode alterar prioridades.');
+    if (!canManageOperational) {
+      alert('Seu perfil não possui permissão para alterar prioridades.');
       return;
     }
     try {
       const val = priorityValue === '' || priorityValue == null ? null : Number(priorityValue)
       const payload = {
-        ...(tenantClientId ? { client_id: tenantClientId } : {}),
+        ...(tenantCompanyId ? { company_id: tenantCompanyId } : {}),
         machine_id: machineId,
         priority: val,
         updated_by: authUser?.email || null,
@@ -255,15 +327,15 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
       const key = String(e.key).toLowerCase();
       if (key === 'l') {
         e.preventDefault();
-        setTab('apontamento');
+        goToTab('apontamento');
       } else if (key === 'i') {
         e.preventDefault();
-        setTab('admin-itens');
+        goToTab('admin-itens');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [goToTab]);
 
   // central handler: recebe instrução do hook onStatusChange e abre modais localmente
   async function handleStatusChange(ordem, targetStatus){
@@ -291,35 +363,65 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
   useEffect(() => {
     if (!authChecked) return
     if (!authUser && tab !== 'login') {
-      setTab('login')
+      setTabInstant('login')
       return
     }
     if (!authUser) return
 
     if (!hasAccess) {
-      setTab('login')
+      setTabInstant('login')
+      return
+    }
+
+    if (mustChangePassword) {
+      if (tab !== 'login') setTabInstant('login')
       return
     }
 
     if (tab === 'login') {
-      setTab('painel')
+      goToTab('painel')
+      return
+    }
+
+    if (!canViewDashboard && tab === 'painel') {
+      setTabInstant('login')
+      return
+    }
+
+    if (!canAccessList && tab === 'lista') {
+      setTabInstant('painel')
+      return
+    }
+
+    if (!canMakeApontamentos && tab === 'apontamento') {
+      setTabInstant('painel')
       return
     }
 
     if (!canCreateOrder && tab === 'nova') {
-      setTab('painel')
+      setTabInstant('painel')
       return
     }
 
     if (!canViewRastreio && tab === 'rastreio') {
-      setTab('painel')
+      setTabInstant('painel')
       return
     }
 
     if (!hasGestaoAccess && tab === 'gestao') {
-      setTab('painel')
+      setTabInstant('painel')
+      return
     }
-  }, [authChecked, authUser, tab, hasAccess, canCreateOrder, canViewRastreio, hasGestaoAccess])
+
+    if (!canManageUsers && tab === 'usuarios') {
+      setTabInstant('painel')
+      return
+    }
+
+    if (!canManageCatalog && tab === 'admin-itens') {
+      setTabInstant('painel')
+    }
+  }, [authChecked, authUser, tab, hasAccess, mustChangePassword, canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, goToTab, setTabInstant])
 
   async function handleSignOut() {
     try {
@@ -327,13 +429,17 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
     } catch (err) {
       console.warn('Falha ao encerrar sessão:', err)
     } finally {
-      setTab('login')
+      setTabInstant('login')
     }
   }
 
   function handleLoginSuccess(user) {
     if (!user) return
-    setTab('painel')
+    if (user?.user_metadata?.must_change_password) {
+      setTabInstant('login')
+      return
+    }
+    goToTab('painel')
   }
 
   function renderBrandBar(subtitle) {
@@ -353,7 +459,10 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
     )
   }
 
-  const hasTenantRouteAccess = !!authUser && tenantAccessChecked && hasAccess
+  const hasTenantRouteAccess = !!authUser && tenantAccessChecked && hasAccess && !mustChangePassword
+  const hasPathPermission = canAccessPath(location?.pathname, {
+    has: (perm) => !!permissions?.hasPermission?.(perm),
+  })
 
   function renderTenantAccessRequired() {
     const accessDenied = !!authUser && tenantAccessChecked && !hasAccess
@@ -367,7 +476,12 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
             </div>
           </div>
         ) : null}
-        <Login onAuthenticated={handleLoginSuccess} showAdminShortcut={false} />
+        <Login
+          onAuthenticated={handleLoginSuccess}
+          showAdminShortcut={false}
+          tenantSubdomain={tenantCompany?.subdomain || null}
+          useUsernameLogin={!!tenantCompany?.subdomain}
+        />
       </div>
     )
   }
@@ -378,13 +492,16 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
     return (
       <div className="app">
         {renderBrandBar('Acesso Admin')}
-        <Login />
+        <Login
+          tenantSubdomain={tenantCompany?.subdomain || null}
+          useUsernameLogin={!!tenantCompany?.subdomain}
+        />
       </div>
     )
   }
 
   if (location && location.pathname === '/ficha') {
-    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
+    if (!hasTenantRouteAccess || !hasPathPermission) return renderTenantAccessRequired()
     return (
       <div className="app">
         {renderBrandBar('Ficha Técnica Digital')}
@@ -394,7 +511,7 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
   }
 
   if (location && location.pathname === '/indicadores') {
-    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
+    if (!hasTenantRouteAccess || !hasPathPermission) return renderTenantAccessRequired()
     return (
       <div className="app">
         {renderBrandBar('Indicadores por Setor')}
@@ -418,12 +535,12 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
 
   useEffect(() => {
     if (!invalidMachineRoute) return
-    setTab('painel')
+    setTabInstant('painel')
     navigate('/', { replace: true })
   }, [invalidMachineRoute, navigate])
 
   if (isMachineRoute) {
-    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
+    if (!hasTenantRouteAccess || !canUseProduction) return renderTenantAccessRequired()
     if (machinesLoading) {
       return <div className="app" style={{ padding: 24 }}>Carregando máquina...</div>
     }
@@ -432,16 +549,16 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
     }
 
     const machineId = String(resolvedMachine.machine_code || '').toUpperCase()
-    const ativosMaquina = ordens.filter(o => o.machine_id === machineId && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ativosMaquina = orders.filter(o => o.machine_id === machineId && !o.finalized).sort((a,b)=>(a.pos??999)-(b.pos??999))
     return (
       <>
         <Tablets
-          registroGrupos={registroGrupos}
+          registroGrupos={orderRecordGroups}
           ativosP1={ativosMaquina}
           machineId={machineId}
-          clientId={tenantClientId}
+          clientId={tenantCompanyId}
           tick={tick}
-          paradas={paradas}
+          paradas={stops}
           onStatusChange={handleStatusChange}
           setStartModal={setStartModal}
           setStopModal={setStopModal}
@@ -459,20 +576,20 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
           resumeModal={resumeModal} setResumeModal={setResumeModal}
           lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
           lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
-          onUpdateOrder={atualizar}
-          onFinalize={finalizar}
-          onConfirmStart={confirmarInicio}
-          onConfirmStop={confirmarParada}
-          onConfirmResume={confirmarRetomada}
-          onConfirmLowEffStart={confirmarBaixaEf}
-          onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
+          onUpdateOrder={updateOrder}
+          onFinalize={finalizeOrder}
+          onConfirmStart={confirmStart}
+          onConfirmStop={confirmStop}
+          onConfirmResume={confirmResume}
+          onConfirmLowEffStart={confirmLowEfficiency}
+          onConfirmLowEffEnd={confirmEndLowEfficiency}
         />
       </>
     );
   }
 
   if (location && location.pathname === '/prioridade') {
-    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
+    if (!hasTenantRouteAccess || !canManageOperational) return renderTenantAccessRequired()
     return (
       <div className="app">
         <Prioridade
@@ -486,7 +603,7 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
   }
 
   if (location && String(location.pathname || '').toLowerCase() === '/tv') {
-    if (!hasTenantRouteAccess) return renderTenantAccessRequired()
+    if (!hasTenantRouteAccess || !canViewTvPanel) return renderTenantAccessRequired()
     if (!tenantMachinesReady) {
       return <div className="app" style={{ padding: 24 }}>Carregando maquinas...</div>
     }
@@ -496,47 +613,21 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
         <PainelTV
           ativosPorMaquina={ativosPorMaquina}
           machineIds={machineIds}
-          paradas={paradas}
+          paradas={stops}
           tick={tick}
-          lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
+          lastFinalizadoPorMaquina={lastFinalizedByMachine}
         />
       </div>
     )
   }
 
-  // controle de abas e renderização
-
-  return (
-    <div className="app">
-
-
-{/* mostre a barra de marca apenas quando não estivermos no painel */}
-{tab !== 'painel' && tab !== 'login' && (
-  renderBrandBar('Controle da Produção')
-)}
-
-      {authUser && tenantAccessChecked && hasAccess && tab !== 'login' && (
-        <div className="tabs">
-          <>
-            <button className={`tabbtn ${tab==='painel'?'active':''}`} onClick={()=>setTab('painel')}>Painel</button>
-            <button className={`tabbtn ${tab==='lista'?'active':''}`} onClick={()=>setTab('lista')}>Lista</button>
-            {canCreateOrder && (
-              <button className={`tabbtn ${tab==='nova'?'active':''}`} onClick={()=>setTab('nova')}>Nova Ordem</button>
-            )}
-            {canViewRastreio && (
-              <button className={`tabbtn ${tab==='rastreio'?'active':''}`} onClick={()=>setTab('rastreio')}>Rastreio</button>
-            )}
-            {hasGestaoAccess && (
-              <button className={`tabbtn ${tab==='gestao'?'active':''}`} onClick={()=>setTab('gestao')}>Gestão</button>
-            )}
-            <button className="tabbtn" onClick={handleSignOut}>Sair</button>
-          </>
-        </div>
-      )}
-
-      {tab === 'login' && (
+  function renderTabContent() {
+    if (tab === 'login') {
+      return (
         <Login
           onAuthenticated={handleLoginSuccess}
+          tenantSubdomain={tenantCompany?.subdomain || null}
+          useUsernameLogin={!!tenantCompany?.subdomain}
           authenticatedTitle={authUser && tenantAccessChecked && !hasAccess ? 'Acesso negado' : 'Acesso liberado'}
           authenticatedDescription={authUser && tenantAccessChecked && !hasAccess
             ? 'Este usuário não possui acesso para este cliente.'
@@ -544,103 +635,201 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
           showAdminShortcut={false}
           allowContinueWhenAuthenticated={!authUser || !tenantAccessChecked || hasAccess}
         />
-      )}
+      )
+    }
 
-      {tab === 'admin-itens' && (
-        authChecked ? (
-          isAdmin ? (
-            <CadastroItens clientId={tenantClientId} />
-          ) : (
-            <div style={{ padding: 24 }}>
-              <h2>Acesso Negado</h2>
-              <p>Esta página não está disponível.</p>
-            </div>
-          )
-        ) : (
-          <div style={{ padding: 16 }}>
-            <small>Verificando permissões…</small>
+    if (tab === 'admin-itens') {
+      if (!authChecked) {
+        return <div style={{ padding: 16 }}><small>Verificando permissões…</small></div>
+      }
+      if (!canManageCatalog) {
+        return (
+          <div style={{ padding: 24 }}>
+            <h2>Acesso Negado</h2>
+            <p>Esta página não está disponível.</p>
           </div>
         )
-      )}
+      }
+      return <CadastroItens clientId={tenantCompanyId} canManage={canManageCatalog} />
+    }
 
-      {tab === 'painel' && tenantAccessChecked && hasAccess && (
-        tenantMachinesReady ? (
+    if (tab === 'painel' && tenantAccessChecked && hasAccess && canViewDashboard) {
+      if (!tenantMachinesReady) {
+        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+      }
+      return (
           <Painel
             ativosPorMaquina={ativosPorMaquina}
             machineIds={machineIds}
-            paradas={paradas}
+            paradas={stops}
             tick={tick}
             onStatusChange={handleStatusChange}
             setStartModal={setStartModal}
             setFinalizando={setFinalizando}
-            lastFinalizadoPorMaquina={lastFinalizadoPorMaquina}
-            onScanned={fetchOrdensAbertas}
+            lastFinalizadoPorMaquina={lastFinalizedByMachine}
+            onScanned={fetchOpenOrders}
             authUser={authUser}
             machinePriorities={machinePriorities}
+            clientId={tenantCompanyId}
+            readOnly={isTvOnly}
           />
-        ) : (
-          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-        )
-      )}
+      )
+    }
 
-      {tab === 'lista' && tenantAccessChecked && hasAccess && (
-        tenantMachinesReady ? (
-          <Lista
-            ativosPorMaquina={ativosPorMaquina}
-            machineIds={machineIds}
-            sensors={sensors}
-            onStatusChange={handleStatusChange}
-            setStartModal={setStartModal}
-            setEditando={setEditando}
-            setFinalizando={setFinalizando}
-            enviarParaFila={enviarParaFila}
-            refreshOrdens={fetchOrdensAbertas}
-            isAdmin={canEditOrder}
-            canReorder={canEditQueue}
-            canEditOrder={canEditOrder}
-            clientId={tenantClientId}
-          />
-        ) : (
-          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-        )
-      )}
+    if (tab === 'lista' && tenantAccessChecked && hasAccess && canAccessList) {
+      if (!tenantMachinesReady) {
+        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+      }
+      return (
+        <Lista
+          ativosPorMaquina={ativosPorMaquina}
+          machineIds={machineIds}
+          sensors={sensors}
+          onStatusChange={handleStatusChange}
+          setStartModal={setStartModal}
+          setEditando={setEditando}
+          setFinalizando={setFinalizando}
+          enviarParaFila={sendToQueue}
+          refreshOrdens={fetchOpenOrders}
+          isAdmin={canEditOrder}
+          canReorder={canEditQueue}
+          canEditOrder={canEditOrder}
+          clientId={tenantCompanyId}
+        />
+      )
+    }
 
-      {tab === 'nova' && canCreateOrder && (
-        canCreateOrder && tenantMachinesReady ? (
-          <NovaOrdem form={form} setForm={setForm} criarOrdem={() => criarOrdem(form, setForm, setTab)} clientId={tenantClientId} machineIds={machineIds} />
-        ) : canCreateOrder ? (
-          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-        ) : (
-          <div style={{ padding: 24 }}>
-            <h2>Acesso Negado</h2>
-            <p>Esta página não está disponível.</p>
-          </div>
-        )
-      )}
+    if (tab === 'nova' && canCreateOrder) {
+      if (!tenantMachinesReady) {
+        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+      }
+      return (
+        <NovaOrdem
+          form={form}
+          setForm={setForm}
+          criarOrdem={() => createOrder(form, setForm, goToTab)}
+          clientId={tenantCompanyId}
+          machineIds={machineIds}
+        />
+      )
+    }
 
-      {tab === 'rastreio' && canViewRastreio && (
-        <Rastreio clientId={tenantClientId} />
-      )}
+    if (tab === 'rastreio' && canViewRastreio) {
+      return <Rastreio clientId={tenantCompanyId} />
+    }
 
-      {tab === 'apontamento' && tenantAccessChecked && hasAccess && (
-        tenantMachinesReady ? (
-          <Apontamento isAdmin={isAdmin} clientId={tenantClientId} machineIds={machineIds} />
-        ) : (
-          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-        )
-      )}
+    if (tab === 'apontamento' && tenantAccessChecked && hasAccess && canMakeApontamentos) {
+      if (!tenantMachinesReady) {
+        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+      }
+      return <Apontamento isAdmin={isAdmin} clientId={tenantCompanyId} machineIds={machineIds} />
+    }
 
-      {tab === 'gestao' && hasGestaoAccess && (
-        hasGestaoAccess && tenantMachinesReady ? (
-          <Gestao clientId={tenantClientId} machineIds={machineIds} />
-        ) : hasGestaoAccess ? (
-          <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-        ) : (
-          <div style={{ padding: 24 }}>
-            <h2>Acesso Negado</h2>
-            <p>Esta página não está disponível.</p>
-          </div>
-        )
+    if (tab === 'gestao' && hasGestaoAccess) {
+      if (!tenantMachinesReady) {
+        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+      }
+      return <Gestao clientId={tenantCompanyId} machineIds={machineIds} />
+    }
+
+    if (tab === 'usuarios' && canManageUsers) {
+      return <Usuarios companyId={tenantCompanyId} canManageUsers={canManageUsers} />
+    }
+
+    return null
+  }
+
+  // controle de abas e renderização
+
+  const showDashboardShell = authUser && tenantAccessChecked && hasAccess && !mustChangePassword && tab !== 'login'
+
+  return (
+    <div className="app">
+      {showDashboardShell ? (
+        <div className={`dashboard-shell ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
+          <aside className="dashboard-sidebar" aria-label="Menu principal">
+            <div className="sidebar-brand">
+              <img
+                src="/Argos sem fundo.png"
+                alt="ARGOS"
+                className="sidebar-logo"
+                onError={(e)=>{ e.currentTarget.src='/ARGOS.png' }}
+              />
+              {!sidebarCollapsed && (
+                <div className="sidebar-brand-text">
+                  <strong>ARGOS</strong>
+                  <span>Controle Industrial</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="sidebar-collapse-btn"
+              onClick={() => setSidebarCollapsed((prev) => !prev)}
+              aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+            >
+              {sidebarCollapsed ? '>>' : '<<'}
+            </button>
+
+            <nav className="sidebar-nav">
+              {tabItems.map((item) => (
+                <button
+                  key={item.id}
+                  className={`sidebar-nav-item ${tab === item.id ? 'active' : ''}`}
+                  onClick={() => goToTab(item.id)}
+                  title={item.label}
+                >
+                  <span className="sidebar-nav-icon" aria-hidden="true">{item.short}</span>
+                  {!sidebarCollapsed && <span>{item.label}</span>}
+                </button>
+              ))}
+            </nav>
+
+            <button className="sidebar-signout" onClick={handleSignOut}>
+              <span className="sidebar-nav-icon" aria-hidden="true">SA</span>
+              {!sidebarCollapsed && <span>Sair</span>}
+            </button>
+          </aside>
+
+          <section className="dashboard-main">
+            <header className="dashboard-topbar">
+              <div className="topbar-title-group">
+                <h2>{currentTabLabel}</h2>
+                <span className="topbar-subtitle">Operacao em tempo real</span>
+              </div>
+
+              <div className="topbar-search-wrap">
+                <input
+                  className="topbar-search"
+                  type="search"
+                  placeholder="Busca rapida de O.P., produto ou maquina"
+                  value={quickSearch}
+                  onChange={(e) => setQuickSearch(e.target.value)}
+                />
+              </div>
+
+              <div className="topbar-right">
+                <div className="system-status-pill">Sistema Online</div>
+                <div className="system-clock" aria-live="polite">{nowLabel}</div>
+                <div className="topbar-user-pill">{authUser?.email || 'Usuario'}</div>
+              </div>
+            </header>
+
+            <div className="dashboard-content">
+              <TabTransition tabKey={tab} direction={tabDirection}>
+                {renderTabContent()}
+              </TabTransition>
+            </div>
+          </section>
+        </div>
+      ) : (
+        <>
+          {tab !== 'painel' && tab !== 'login' && renderBrandBar('Controle da Produção')}
+          <TabTransition tabKey={tab} direction={tabDirection}>
+            {renderTabContent()}
+          </TabTransition>
+        </>
       )}
 
       {/* Modais centralizados */}
@@ -652,14 +841,15 @@ export default function DemoApp({ tenantClient = null, isDemoEnvironment = false
         resumeModal={resumeModal} setResumeModal={setResumeModal}
         lowEffModal={lowEffModal} setLowEffModal={setLowEffModal}
         lowEffEndModal={lowEffEndModal} setLowEffEndModal={setLowEffEndModal}
-        onUpdateOrder={atualizar}
-        onFinalize={finalizar}
-        onConfirmStart={confirmarInicio}
-        onConfirmStop={confirmarParada}
-        onConfirmResume={confirmarRetomada}
-        onConfirmLowEffStart={confirmarBaixaEf}
-        onConfirmLowEffEnd={confirmarEncerrarBaixaEf}
+        onUpdateOrder={updateOrder}
+        onFinalize={finalizeOrder}
+        onConfirmStart={confirmStart}
+        onConfirmStop={confirmStop}
+        onConfirmResume={confirmResume}
+        onConfirmLowEffStart={confirmLowEfficiency}
+        onConfirmLowEffEnd={confirmEndLowEfficiency}
       />
     </div>
   )
 }
+

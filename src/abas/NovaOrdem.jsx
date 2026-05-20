@@ -1,10 +1,10 @@
 // src/abas/NovaOrdem.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
-import { MAQUINAS } from '../lib/constants'
+import { MAQUINAS } from '../domain/constants'
 import Modal from '../components/Modal'
 
-export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId = null, machineIds = MAQUINAS }) {
+export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
   // ====== Busca de itens ligada ao campo "Produto" ======
   const [qProd, setQProd] = useState(form.product || '') // espelho do campo Produto
   const [suggestions, setSuggestions] = useState([])
@@ -13,22 +13,27 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
   const [pickedItem, setPickedItem] = useState(null)
   const [openList, setOpenList] = useState(false)
   const [checkingItemCode, setCheckingItemCode] = useState(false)
+  const [creatingOrder, setCreatingOrder] = useState(false)
   const [missingItemModal, setMissingItemModal] = useState({ open: false, code: '' })
+  const [duplicateOrderModal, setDuplicateOrderModal] = useState({ open: false, code: '', matches: [], pendingForm: null, busy: false })
   const debRef = useRef(null)
   const listRef = useRef(null)
-  const availableMachines = useMemo(() => {
-    const src = Array.isArray(machineIds) && machineIds.length ? machineIds : MAQUINAS
-    return src
-      .map((m) => String(m || '').trim().toUpperCase())
-      .filter(Boolean)
-  }, [machineIds])
+  const creatingOrderRef = useRef(false)
 
-  useEffect(() => {
-    if (!availableMachines.length) return
-    const current = String(form.machine_id || '').trim().toUpperCase()
-    if (current && availableMachines.includes(current)) return
-    setForm((f) => ({ ...f, machine_id: availableMachines[0] }))
-  }, [availableMachines, form.machine_id, setForm])
+  const parseNonNegNumber = (value) => {
+    const num = Number(String(value || '').replace(',', '.').trim())
+    return Number.isFinite(num) && num >= 0 ? num : null
+  }
+
+  const buildEmbalagemNote = (notes, embalagem) => {
+    const trimmedNotes = String(notes || '').trim()
+    const trimmedEmbalagem = String(embalagem || '').trim()
+    if (!trimmedEmbalagem) return trimmedNotes
+    const noteText = `Embalagem: ${trimmedEmbalagem}`
+    if (!trimmedNotes) return noteText
+    if (trimmedNotes.includes(noteText)) return trimmedNotes
+    return `${trimmedNotes} ${noteText}`
+  }
 
   // mantém qProd sincronizado quando a tela monta
   useEffect(() => { setQProd(form.product || '') }, []) // ao montar
@@ -69,16 +74,12 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
       ors.unshift(`code.ilike.%${escapeLike(codeGuess)}%`)
     }
 
-    let query = supabase
+    const { data, error } = await supabase
       .from('items')
-      .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin')
+      .select('id, code, description, color, cycle_seconds, cavities, padrao, embalagem, part_weight_g, unit_value, resin')
       .or(ors.join(','))
       .order('code', { ascending: true })
       .limit(12)
-
-    if (clientId) query = query.eq('client_id', clientId)
-
-    const { data, error } = await query
 
     setLoading(false)
     if (error) { setErr(error.message); setSuggestions([]); setOpenList(false); return }
@@ -110,43 +111,121 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
   function applyItem(item, opts = {}) {
     setPickedItem(item)
     setQProd(`${item.code} - ${item.description}`)
-    setForm(f => ({
-      ...f,
-      product: `${item.code} - ${item.description}`,
-      color: (opts.keepUserColorIfDifferent && f.color && f.color !== '' && f.color !== item.color)
-        ? f.color
-        : (item.color || '')
-    }))
+    setForm(f => {
+      const standardValue = item.padrao != null && item.padrao !== '' ? String(item.padrao) : f.standard || ''
+      const nextNotes = buildEmbalagemNote(f.notes, item.embalagem)
+      const nextForm = {
+        ...f,
+        product: `${item.code} - ${item.description}`,
+        color: (opts.keepUserColorIfDifferent && f.color && f.color !== '' && f.color !== item.color)
+          ? f.color
+          : (item.color || ''),
+        standard: standardValue,
+        notes: nextNotes,
+      }
+      const qty = parseNonNegNumber(nextForm.qty)
+      const padrao = parseNonNegNumber(standardValue)
+      if (qty != null && padrao != null && padrao > 0) {
+        nextForm.boxes = String(Number((qty / padrao).toFixed(2)))
+      }
+      return nextForm
+    })
+  }
+
+  async function submitCreateOrder(nextForm) {
+    if (creatingOrderRef.current) return false
+
+    creatingOrderRef.current = true
+    setCreatingOrder(true)
+    try {
+      return (await criarOrdem(nextForm, setForm, setTab)) !== false
+    } finally {
+      creatingOrderRef.current = false
+      setCreatingOrder(false)
+    }
+  }
+
+  function closeDuplicateOrderModal() {
+    if (duplicateOrderModal.busy) return
+    setDuplicateOrderModal({ open: false, code: '', matches: [], pendingForm: null, busy: false })
+  }
+
+  async function confirmDuplicateOrderCreation() {
+    const pendingForm = duplicateOrderModal.pendingForm
+    if (!pendingForm || creatingOrderRef.current) return
+
+    setDuplicateOrderModal(prev => ({ ...prev, busy: true }))
+    const created = await submitCreateOrder(pendingForm)
+    if (created) {
+      setDuplicateOrderModal({ open: false, code: '', matches: [], pendingForm: null, busy: false })
+      return
+    }
+
+    setDuplicateOrderModal(prev => ({ ...prev, busy: false }))
+  }
+
+  async function validateDuplicateOrder(nextForm) {
+    const normalizedCode = String(nextForm?.code || '').trim()
+    if (!normalizedCode) return false
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, code, machine_id, status, finalized, created_at')
+      .eq('code', normalizedCode)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if (error) {
+      alert('Não foi possível validar o número da O.P.: ' + error.message)
+      return false
+    }
+
+    if (!data?.length) {
+      return await submitCreateOrder(nextForm)
+    }
+
+    setDuplicateOrderModal({
+      open: true,
+      code: normalizedCode,
+      matches: data,
+      pendingForm: nextForm,
+      busy: false,
+    })
+    return false
   }
 
   async function handleCreateOrder() {
+    if (creatingOrderRef.current) return
+
+    const baseForm = {
+      ...form,
+      code: String(form.code || '').trim(),
+    }
+
     const term = String(qProd || '').trim()
     if (!term) {
-      criarOrdem(form, setForm, setTab)
+      await validateDuplicateOrder(baseForm)
       return
     }
 
     if (pickedItem && isExactProductMatch(term, pickedItem)) {
-      criarOrdem(form, setForm, setTab)
+      await validateDuplicateOrder(baseForm)
       return
     }
 
     const codeGuess = term.split('-')[0]?.trim()
     if (!codeGuess) {
-      criarOrdem(form, setForm, setTab)
+      await validateDuplicateOrder(baseForm)
       return
     }
 
     setCheckingItemCode(true)
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from('items')
-        .select('id, code, description, color, cycle_seconds, cavities, part_weight_g, unit_value, resin')
+        .select('id, code, description, color, cycle_seconds, cavities, padrao, embalagem, part_weight_g, unit_value, resin')
         .eq('code', codeGuess)
-
-      if (clientId) query = query.eq('client_id', clientId)
-
-      const { data, error } = await query.maybeSingle()
+        .maybeSingle()
 
       if (error) {
         setErr(error.message || 'Não foi possível validar o código do item.')
@@ -162,16 +241,25 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
       const nextColor = (form.color && form.color !== '' && form.color !== data.color)
         ? form.color
         : (data.color || '')
+      const standardValue = data.padrao != null && data.padrao !== '' ? String(data.padrao) : baseForm.standard || ''
+      const nextNotes = buildEmbalagemNote(baseForm.notes, data.embalagem)
       const nextForm = {
-        ...form,
+        ...baseForm,
         product: nextProduct,
         color: nextColor,
+        standard: standardValue,
+        notes: nextNotes,
+      }
+      const qty = parseNonNegNumber(nextForm.qty)
+      const padrao = parseNonNegNumber(standardValue)
+      if (qty != null && padrao != null && padrao > 0) {
+        nextForm.boxes = String(Number((qty / padrao).toFixed(2)))
       }
 
       setPickedItem(data)
       setQProd(nextProduct)
       setForm(nextForm)
-      criarOrdem(nextForm, setForm, setTab)
+      await validateDuplicateOrder(nextForm)
     } finally {
       setCheckingItemCode(false)
     }
@@ -194,6 +282,8 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
     return [
       ['Ciclo (s)', it.cycle_seconds],
       ['Cavidades', it.cavities],
+      ['Padrão', it.padrao],
+      ['Embalagem', it.embalagem],
       ['Peso (g)', it.part_weight_g],
       ['Valor (R$)', it.unit_value],
       ['Resina', it.resin],
@@ -223,7 +313,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
               value={form.machine_id}
               onChange={e=>setForm(f=>({...f, machine_id:e.target.value}))}
             >
-              {availableMachines.map(m=><option key={m} value={m}>{m}</option>)}
+              {MAQUINAS.map(m=><option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 
@@ -297,9 +387,31 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
           </div>
 
           {/* Restante dos campos */}
-          <div><div className="label">Quantidade</div><input className="input" value={form.qty} onChange={e=>setForm(f=>({...f, qty:e.target.value}))}/></div>
+          <div><div className="label">Quantidade</div><input className="input" value={form.qty} onChange={e=>{
+              const qtyValue = e.target.value
+              setForm(f=>{
+                const next = { ...f, qty: qtyValue }
+                const qtyNum = parseNonNegNumber(qtyValue)
+                const padraoNum = parseNonNegNumber(f.standard)
+                if (qtyNum != null && padraoNum != null && padraoNum > 0) {
+                  next.boxes = String(Number((qtyNum / padraoNum).toFixed(2)))
+                }
+                return next
+              })
+            }}/></div>
           <div><div className="label">Volumes</div><input className="input" value={form.boxes} onChange={e=>setForm(f=>({...f, boxes:e.target.value}))}/></div>
-          <div><div className="label">Padrão</div><input className="input" value={form.standard} onChange={e=>setForm(f=>({...f, standard:e.target.value}))}/></div>
+          <div><div className="label">Padrão</div><input className="input" value={form.standard} onChange={e=>{
+              const standardValue = e.target.value
+              setForm(f=>{
+                const next = { ...f, standard: standardValue }
+                const qtyNum = parseNonNegNumber(f.qty)
+                const padraoNum = parseNonNegNumber(standardValue)
+                if (qtyNum != null && padraoNum != null && padraoNum > 0) {
+                  next.boxes = String(Number((qtyNum / padraoNum).toFixed(2)))
+                }
+                return next
+              })
+            }}/></div>
           <div><div className="label">Prazo de Entrega</div><input type="date" className="input" value={form.due_date} onChange={e=>setForm(f=>({...f, due_date:e.target.value}))}/></div>
           <div><div className="label">Observações</div><input className="input" value={form.notes} onChange={e=>setForm(f=>({...f, notes:e.target.value}))}/></div>
         </div>
@@ -314,8 +426,8 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
         )}
 
         <div className="sep"></div>
-        <button className="btn primary" onClick={handleCreateOrder} disabled={checkingItemCode}>
-          {checkingItemCode ? 'Validando item…' : 'Adicionar'}
+        <button className="btn primary" onClick={handleCreateOrder} disabled={checkingItemCode || creatingOrder}>
+          {creatingOrder ? 'Criando...' : checkingItemCode ? 'Validando item…' : 'Adicionar'}
         </button>
       </div>
 
@@ -338,8 +450,56 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, clientId 
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={duplicateOrderModal.open}
+        onClose={closeDuplicateOrderModal}
+        title="O.P. já cadastrada"
+        closeOnBackdrop={!duplicateOrderModal.busy}
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ margin: 0 }}>
+            Já existe uma O.P. com o número <b>{duplicateOrderModal.code || '-'}</b> registrado.
+          </p>
+          <p style={{ margin: 0 }}>
+            Deseja realmente gerar outra ordem com este mesmo número?
+          </p>
+
+          {!!duplicateOrderModal.matches.length && (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {duplicateOrderModal.matches.map((match) => {
+                const statusLabel = match.finalized ? 'FINALIZADA' : (match.status || 'SEM STATUS')
+                return (
+                  <div key={match.id} style={duplicateRow}>
+                    <strong>{match.machine_id || 'SEM MÁQUINA'}</strong>
+                    <span>{statusLabel}</span>
+                    <span>{formatOrderCreatedAt(match.created_at)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn" onClick={closeDuplicateOrderModal} disabled={duplicateOrderModal.busy}>
+              Cancelar
+            </button>
+            <button className="btn primary" onClick={confirmDuplicateOrderCreation} disabled={duplicateOrderModal.busy}>
+              {duplicateOrderModal.busy ? 'Gerando...' : 'Gerar mesmo assim'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
+}
+
+function formatOrderCreatedAt(value) {
+  if (!value) return 'Sem data'
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return 'Sem data'
+  return parsed.toLocaleString('pt-BR')
 }
 
 /* ===== estilos locais da dropdown/pílulas ===== */
@@ -358,4 +518,14 @@ const pill = {
   borderRadius: 999,
   fontSize: 12,
   background: '#fafafa',
+}
+const duplicateRow = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(90px, 1fr) minmax(120px, 1fr) minmax(150px, 1.2fr)',
+  gap: 8,
+  padding: '10px 12px',
+  border: '1px solid #e7e7e7',
+  borderRadius: 10,
+  background: '#fafafa',
+  alignItems: 'center',
 }

@@ -7,7 +7,7 @@ import { getTurnoAtual, statusClass } from "../lib/utils";
 import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
-import { REFUGO_MOTIVOS } from "../lib/constants";
+import { REFUGO_MOTIVOS } from "../domain/constants";
 import useTabletMonitor from "../hooks/useTabletMonitor";
 import { normalizeTabletCode } from "../lib/tabletCode";
 
@@ -27,7 +27,7 @@ export default function Pet01({
   clientId = null,
 }) {
   const machineId = String(machineIdProp || "P1").toUpperCase();
-  const withClient = (query) => (clientId ? query.eq('client_id', clientId) : query);
+  const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query);
   // estados principais
   const [ativa, setAtiva] = useState(null);
   const [proximo, setProximo] = useState(null);
@@ -334,7 +334,7 @@ const [currentShift, setCurrentShift] = useState(() => {
     try {
       const nowBr = DateTime.now().setZone("America/Sao_Paulo");
       const payload = {
-        ...(clientId ? { client_id: clientId } : {}),
+        ...(clientId ? { company_id: clientId } : {}),
         machine_id: machineId,
         shift: String(shiftInfo.shiftKey),
         operator: nome,
@@ -385,7 +385,7 @@ async function biparWithCode(code) {
   const { data: dup, error: dupErr } = await supabase
     .from("production_scans")
     .select("id")
-    .eq("client_id", ativa?.client_id || clientId)
+    .eq("company_id", ativa?.company_id || clientId)
     .eq("order_id", ativa.id)
     .eq("scanned_box", caixa)
     .maybeSingle();
@@ -426,7 +426,7 @@ async function biparWithCode(code) {
   console.info("[biparWithCode] turnoCalc (getTurnoAtual):", turnoCalc);
 
   const payload = {
-    ...(clientId ? { client_id: clientId } : {}),
+    ...(clientId ? { company_id: clientId } : {}),
     created_at: createdAtUtcIso,
     machine_id: machineId,
     shift: turnoCalc,
@@ -832,7 +832,7 @@ if (typeof window !== "undefined") {
 
           // payload final compatível com scrap_logs
             const payload = {
-          ...(clientId ? { client_id: clientId } : {}),
+          ...(clientId ? { company_id: clientId } : {}),
     created_at: createdAtUtcIso,           // grava o UTC correspondente ao horário BR
     machine_id: ativa.machine_id,
     shift: turnoCalc,
@@ -940,3 +940,4 @@ if (typeof window !== "undefined") {
     </div>
   );
 }
+

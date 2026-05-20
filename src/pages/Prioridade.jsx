@@ -1,5 +1,5 @@
 import React from "react";
-import { MAQUINAS } from "../lib/constants";
+import { MAQUINAS } from "../domain/constants";
 
 export default function Prioridade({ machinePriorities = {}, onChangePriority, loading, authUser }) {
   const canEdit = authUser?.email?.toLowerCase() === "nfe@savantiplasticos.com.br";
