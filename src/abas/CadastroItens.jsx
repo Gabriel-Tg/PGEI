@@ -80,7 +80,9 @@ const getFileExtension = (fileName = '') => {
 
 const sanitizeCodeForPath = (value) => String(value ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
 
-export default function CadastroItens({ canManage = false }) {
+export default function CadastroItens({ canManage = false, clientId = null, companyId = null }) {
+  const tenantCompanyId = cleanText(companyId || clientId) || null
+
   // ============== AUTH / ADMIN ONLY GATE ==============
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -108,10 +110,13 @@ export default function CadastroItens({ canManage = false }) {
   const fetchItems = async () => {
     setLoading(true)
     setError(null)
-    const { data, error } = await supabase
+    let query = supabase
       .from('items')
       .select('*')
-      .order('code', { ascending: true })
+    if (tenantCompanyId) {
+      query = query.eq('company_id', tenantCompanyId)
+    }
+    const { data, error } = await query.order('code', { ascending: true })
     if (error) {
       setError(error.message)
       setItems([])
@@ -173,14 +178,21 @@ export default function CadastroItens({ canManage = false }) {
 
     try {
       const [structureRes, purchasesRes] = await Promise.all([
-        supabase
-          .from('item_structures')
-          .select('*')
-          .eq('finished_item_code', finishedCode)
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('estoque_purchases')
-          .select('item_code,balance')
+        (() => {
+          let q = supabase
+            .from('item_structures')
+            .select('*')
+            .eq('finished_item_code', finishedCode)
+          if (tenantCompanyId) q = q.eq('company_id', tenantCompanyId)
+          return q.order('created_at', { ascending: true })
+        })(),
+        (() => {
+          let q = supabase
+            .from('estoque_purchases')
+            .select('item_code,balance')
+          if (tenantCompanyId) q = q.eq('company_id', tenantCompanyId)
+          return q
+        })()
       ])
 
       if (structureRes.error) throw structureRes.error
@@ -246,6 +258,10 @@ export default function CadastroItens({ canManage = false }) {
 
   async function handleSaveStructure() {
     if (!structureItem?.code) return
+    if (!tenantCompanyId) {
+      setStructureErr('Empresa não identificada para salvar estrutura.')
+      return
+    }
     setStructureErr(null)
 
     const finishedCode = cleanText(structureItem.code)
@@ -273,11 +289,14 @@ export default function CadastroItens({ canManage = false }) {
         .from('item_structures')
         .delete()
         .eq('finished_item_code', finishedCode)
+        .eq('company_id', tenantCompanyId)
 
       if (deleteErr) throw deleteErr
 
       if (normalizedRows.length > 0) {
         const payload = normalizedRows.map((row) => ({
+          company_id: tenantCompanyId,
+          client_id: tenantCompanyId,
           finished_item_code: finishedCode,
           input_item_code: row.itemCode,
           quantity_per_piece: row.quantityPerPiece,
@@ -426,6 +445,10 @@ export default function CadastroItens({ canManage = false }) {
   }
   const handleSave = async () => {
     setFormErr(null)
+    if (!editing?.id && !tenantCompanyId) {
+      setFormErr('Empresa não identificada para cadastro de item.')
+      return
+    }
     const err = validate()
     if (err) { setFormErr(err); return }
     const code = cleanText(form.code)
@@ -480,7 +503,11 @@ export default function CadastroItens({ canManage = false }) {
     if (editing?.id) {
       q = supabase.from('items').update(payload).eq('id', editing.id)
     } else {
-      q = supabase.from('items').insert(payload)
+      q = supabase.from('items').insert({
+        ...payload,
+        company_id: tenantCompanyId,
+        client_id: tenantCompanyId,
+      })
     }
     const { error } = await q
     if (error) {
@@ -587,6 +614,11 @@ export default function CadastroItens({ canManage = false }) {
   }
 
   async function handleImportCSV(file) {
+    if (!tenantCompanyId) {
+      setImportErr('Empresa não identificada para importação de itens.')
+      return
+    }
+
     // tenta autodetectar, depois força delimitadores comuns (Excel PT-BR usa ;)
     const delimiters = [undefined, ';', '\t', ',']
     let best = null
@@ -622,8 +654,12 @@ export default function CadastroItens({ canManage = false }) {
     let failed = null
     const CHUNK = 300
     for (let i = 0; i < best.mapped.length; i += CHUNK) {
-      const slice = best.mapped.slice(i, i + CHUNK)
-      const { error } = await supabase.from('items').upsert(slice, { onConflict: 'code', ignoreDuplicates: true })
+      const slice = best.mapped.slice(i, i + CHUNK).map((row) => ({
+        ...row,
+        company_id: tenantCompanyId,
+        client_id: tenantCompanyId,
+      }))
+      const { error } = await supabase.from('items').upsert(slice, { onConflict: 'company_id,code', ignoreDuplicates: true })
       if (error) { failed = error.message; break }
     }
     setImporting(false)

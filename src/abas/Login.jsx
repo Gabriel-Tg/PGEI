@@ -62,21 +62,6 @@ export default function Login({
         return
       }
 
-      if (isDemoEnvironment && id === 'demo' && password === 'demo1234') {
-        const demoUser = { id: 'demo', email: 'demo', user_metadata: {} }
-        try {
-          localStorage.setItem('demoAuthUser', JSON.stringify(demoUser))
-          window.dispatchEvent(new Event('demo-auth-changed'))
-        } catch {
-          // ignore
-        }
-        setUser(demoUser)
-        if (typeof onAuthenticated === 'function') {
-          onAuthenticated(demoUser)
-        }
-        return
-      }
-
       let loginEmail = id
       if (useUsernameLogin) {
         if (id.includes('@')) {
@@ -164,16 +149,6 @@ export default function Login({
   }
 
   async function signOut() {
-    if (isDemoEnvironment) {
-      try {
-        localStorage.removeItem('demoAuthUser')
-        window.dispatchEvent(new Event('demo-auth-changed'))
-      } catch {
-        // ignore
-      }
-      setUser(null)
-      return
-    }
     await supabase.auth.signOut()
     setUser(null)
   }

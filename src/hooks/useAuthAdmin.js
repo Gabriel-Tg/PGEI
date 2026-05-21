@@ -12,7 +12,7 @@ import {
   permissionSetForRole,
 } from '../domain/rbac'
 
-export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = false } = {}){
+export default function useAuthAdmin(tenantCompanyId = null){
   const [authUser, setAuthUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [tenantAccess, setTenantAccess] = useState(false)
@@ -32,17 +32,7 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
         return
       }
 
-      if (isDemoTenant) {
-        try {
-          const stored = localStorage.getItem('demoAuthUser')
-          if (stored) {
-            const parsed = JSON.parse(stored)
-            setAuthUser(parsed)
-          }
-        } catch {
-          // ignore corrupt demo session
-        }
-      }
+      setAuthUser(null)
       setAuthChecked(true)
     })()
 
@@ -53,16 +43,7 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
         setAuthChecked(true)
         return
       }
-      if (isDemoTenant) {
-        try {
-          const stored = localStorage.getItem('demoAuthUser')
-          setAuthUser(stored ? JSON.parse(stored) : null)
-        } catch {
-          setAuthUser(null)
-        }
-      } else {
-        setAuthUser(null)
-      }
+      setAuthUser(null)
       setAuthChecked(true)
     })
     authSubscription = listenerData?.subscription ?? null
@@ -75,22 +56,7 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
         // noop
       }
     }
-  }, [isDemoTenant])
-
-  useEffect(() => {
-    if (!isDemoTenant) return
-    const onDemoAuthChange = () => {
-      try {
-        const stored = localStorage.getItem('demoAuthUser')
-        setAuthUser(stored ? JSON.parse(stored) : null)
-      } catch {
-        setAuthUser(null)
-      }
-      setAuthChecked(true)
-    }
-    window.addEventListener('demo-auth-changed', onDemoAuthChange)
-    return () => window.removeEventListener('demo-auth-changed', onDemoAuthChange)
-  }, [isDemoTenant])
+  }, [])
 
   const isAdmin = useMemo(() => {
     const email = authUser?.email?.toLowerCase()
@@ -123,14 +89,6 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
       if (isAdmin) {
         setTenantAccess(true)
         setTenantRole(USER_ROLES.ADMIN)
-        setTenantAccessChecked(true)
-        return
-      }
-
-      if (isDemoTenant) {
-        const email = String(authUser?.email || '').trim().toLowerCase()
-        setTenantAccess(!!email)
-        setTenantRole(email ? USER_ROLES.MANAGER : null)
         setTenantAccessChecked(true)
         return
       }
@@ -182,7 +140,7 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
 
     checkTenantAccess()
     return () => { cancelled = true }
-  }, [authChecked, authUser, isAdmin, isProducao, isDemoTenant, tenantCompanyId])
+  }, [authChecked, authUser, isAdmin, isProducao, tenantCompanyId])
 
   const hasAccess = useMemo(() => {
     if (isAdmin) return true
