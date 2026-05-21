@@ -164,6 +164,15 @@
     grid-template-columns: 1fr;
   }
 
+  .dashboard-overview .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-overview .kpi-card-scrap,
+  .dashboard-overview .kpi-card-stops {
+    display: none;
+  }
+
   .grid2 .flex {
     justify-content: stretch;
     flex-wrap: wrap;

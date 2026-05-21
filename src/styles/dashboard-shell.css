@@ -819,6 +819,41 @@
   overflow-x: auto;
 }
 
+.orders-mobile-list {
+  display: none;
+}
+
+.orders-mobile-item {
+  border-radius: 14px;
+  border: 1px solid rgba(69, 116, 185, 0.2);
+  background: rgba(10, 22, 41, 0.92);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.orders-mobile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.orders-mobile-product {
+  margin: 0;
+  color: #c8d9f1;
+  font-size: 0.9rem;
+}
+
+.orders-mobile-qty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .orders-table {
   width: 100%;
   min-width: 760px;
@@ -974,5 +1009,107 @@
 
   .line-chart-labels {
     font-size: 10px;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-overview,
+  .dashboard-charts-grid,
+  .orders-layout,
+  .overview-chart-card,
+  .donut-card,
+  .orders-table-card,
+  .stop-reason-card,
+  .line-chart-wrap,
+  .donut-wrap,
+  .stop-reason-list {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .kpi-card-scrap,
+  .kpi-card-stops {
+    display: none;
+  }
+
+  .kpi-card {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .kpi-value {
+    font-size: clamp(19px, 5.4vw, 24px);
+  }
+
+  .chart-filter-row {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .overview-chart-card,
+  .donut-card,
+  .orders-table-card,
+  .stop-reason-card {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .overview-chart-card header,
+  .donut-card header,
+  .orders-table-card header,
+  .stop-reason-card header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .line-chart-svg {
+    height: 180px;
+  }
+
+  .line-chart-labels {
+    font-size: 10px;
+    gap: 4px;
+  }
+
+  .line-chart-legend {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .donut-wrap {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .donut-chart {
+    width: 150px;
+    height: 150px;
+  }
+
+  .orders-table-responsive {
+    display: none;
+  }
+
+  .orders-mobile-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .orders-mobile-head .status-badge {
+    font-size: 10px;
+    padding: 5px 8px;
+  }
+
+  .stop-tooltip,
+  .line-tooltip {
+    position: static;
+    margin-top: 8px;
   }
 }

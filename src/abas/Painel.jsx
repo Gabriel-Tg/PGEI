@@ -1003,19 +1003,19 @@ export default function Painel({
     <div className="board-wrapper">
       <section className="dashboard-overview">
         <div className="kpi-grid">
-          <article className="kpi-card">
+          <article className="kpi-card kpi-card-produced">
             <p className="kpi-label">Produção no Período</p>
             <strong className="kpi-value">{formatCompactNumber(overview.producedPieces)} peças</strong>
             <span className="kpi-meta">{formatCompactNumber(overview.producedBoxes)} caixas</span>
           </article>
-          <article className="kpi-card">
+          <article className="kpi-card kpi-card-scrap">
             <p className="kpi-label">Refugo</p>
             <strong className="kpi-value">{overview.scrapPct.toFixed(1)}%</strong>
             <span className={`kpi-trend ${overview.scrapPct <= 5 ? 'up' : 'down'}`}>
               {formatCompactNumber(overview.scrapPieces)} peças refugadas
             </span>
           </article>
-          <article className="kpi-card">
+          <article className="kpi-card kpi-card-efficiency">
             <p className="kpi-label">Eficiência</p>
             <strong className="kpi-value">{overview.efficiency.toFixed(1)}%</strong>
             <span className={`kpi-trend ${overview.efficiency >= 80 ? 'up' : 'down'}`}>
@@ -1025,7 +1025,7 @@ export default function Painel({
               Meta agora: {formatCompactNumber(Math.round(overview.metaNowBoxes || 0))} cx • {formatCompactNumber(Math.round(overview.metaNowPieces || 0))} pç
             </span>
           </article>
-          <article className="kpi-card">
+          <article className="kpi-card kpi-card-stops">
             <p className="kpi-label">Paradas</p>
             <strong className="kpi-value">{overview.openStopCount}</strong>
             <span className="kpi-meta">
@@ -1213,6 +1213,30 @@ export default function Painel({
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="orders-mobile-list" aria-label="Lista simplificada de ordens em andamento">
+              {ongoingOrders.length === 0 ? (
+                <div className="orders-empty">Nenhuma ordem em andamento no momento.</div>
+              ) : (
+                ongoingOrders.map((order) => (
+                  <article className="orders-mobile-item" key={`mobile-${order.machine}-${order.order}`}>
+                    <div className="orders-mobile-head">
+                      <strong>{order.machine} • {order.order}</strong>
+                      <span className={getStatusBadge(order.status)}>{getStatusLabel(order.status)}</span>
+                    </div>
+                    <p className="orders-mobile-product">{order.product}</p>
+                    <div className="orders-mobile-qty">
+                      <span>Produzido: {order.producedBoxes.toLocaleString('pt-BR')} cx</span>
+                      <span>Meta: {order.plannedBoxes.toLocaleString('pt-BR')} cx</span>
+                    </div>
+                    <div className="progress-bar" aria-label={`Progresso ${order.progress}%`}>
+                      <div className="progress-bar-fill" style={{ width: `${order.progress}%` }} />
+                    </div>
+                    <span className="progress-label">{order.progress}% concluído</span>
+                  </article>
+                ))
+              )}
             </div>
           </div>
 
