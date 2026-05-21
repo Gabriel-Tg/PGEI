@@ -12,15 +12,15 @@
   gap: 8px;
   padding: 6px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #e2e8f0, #f8fafc);
-  border: 1px solid #dbe3ee;
+  background: var(--panel);
+  border: 1px solid var(--border);
   width: fit-content;
 }
 
 .rastreio-view-btn {
   border: none;
   background: transparent;
-  color: #334155;
+  color: var(--text);
   font-weight: 700;
   padding: 10px 14px;
   border-radius: 10px;
@@ -33,9 +33,9 @@
 }
 
 .rastreio-view-btn.active {
-  background: linear-gradient(135deg, #0f172a, #1d4ed8);
-  color: #fff;
-  box-shadow: 0 10px 22px rgba(29, 78, 216, 0.22);
+  background: linear-gradient(135deg, rgba(28, 136, 255, 0.18), rgba(77, 135, 231, 0.18));
+  color: var(--text);
+  box-shadow: 0 10px 22px rgba(28, 136, 255, 0.18);
 }
 
 .rastreio-header {
@@ -56,14 +56,16 @@
 .rastreio-form input[type="text"] {
   min-width: 180px;
   padding: 10px 12px;
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
+  background: var(--bg-soft);
+  color: var(--text);
 }
 
 .rastreio-form button {
   padding: 10px 14px;
-  background: #0d6efd;
+  background: var(--primary);
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -74,16 +76,16 @@
 
 .rastreio-form button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(13, 110, 253, 0.18);
+  box-shadow: 0 6px 16px rgba(28, 136, 255, 0.18);
 }
 
 .rastreio-status {
   padding: 10px 14px;
   border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--border);
   font-size: 13px;
-  color: #334155;
+  color: var(--text);
 }
 
 .rastreio-cards {
@@ -93,21 +95,21 @@
 }
 
 .rastreio-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  background: var(--card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
 }
 
 .rastreio-card strong {
   display: block;
   font-size: 13px;
-  color: #0f172a;
+  color: var(--heading);
 }
 
 .rastreio-card span {
-  color: #475569;
+  color: var(--muted-strong);
   font-size: 12px;
 }
 
@@ -132,7 +134,7 @@
 .rastreio-filter-group label {
   font-size: 12px;
   font-weight: 700;
-  color: #475569;
+  color: var(--muted-strong);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -141,10 +143,11 @@
 .rastreio-filter-group input {
   min-height: 42px;
   padding: 10px 12px;
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 14px;
-  background: #fff;
+  background: var(--bg-soft);
+  color: var(--text);
 }
 
 .rastreio-summary-highlights {
@@ -156,46 +159,46 @@
 .rastreio-summary-highlight-card {
   border-radius: 14px;
   padding: 14px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: var(--card);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 .rastreio-summary-highlight-card span,
 .rastreio-summary-highlight-card small {
-  color: #475569;
+  color: var(--muted-strong);
 }
 
 .rastreio-summary-highlight-card strong {
   font-size: 28px;
   line-height: 1;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .rastreio-summary-highlight-card.good {
-  background: linear-gradient(135deg, #ecfdf3, #f8fffb);
-  border-color: #b7ebc6;
+  background: rgba(56, 242, 161, 0.12);
+  border-color: rgba(56, 242, 161, 0.32);
 }
 
 .rastreio-summary-highlight-card.scrap {
-  background: linear-gradient(135deg, #fff1f2, #fffaf5);
-  border-color: #fecdd3;
+  background: rgba(255, 107, 120, 0.12);
+  border-color: rgba(255, 107, 120, 0.28);
 }
 
 .rastreio-summary-highlight-card.neutral {
-  background: linear-gradient(135deg, #eff6ff, #f8fbff);
-  border-color: #bfdbfe;
+  background: rgba(28, 136, 255, 0.12);
+  border-color: rgba(28, 136, 255, 0.28);
 }
 
 .rastreio-summary-table-wrap {
   overflow: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+  background: var(--card-2);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
 }
 
 .rastreio-summary-table-wrap.compact {
@@ -216,19 +219,19 @@
 .rastreio-summary-table th,
 .rastreio-summary-table td {
   padding: 12px 14px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   text-align: left;
   vertical-align: middle;
   font-size: 13px;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .rastreio-summary-table th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
-  color: #475569;
+  background: var(--bg-soft);
+  color: var(--muted-strong);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -241,7 +244,7 @@
 
 .rastreio-summary-row:hover,
 .rastreio-summary-row:focus-visible {
-  background: #f8fbff;
+  background: rgba(28, 136, 255, 0.10);
   outline: none;
 }
 

@@ -674,7 +674,7 @@ export default function CadastroItens({ canManage = false }) {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 onClick={downloadCSVTemplate}
-                style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600, background: '#fff' }}
+                style={headerButton}
                 title="Baixar modelo CSV"
               >
                 Baixar modelo CSV
@@ -682,7 +682,7 @@ export default function CadastroItens({ canManage = false }) {
 
               <button
                 onClick={triggerPickCSV}
-                style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600, background: importing ? '#f2f2f2' : '#fff' }}
+                style={headerButton}
                 disabled={importing}
                 title="Importar CSV"
               >
@@ -698,7 +698,7 @@ export default function CadastroItens({ canManage = false }) {
 
               <button
                 onClick={() => { setEditing(null); resetForm(); setOpen(true) }}
-                style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', cursor: 'pointer', fontWeight: 600 }}
+                style={headerButton}
               >
                 Cadastrar item
               </button>
@@ -706,7 +706,7 @@ export default function CadastroItens({ canManage = false }) {
           </div>
 
           {importErr && (
-            <div style={{ padding: 10, borderRadius: 10, background: '#fff3f3', color: '#a80000' }}>
+            <div style={{ padding: 10, borderRadius: 10, background: 'rgba(255, 107, 120, 0.14)', color: '#ff6b78' }}>
               {importErr}
             </div>
           )}
@@ -719,8 +719,8 @@ export default function CadastroItens({ canManage = false }) {
           ) : items.length === 0 ? (
             <div style={{ padding: 16, opacity: 0.7 }}>Nenhum item cadastrado ainda.</div>
           ) : (
-            <div style={{ border: '1px solid #eee', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ padding: 12, background: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: 'var(--bg-soft)' }}>
+              <div style={{ padding: 12, background: 'var(--card)', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   onClick={() => setListType('insumo')}
@@ -744,7 +744,7 @@ export default function CadastroItens({ canManage = false }) {
                   <div style={{ width: '100%', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
-                        <tr style={{ background: '#f6f6f6' }}>
+                        <tr style={{ background: 'var(--bg-soft)' }}>
                           <th style={th}>Código</th>
                           <th style={th}>Descrição</th>
                           <th style={th}>Unidade</th>
@@ -756,7 +756,7 @@ export default function CadastroItens({ canManage = false }) {
                       </thead>
                       <tbody>
                         {insumoItems.map((it) => (
-                          <tr key={it.id} style={{ borderTop: '1px solid #eee' }}>
+                          <tr key={it.id} style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
                             <td style={td}>{it.code}</td>
                             <td style={td}>{it.description}</td>
                             <td style={td}>{it.unidade || '-'}</td>
@@ -766,7 +766,7 @@ export default function CadastroItens({ canManage = false }) {
                             <td style={{ ...td, whiteSpace: 'nowrap' }}>
                               <button
                                 onClick={() => startEdit(it)}
-                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                                style={tableActionButton}
                               >
                                 Editar
                               </button>
@@ -784,7 +784,7 @@ export default function CadastroItens({ canManage = false }) {
                   <div style={{ width: '100%', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
-                        <tr style={{ background: '#f6f6f6' }}>
+                        <tr style={{ background: 'var(--bg-soft)' }}>
                           <th style={th}>Código</th>
                           <th style={th}>Descrição</th>
                           <th style={th}>Cor</th>
@@ -799,7 +799,7 @@ export default function CadastroItens({ canManage = false }) {
                       </thead>
                       <tbody>
                         {produtoAcabadoItems.map((it) => (
-                          <tr key={it.id} style={{ borderTop: '1px solid #eee' }}>
+                          <tr key={it.id} style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
                             <td style={td}>{it.code}</td>
                             <td style={td}>{it.description}</td>
                             <td style={td}>{it.color}</td>
@@ -812,13 +812,13 @@ export default function CadastroItens({ canManage = false }) {
                             <td style={{ ...td, whiteSpace: 'nowrap' }}>
                               <button
                                 onClick={() => openStructureModal(it)}
-                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600, marginRight: 8 }}
+                                style={{ ...tableActionButton, marginRight: 8 }}
                               >
                                 Estrutura
                               </button>
                               <button
                                 onClick={() => startEdit(it)}
-                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                                style={tableActionButton}
                               >
                                 Editar
                               </button>
@@ -837,7 +837,7 @@ export default function CadastroItens({ canManage = false }) {
           <Modal open={open} onClose={() => !saving && setOpen(false)} title={editing?.id ? 'Editar item' : 'Cadastrar item'}>
             <div style={{ display: 'grid', gap: 12, paddingTop: 4 }}>
               {formErr && (
-                <div style={{ padding: 10, borderRadius: 10, background: '#fff3f3', color: '#a80000' }}>
+                <div style={{ padding: 10, borderRadius: 10, background: 'rgba(255, 107, 120, 0.14)', color: '#ff6b78' }}>
                   {formErr}
                 </div>
               )}
@@ -961,7 +961,7 @@ export default function CadastroItens({ canManage = false }) {
           >
             <div style={{ display: 'grid', gap: 12 }}>
               {structureErr && (
-                <div style={{ padding: 10, borderRadius: 10, background: '#fff3f3', color: '#a80000' }}>
+                <div style={{ padding: 10, borderRadius: 10, background: 'rgba(255, 107, 120, 0.14)', color: '#ff6b78' }}>
                   {structureErr}
                 </div>
               )}
@@ -980,10 +980,10 @@ export default function CadastroItens({ canManage = false }) {
               {structureLoading ? (
                 <div style={{ padding: 8 }}>Carregando estrutura…</div>
               ) : (
-                <div style={{ width: '100%', overflowX: 'auto', border: '1px solid #eee', borderRadius: 10 }}>
+                <div style={{ width: '100%', overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--card)' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: '#f6f6f6' }}>
+                      <tr style={{ background: 'var(--bg-soft)' }}>
                         <th style={th}>Cod</th>
                         <th style={th}>Descrição</th>
                         <th style={th}>Unidade</th>
@@ -1009,7 +1009,7 @@ export default function CadastroItens({ canManage = false }) {
                         const total = totalRaw != null && isUnitUN(unit) ? Math.round(totalRaw) : totalRaw
 
                         return (
-                          <tr key={row.id || `${code}-${idx}`} style={{ borderTop: '1px solid #eee' }}>
+                          <tr key={row.id || `${code}-${idx}`} style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
                             <td style={td}>{code || '-'}</td>
                             <td style={td}>{source?.description || '-'}</td>
                             <td style={td}>{unit || '-'}</td>
@@ -1020,7 +1020,7 @@ export default function CadastroItens({ canManage = false }) {
                               <button
                                 type="button"
                                 onClick={() => handleRemoveStructureRow(idx)}
-                                style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                                style={tableActionButton}
                               >
                                 Remover
                               </button>
@@ -1033,8 +1033,8 @@ export default function CadastroItens({ canManage = false }) {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gap: 8, border: '1px solid #eee', borderRadius: 10, padding: 10 }}>
-                <div style={{ fontWeight: 700 }}>Adicionar insumo na estrutura</div>
+              <div style={{ display: 'grid', gap: 8, border: '1px solid var(--border)', borderRadius: 10, padding: 10, background: 'var(--card)' }}>
+                <div style={{ fontWeight: 700, color: 'var(--heading)' }}>Adicionar insumo na estrutura</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr auto', gap: 8 }}>
                   <select
                     value={newStructureRow.itemCode}
@@ -1098,12 +1098,14 @@ const th = {
   padding: '10px 12px',
   fontWeight: 700,
   fontSize: 13,
-  borderBottom: '1px solid #eee',
+  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+  color: 'var(--text)',
 }
 const td = {
   padding: '10px 12px',
   fontSize: 13,
   verticalAlign: 'top',
+  color: 'var(--text)',
 }
 const tdNum = { ...td, textAlign: 'right', whiteSpace: 'nowrap' }
 const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }
@@ -1111,14 +1113,34 @@ const grid3 = { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }
 const input = {
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid #ddd',
+  border: '1px solid var(--border)',
   outline: 'none',
+  background: 'var(--bg-soft)',
+  color: 'var(--text)',
+}
+const headerButton = {
+  padding: '10px 14px',
+  borderRadius: 12,
+  border: '1px solid var(--border)',
+  background: 'var(--bg-soft)',
+  color: 'var(--text)',
+  cursor: 'pointer',
+  fontWeight: 600,
+}
+const tableActionButton = {
+  padding: '6px 10px',
+  borderRadius: 10,
+  border: '1px solid var(--border)',
+  background: 'var(--bg-soft)',
+  color: 'var(--text)',
+  cursor: 'pointer',
+  fontWeight: 600,
 }
 const btnPrimary = {
   padding: '10px 14px',
   borderRadius: 12,
-  border: '1px solid #0a7',
-  background: '#0a7',
+  border: '1px solid var(--secondary)',
+  background: 'var(--primary)',
   color: '#fff',
   cursor: 'pointer',
   fontWeight: 700,
@@ -1126,24 +1148,26 @@ const btnPrimary = {
 const btnGhost = {
   padding: '10px 14px',
   borderRadius: 12,
-  border: '1px solid #ddd',
-  background: '#fff',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-soft)',
+  color: 'var(--text)',
   cursor: 'pointer',
   fontWeight: 600,
 }
 const btnType = {
   padding: '8px 12px',
   borderRadius: 10,
-  border: '1px solid #ddd',
-  background: '#fff',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-soft)',
+  color: 'var(--text)',
   cursor: 'pointer',
   fontWeight: 600,
 }
 const btnTypeActive = {
   ...btnType,
-  border: '1px solid #0a7',
-  background: '#eafaf5',
-  color: '#0a7',
+  border: '1px solid var(--secondary)',
+  background: 'rgba(77, 135, 231, 0.14)',
+  color: 'var(--text)',
 }
 
 // ======= Utils locais =======

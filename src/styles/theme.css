@@ -2,35 +2,30 @@
   TEMA ARGOS (Dark Industrial) + Base
   ======================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Orbitron:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root {
-  --bg: #040913;
-  --bg-soft: #091425;
-  --panel: rgba(12, 23, 42, 0.72);
-  --card: rgba(13, 27, 48, 0.86);
-  --card-2: rgba(20, 37, 62, 0.85);
-  --border: rgba(107, 159, 255, 0.28);
-  --border-strong: rgba(43, 222, 255, 0.48);
+  --bg: #050d1d;
+  --bg-soft: #08152d;
+  --panel: rgba(9, 18, 34, 0.88);
+  --card: rgba(10, 24, 44, 0.94);
+  --card-2: rgba(14, 30, 52, 0.92);
+  --border: rgba(77, 135, 231, 0.24);
+  --border-strong: rgba(42, 184, 255, 0.36);
   --text: #e9f3ff;
-  --muted: #93a9c8;
-
-  --primary: #0c5dff;
-  --primary-700: #073bb8;
-  --secondary: #00c8ff;
-  --secondary-700: #0488a9;
+  --heading: #f5f9ff;
+  --muted: #8ea8c9;
+  --muted-strong: #b3c6e0;
+  --primary: #1c88ff;
+  --primary-700: #0d66c4;
+  --secondary: #4de0ff;
+  --secondary-700: #1aa7cc;
   --accent-green: #38f2a1;
-  --accent-red: #ff5f77;
-  --accent-violet: #8a7bff;
-
-  --primary-rgb: 12, 93, 255;
-  --secondary-rgb: 0, 200, 255;
-
-  --green: #38f2a1;
-  --yellow: #f9bf4f;
-  --red: #ff5f77;
-
-  --shadow: 0 16px 34px rgba(0, 4, 13, 0.48);
+  --accent-red: #ff6b78;
+  --accent-yellow: #f8c158;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+  --shadow-soft: 0 10px 26px rgba(0, 0, 0, 0.18);
+  --radius: 18px;
 }
 
 * { box-sizing: border-box; }
@@ -38,7 +33,7 @@
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
 }
 
 body {
@@ -46,14 +41,15 @@ body {
   color: var(--text);
   font-family: Manrope, "Segoe UI", sans-serif;
   font-size: 16px;
+  line-height: 1.55;
   letter-spacing: 0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background:
-    radial-gradient(circle at 12% 18%, rgba(0, 122, 255, 0.2), transparent 34%),
-    radial-gradient(circle at 84% 10%, rgba(56, 242, 161, 0.14), transparent 30%),
-    radial-gradient(circle at 72% 88%, rgba(138, 123, 255, 0.16), transparent 38%),
-    linear-gradient(165deg, #030712 0%, #040d1b 42%, #041226 100%);
+    radial-gradient(circle at 14% 12%, rgba(28, 140, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 85% 12%, rgba(56, 242, 161, 0.12), transparent 25%),
+    radial-gradient(circle at 70% 86%, rgba(138, 123, 255, 0.1), transparent 34%),
+    linear-gradient(165deg, #030712 0%, #061121 40%, #081527 100%);
 }
 
 #root {
@@ -64,13 +60,27 @@ body {
 
 .app {
   min-height: 100%;
-  padding: 20px;
+  padding: 18px 20px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: rgba(28, 136, 255, 0.24);
 }
 
 h1,
 h2,
 h3,
 h4 {
-  font-family: Orbitron, Manrope, sans-serif;
-  letter-spacing: 0.02em;
+  margin: 0;
+  font-family: Manrope, "Segoe UI", sans-serif;
+  color: var(--heading);
+  letter-spacing: -0.02em;
 }

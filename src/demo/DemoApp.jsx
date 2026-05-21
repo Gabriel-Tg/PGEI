@@ -10,7 +10,7 @@ import Painel from '../abas/Painel'
 import Lista from '../abas/Lista'
 import NovaOrdem from '../abas/NovaOrdem'
 import Rastreio from '../abas/Rastreio'
-import Gestao from '../abas/Gestao'
+import Estoque from '../abas/Estoque'
 import PainelTV from '../abas/PainelTV'
 import Tablets from '../pages/Tablets'
 import Ficha from '../pages/Ficha'
@@ -30,7 +30,6 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
   const [tab, setTab] = useState('login')
   const [tabDirection, setTabDirection] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [quickSearch, setQuickSearch] = useState('')
   const [nowLabel, setNowLabel] = useState(() => DateTime.now().setZone('America/Sao_Paulo').toFormat('dd/LL/yyyy HH:mm:ss'))
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})
@@ -104,7 +103,7 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
     if (canMakeApontamentos) ids.push('apontamento')
     if (canCreateOrder) ids.push('nova')
     if (canViewRastreio) ids.push('rastreio')
-    if (hasGestaoAccess) ids.push('gestao')
+    if (hasGestaoAccess) ids.push('estoque')
     if (canManageUsers) ids.push('usuarios')
     if (canManageCatalog) ids.push('admin-itens')
     return ids
@@ -112,14 +111,14 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
 
   const tabItems = useMemo(() => {
     const items = []
-    if (canViewDashboard) items.push({ id: 'painel', label: 'Dashboard', short: 'DB' })
-    if (canAccessList) items.push({ id: 'lista', label: 'Producao', short: 'PD' })
-    if (canMakeApontamentos) items.push({ id: 'apontamento', label: 'Apontamento', short: 'AP' })
-    if (canCreateOrder) items.push({ id: 'nova', label: 'Ordens', short: 'OP' })
-    if (canViewRastreio) items.push({ id: 'rastreio', label: 'Rastreio', short: 'RT' })
-    if (hasGestaoAccess) items.push({ id: 'gestao', label: 'Gestao', short: 'GS' })
-    if (canManageUsers) items.push({ id: 'usuarios', label: 'Usuarios', short: 'US' })
-    if (canManageCatalog) items.push({ id: 'admin-itens', label: 'Cadastro Itens', short: 'IT' })
+    if (canViewDashboard) items.push({ id: 'painel', label: 'Dashboard', icon: 'dashboard' })
+    if (canAccessList) items.push({ id: 'lista', label: 'Painel', icon: 'production' })
+    if (canMakeApontamentos) items.push({ id: 'apontamento', label: 'Apontamento', icon: 'apontamento' })
+    if (canCreateOrder) items.push({ id: 'nova', label: 'Ordens', icon: 'orders' })
+    if (canViewRastreio) items.push({ id: 'rastreio', label: 'Rastreio', icon: 'tracking' })
+    if (hasGestaoAccess) items.push({ id: 'estoque', label: 'Estoque', icon: 'inventory' })
+    if (canManageUsers) items.push({ id: 'usuarios', label: 'Configurações', icon: 'settings' })
+    if (canManageCatalog) items.push({ id: 'admin-itens', label: 'Cadastro Itens', icon: 'catalog' })
     return items
   }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
 
@@ -144,6 +143,122 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
     setTab(next)
   }, [])
 
+  const renderNavIcon = (iconName) => {
+    const commonProps = {
+      width: 18,
+      height: 18,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.8,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round'
+    }
+
+    switch (iconName) {
+      case 'dashboard':
+        return (
+          <svg {...commonProps}>
+            <rect x="3" y="3" width="7" height="7" rx="1.5" />
+            <rect x="14" y="3" width="7" height="7" rx="1.5" />
+            <rect x="3" y="14" width="7" height="7" rx="1.5" />
+            <rect x="14" y="14" width="7" height="7" rx="1.5" />
+          </svg>
+        )
+      case 'production':
+        return (
+          <svg {...commonProps}>
+            <path d="M4 20h16V10H4v10z" />
+            <path d="M4 10l6-4v4" />
+            <path d="M14 10V4l6 4" />
+            <path d="M7 20V13h3v7" />
+          </svg>
+        )
+      case 'apontamento':
+        return (
+          <svg {...commonProps}>
+            <path d="M4 20h16" />
+            <path d="M7 17.5 16.5 8" />
+            <path d="M17.5 6.5 15.5 8.5 13.5 6.5 15.5 4.5 17.5 6.5Z" />
+          </svg>
+        )
+      case 'orders':
+        return (
+          <svg {...commonProps}>
+            <path d="M3 8.5h18v10H3z" />
+            <path d="M3 8.5 12 3l9 5.5" />
+            <path d="M12 3v10" />
+          </svg>
+        )
+      case 'tracking':
+        return (
+          <svg {...commonProps}>
+            <circle cx="11" cy="11" r="6" />
+            <path d="M16 16l4 4" />
+          </svg>
+        )
+      case 'management':
+        return (
+          <svg {...commonProps}>
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a7.9 7.9 0 0 0 .2-1.5 7.9 7.9 0 0 0-.2-1.5" />
+            <path d="M4.6 15a7.9 7.9 0 0 1-.2-1.5 7.9 7.9 0 0 1 .2-1.5" />
+            <path d="M12 4.6V3" />
+            <path d="M12 21v-1.6" />
+            <path d="M18.3 6.7l1.1-1.1" />
+            <path d="M4.6 19.4l1.1-1.1" />
+          </svg>
+        )
+      case 'inventory':
+        return (
+          <svg {...commonProps}>
+            <rect x="4" y="6" width="16" height="12" rx="2" />
+            <path d="M4 10h16" />
+            <path d="M9 6v12" />
+          </svg>
+        )
+      case 'settings':
+        return (
+          <svg {...commonProps}>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a7.9 7.9 0 0 0 .2-1.5 7.9 7.9 0 0 0-.2-1.5" />
+            <path d="M4.6 15a7.9 7.9 0 0 1-.2-1.5 7.9 7.9 0 0 1 .2-1.5" />
+            <path d="M12 4.6V3" />
+            <path d="M12 21v-1.6" />
+          </svg>
+        )
+      case 'users':
+        return (
+          <svg {...commonProps}>
+            <path d="M7 9a3 3 0 1 1 6 0 3 3 0 0 1-6 0Z" />
+            <path d="M4 20c0-3 2.5-5 5.5-5h5c3 0 5.5 2 5.5 5" />
+          </svg>
+        )
+      case 'catalog':
+        return (
+          <svg {...commonProps}>
+            <path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+            <path d="M7 9h10" />
+            <path d="M10 13h4" />
+          </svg>
+        )
+      case 'logout':
+        return (
+          <svg {...commonProps}>
+            <path d="M9 8l-4 4 4 4" />
+            <path d="M5 12h11" />
+            <path d="M16 6v12" />
+          </svg>
+        )
+      default:
+        return (
+          <svg {...commonProps}>
+            <circle cx="12" cy="12" r="9" />
+          </svg>
+        )
+    }
+  }
+
   const {
     orders, stops,
     fetchOpenOrders,
@@ -151,7 +266,7 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
     createOrder, updateOrder, sendToQueue, finalizeOrder,
     confirmStart, confirmStop, confirmResume, confirmLowEfficiency, confirmEndLowEfficiency,
     activeByMachine, orderRecordGroups, lastFinalizedByMachine, onStatusChange
-  } = useOrders(tenantCompanyId)
+  } = useOrders(tenantCompanyId, { isDemoTenant: isDemoEnvironment })
   const ativosPorMaquina = activeByMachine || {}
 
   useEffect(() => {
@@ -408,7 +523,7 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
       return
     }
 
-    if (!hasGestaoAccess && tab === 'gestao') {
+    if (!hasGestaoAccess && tab === 'estoque') {
       setTabInstant('painel')
       return
     }
@@ -481,6 +596,7 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
           showAdminShortcut={false}
           tenantSubdomain={tenantCompany?.subdomain || null}
           useUsernameLogin={!!tenantCompany?.subdomain}
+          isDemoEnvironment={isDemoEnvironment}
         />
       </div>
     )
@@ -495,6 +611,7 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
         <Login
           tenantSubdomain={tenantCompany?.subdomain || null}
           useUsernameLogin={!!tenantCompany?.subdomain}
+          isDemoEnvironment={isDemoEnvironment}
         />
       </div>
     )
@@ -628,6 +745,7 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
           onAuthenticated={handleLoginSuccess}
           tenantSubdomain={tenantCompany?.subdomain || null}
           useUsernameLogin={!!tenantCompany?.subdomain}
+          isDemoEnvironment={isDemoEnvironment}
           authenticatedTitle={authUser && tenantAccessChecked && !hasAccess ? 'Acesso negado' : 'Acesso liberado'}
           authenticatedDescription={authUser && tenantAccessChecked && !hasAccess
             ? 'Este usuário não possui acesso para este cliente.'
@@ -725,11 +843,11 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
       return <Apontamento isAdmin={isAdmin} clientId={tenantCompanyId} machineIds={machineIds} />
     }
 
-    if (tab === 'gestao' && hasGestaoAccess) {
+if (tab === 'estoque' && hasGestaoAccess) {
       if (!tenantMachinesReady) {
         return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
       }
-      return <Gestao clientId={tenantCompanyId} machineIds={machineIds} />
+      return <Estoque clientId={tenantCompanyId} machineIds={machineIds} />
     }
 
     if (tab === 'usuarios' && canManageUsers) {
@@ -767,9 +885,11 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
               type="button"
               className="sidebar-collapse-btn"
               onClick={() => setSidebarCollapsed((prev) => !prev)}
+              aria-expanded={!sidebarCollapsed}
               aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
             >
-              {sidebarCollapsed ? '>>' : '<<'}
+              <span className="sidebar-collapse-icon" aria-hidden="true">☰</span>
+              {!sidebarCollapsed && <span>Menu</span>}
             </button>
 
             <nav className="sidebar-nav">
@@ -780,14 +900,14 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
                   onClick={() => goToTab(item.id)}
                   title={item.label}
                 >
-                  <span className="sidebar-nav-icon" aria-hidden="true">{item.short}</span>
+                  <span className="sidebar-nav-icon" aria-hidden="true">{renderNavIcon(item.icon)}</span>
                   {!sidebarCollapsed && <span>{item.label}</span>}
                 </button>
               ))}
             </nav>
 
             <button className="sidebar-signout" onClick={handleSignOut}>
-              <span className="sidebar-nav-icon" aria-hidden="true">SA</span>
+              <span className="sidebar-nav-icon" aria-hidden="true">{renderNavIcon('logout')}</span>
               {!sidebarCollapsed && <span>Sair</span>}
             </button>
           </aside>
@@ -796,23 +916,6 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
             <header className="dashboard-topbar">
               <div className="topbar-title-group">
                 <h2>{currentTabLabel}</h2>
-                <span className="topbar-subtitle">Operacao em tempo real</span>
-              </div>
-
-              <div className="topbar-search-wrap">
-                <input
-                  className="topbar-search"
-                  type="search"
-                  placeholder="Busca rapida de O.P., produto ou maquina"
-                  value={quickSearch}
-                  onChange={(e) => setQuickSearch(e.target.value)}
-                />
-              </div>
-
-              <div className="topbar-right">
-                <div className="system-status-pill">Sistema Online</div>
-                <div className="system-clock" aria-live="polite">{nowLabel}</div>
-                <div className="topbar-user-pill">{authUser?.email || 'Usuario'}</div>
               </div>
             </header>
 
@@ -832,6 +935,32 @@ export default function DemoApp({ tenantCompany = null, isDemoEnvironment = fals
         </>
       )}
 
+      {/* Navbar mobile fixa embaixo */}
+      {showDashboardShell && (
+        <div className="mobile-bottom-nav" aria-label="Menu principal">
+          {tabItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`mobile-bottom-nav-item ${tab === item.id ? 'active' : ''}`}
+              onClick={() => goToTab(item.id)}
+              title={item.label}
+            >
+              <span className="mobile-nav-icon" aria-hidden="true">{renderNavIcon(item.icon)}</span>
+              <span className="mobile-nav-label">{item.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className="mobile-bottom-nav-item mobile-signout"
+            onClick={handleSignOut}
+            title="Sair"
+          >
+            <span className="mobile-nav-icon" aria-hidden="true">{renderNavIcon('logout')}</span>
+            <span className="mobile-nav-label">Sair</span>
+          </button>
+        </div>
+      )}
       {/* Modais centralizados */}
       <GlobalModals
         editando={editando} setEditando={setEditando}

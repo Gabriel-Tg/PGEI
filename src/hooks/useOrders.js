@@ -4,8 +4,9 @@ import { supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import { mapOrder } from '../domain/entities'
+import { demoOrders, demoStops } from '../demo/demoData'
 
-export default function useOrders(clientId = null){
+export default function useOrders(clientId = null, { isDemoTenant = false } = {}){
   const [orders, setOrders] = useState([])
   const [finalizedOrders, setFinalizedOrders] = useState([])
   const [stops, setStops] = useState([])
@@ -17,6 +18,12 @@ export default function useOrders(clientId = null){
 
   // basic fetchers
   async function fetchOpenOrders(){
+    if (isDemoTenant) {
+      const demoOpen = demoOrders.filter((o) => !o.finalized)
+      setOrders(demoOpen.map(mapOrder))
+      return
+    }
+
     // NOTE: scanned_count:production_scans(count) -> agrega o count de production_scans por order_id
     const res = await withClient(supabase
       .from('orders')
@@ -44,16 +51,27 @@ export default function useOrders(clientId = null){
   }
 
   async function fetchFinalizedOrders(){
+    if (isDemoTenant) {
+      const demoFinalized = demoOrders.filter((o) => o.finalized)
+      setFinalizedOrders(demoFinalized.map(mapOrder))
+      return
+    }
     const res = await withClient(supabase.from('orders').select('*')).eq('finalized', true).order('finalized_at',{ascending:false}).limit(500)
     if(!res.error) setFinalizedOrders((res.data || []).map(mapOrder))
   }
   async function fetchStops(){
+    if (isDemoTenant) {
+      setStops(demoStops)
+      return
+    }
     const res = await withClient(supabase.from('machine_stops').select('*')).order('started_at',{ascending:false}).limit(1000)
     if(!res.error) setStops(res.data||[])
   }
 
   useEffect(()=>{ 
     fetchOpenOrders(); fetchFinalizedOrders(); fetchStops()
+    if (isDemoTenant) return undefined
+
     const chOrders = supabase.channel('orders-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, (p)=>{
         const r = p.new; if(!r) return;
@@ -85,7 +103,7 @@ export default function useOrders(clientId = null){
         })
       }).subscribe()
     return ()=>{ supabase.removeChannel(chOrders); supabase.removeChannel(chStops) }
-  },[clientId])
+  },[clientId, isDemoTenant])
 
   // helpers
   function patchOrderLocal(id, patch) { setOrders(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o)); }

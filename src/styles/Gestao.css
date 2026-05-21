@@ -3,12 +3,16 @@
 .gestao-card {
   padding: 12px;
   box-sizing: border-box;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 
 .gestao-title {
   margin-bottom: 8px;
   font-weight: 700;
   font-size: 18px;
+  color: var(--heading);
 }
 
 .gestao-filtros {
@@ -26,7 +30,7 @@
 }
 
 .gestao-view-actions .btn.is-active {
-  border-color: var(--accent, #1769aa);
+  border-color: var(--secondary);
   font-weight: 700;
 }
 
@@ -95,15 +99,16 @@
 
 .gestao-setor {
   padding: 12px;
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   box-shadow: none;
-  background: #fff;
+  background: var(--card-2);
 }
 
 .gestao-setor-title {
   font-weight: 800;
   font-size: 20px;
   margin-bottom: 10px;
+  color: var(--heading);
 }
 
 .gestao-kpis {
@@ -114,16 +119,16 @@
 }
 
 .gestao-kpi {
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
-  background: #fafafa;
+  background: var(--card);
 }
 
 .gestao-kpi-title {
   font-size: 12px;
   font-weight: 700;
-  color: #666;
+  color: var(--muted-strong);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -132,12 +137,12 @@
   font-size: 20px;
   font-weight: 800;
   margin-top: 4px;
-  color: #222;
+  color: var(--text);
 }
 
 .gestao-kpi-sub {
   font-size: 12px;
-  color: #666;
+  color: var(--muted);
   margin-top: 2px;
 }
 
@@ -149,14 +154,16 @@
 
 .gestao-table {
   padding: 10px;
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   box-shadow: none;
+  background: var(--card-2);
 }
 
 .gestao-table-title {
   font-size: 14px;
   font-weight: 700;
   margin-bottom: 8px;
+  color: var(--heading);
 }
 
 .gestao-table table {
@@ -169,16 +176,17 @@
 .gestao-table td {
   text-align: left;
   padding: 6px 4px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
 .gestao-table th {
   font-weight: 700;
-  color: #555;
+  color: var(--muted-strong);
 }
 
 .gestao-empty {
-  color: #777;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -190,8 +198,9 @@
 
 .gestao-monitor-card {
   padding: 12px;
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   box-shadow: none;
+  background: var(--card-2);
 }
 
 .gestao-monitor-head {
@@ -210,13 +219,13 @@
 }
 
 .gestao-monitor-pill.online {
-  color: #1b5e20;
-  background: #e8f5e9;
+  color: #00d084;
+  background: rgba(56, 242, 161, 0.16);
 }
 
 .gestao-monitor-pill.offline {
-  color: #b71c1c;
-  background: #ffebee;
+  color: #ff6b78;
+  background: rgba(255, 107, 120, 0.18);
 }
 
 .gestao-monitor-grid {
@@ -229,27 +238,27 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
-  background: #fafafa;
+  background: var(--card);
 }
 
 .gestao-monitor-field span {
   font-size: 12px;
-  color: #666;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 
 .gestao-monitor-field strong {
   font-size: 14px;
-  color: #222;
+  color: var(--text);
 }
 
 .gestao-monitor-field small {
   font-size: 12px;
-  color: #666;
+  color: var(--muted);
 }
 
 @media (max-width: 900px) {

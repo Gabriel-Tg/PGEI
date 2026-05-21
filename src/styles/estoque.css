@@ -39,7 +39,7 @@
 
 .estoque-tabbtn {
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--bg-soft);
   padding: 10px 14px;
   border-radius: 10px;
   cursor: pointer;
@@ -56,11 +56,11 @@
 }
 
 .estoque-card {
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 6px 18px rgba(1, 13, 28, 0.25);
 }
 
 .estoque-card-head {
@@ -92,7 +92,7 @@
   padding: 8px 34px 8px 12px;
   font-size: 14px;
   color: var(--text);
-  background-color: #fff;
+  background-color: var(--bg-soft);
   appearance: none;
   -webkit-appearance: none;
   background-image:
@@ -137,7 +137,7 @@
 }
 
 .estoque-table th {
-  background: #f7f9fb;
+  background: var(--bg-soft);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 12px;
@@ -169,11 +169,11 @@
   top: calc(100% + 8px);
   z-index: 20;
   display: none;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 6px 18px rgba(1, 13, 28, 0.24);
 }
 
 .estoque-product-preview.estoque-product-preview--up {
@@ -186,7 +186,7 @@
   width: 200px;
   height: 200px;
   object-fit: contain;
-  background: #fff;
+  background: var(--bg);
 }
 
 .estoque-product-hover:hover .estoque-product-preview,
@@ -222,6 +222,8 @@
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 14px;
+  background: var(--bg-soft);
+  color: var(--text);
 }
 
 .estoque-form-actions {
@@ -230,9 +232,9 @@
 }
 
 .estoque-alert {
-  background: #fff6e5;
-  color: #ad6800;
-  border: 1px solid #ffe2ad;
+  background: rgba(255, 188, 60, 0.12);
+  color: #ffd985;
+  border: 1px solid rgba(255, 188, 60, 0.22);
   padding: 10px 12px;
   border-radius: 10px;
   margin-bottom: 10px;

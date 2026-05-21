@@ -10,6 +10,7 @@ export default function Login({
   allowContinueWhenAuthenticated = true,
   tenantSubdomain = null,
   useUsernameLogin = false,
+  isDemoEnvironment = false,
 }) {
   const isMissingSessionError = (err) => String(err?.message || '').toLowerCase().includes('auth session missing')
   const shouldForcePasswordChange = (u) => Boolean(u?.user_metadata?.must_change_password)
@@ -58,6 +59,21 @@ export default function Login({
       const id = String(identifier || '').trim().toLowerCase()
       if (!id || !password) {
         setError('Informe usuário e senha.')
+        return
+      }
+
+      if (isDemoEnvironment && id === 'demo' && password === 'demo1234') {
+        const demoUser = { id: 'demo', email: 'demo', user_metadata: {} }
+        try {
+          localStorage.setItem('demoAuthUser', JSON.stringify(demoUser))
+          window.dispatchEvent(new Event('demo-auth-changed'))
+        } catch {
+          // ignore
+        }
+        setUser(demoUser)
+        if (typeof onAuthenticated === 'function') {
+          onAuthenticated(demoUser)
+        }
         return
       }
 
@@ -148,6 +164,16 @@ export default function Login({
   }
 
   async function signOut() {
+    if (isDemoEnvironment) {
+      try {
+        localStorage.removeItem('demoAuthUser')
+        window.dispatchEvent(new Event('demo-auth-changed'))
+      } catch {
+        // ignore
+      }
+      setUser(null)
+      return
+    }
     await supabase.auth.signOut()
     setUser(null)
   }
@@ -245,9 +271,15 @@ export default function Login({
           <button className="btn primary" type="submit">Entrar</button>
         </div>
       </form>
-      <div style={{ fontSize: 12, opacity: 0.8 }}>
-        Precisa de acesso? Solicite ao administrador da sua empresa.
-      </div>
+      {isDemoEnvironment ? (
+        <div style={{ fontSize: 12, opacity: 0.85, marginTop: 8, padding: 10, background: 'rgba(255,255,255,0.05)', borderRadius: 10 }}>
+          Use <b>demo</b> / <b>demo1234</b> para entrar no modo de demonstração.
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, opacity: 0.8 }}>
+          Precisa de acesso? Solicite ao administrador da sua empresa.
+        </div>
+      )}
     </div>
   )
 }

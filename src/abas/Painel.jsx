@@ -367,20 +367,33 @@ export default function Painel({
 
     const efficiency = plannedTotal > 0 ? (producedTotal / plannedTotal) * 100 : 0;
     const availability = (producingCount / machineCount) * 100;
-    const oee = (efficiency * availability) / 100;
 
-    const downtimeSeconds = (paradas || [])
-      .filter((p) => !p.resumed_at)
-      .reduce((acc, p) => {
-        const started = new Date(p.started_at).getTime();
-        if (!Number.isFinite(started)) return acc;
-        return acc + Math.max(0, Math.floor((Date.now() - started) / 1000));
-      }, 0);
+    const openStops = (paradas || []).filter((p) => !p.resumed_at);
+    const openStopCount = openStops.length;
+    const openStopSeconds = openStops.reduce((acc, p) => {
+      const started = new Date(p.started_at).getTime();
+      if (!Number.isFinite(started)) return acc;
+      return acc + Math.max(0, Math.floor((Date.now() - started) / 1000));
+    }, 0);
 
     const machineOutput = snapshots.map((entry) => ({
       machine: entry.machine,
       value: Number(entry.ativa?.scanned_count || 0),
     }));
+
+    const reasonMap = (paradas || []).reduce((acc, item) => {
+      const reason = String(item.reason || item.motivo || 'Outro').trim() || 'Outro';
+      acc[reason] = (acc[reason] || 0) + 1;
+      return acc;
+    }, {});
+    const reasonTotal = Object.values(reasonMap).reduce((acc, value) => acc + value, 0);
+    const stopReasons = Object.entries(reasonMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => ({
+        reason,
+        count,
+        percent: reasonTotal > 0 ? Math.round((count / reasonTotal) * 100) : 0,
+      }));
 
     const fractions = [0.12, 0.22, 0.34, 0.45, 0.58, 0.71, 0.84, 0.92, 1];
     const trendReal = fractions.map((f, idx) => {
@@ -398,8 +411,9 @@ export default function Painel({
       producedTotal,
       efficiency,
       availability,
-      oee,
-      downtimeSeconds,
+      openStopCount,
+      openStopSeconds,
+      stopReasons,
       machineOutput,
       trendReal,
       trendGoal,
@@ -433,44 +447,77 @@ export default function Painel({
     ? `conic-gradient(${donutGradient.join(", ")})`
     : "conic-gradient(#24324d 0% 100%)";
 
+  const ongoingOrders = useMemo(() => {
+    return machineIds
+      .map((machine) => {
+        const ativa = (source[machine] || [])[0] || null;
+        if (!ativa) return null;
+
+        const plannedQty = Number(ativa?.boxes || 0);
+        const producedQty = Number(ativa?.scanned_count || 0);
+        const progress = plannedQty > 0 ? Math.min(100, Math.round((producedQty / plannedQty) * 100)) : 0;
+
+        return {
+          machine,
+          order: ativa?.code || ativa?.op_code || ativa?.id || "-",
+          product: ativa?.product || "-",
+          plannedQty,
+          producedQty,
+          progress,
+          status: ativa?.status || "AGUARDANDO",
+        };
+      })
+      .filter(Boolean);
+  }, [machineIds, source]);
+
+  function getStatusBadge(status) {
+    const normalized = String(status || "").toUpperCase();
+    if (normalized === "PRODUZINDO") return "status-badge producing";
+    if (normalized === "PARADA") return "status-badge stopped";
+    if (normalized === "BAIXA_EFICIENCIA") return "status-badge low-efficiency";
+    if (normalized === "FINALIZADA") return "status-badge finished";
+    if (normalized === "AGUARDANDO") return "status-badge waiting";
+    return "status-badge default";
+  }
+
+  function getStatusLabel(status) {
+    const normalized = String(status || "").toUpperCase();
+    if (normalized === "PRODUZINDO") return "Produzindo";
+    if (normalized === "PARADA") return "Parada";
+    if (normalized === "BAIXA_EFICIENCIA") return "Baixa Eficiência";
+    if (normalized === "FINALIZADA") return "Finalizada";
+    if (normalized === "AGUARDANDO") return "Aguardando";
+    return status || "-";
+  }
+
   return (
     <div className="board-wrapper">
       <section className="dashboard-overview">
         <div className="kpi-grid">
           <article className="kpi-card">
-            <p className="kpi-label">Producao Real</p>
+            <p className="kpi-label">Produção Hoje</p>
             <strong className="kpi-value">{formatCompactNumber(overview.producedTotal)}</strong>
             <span className="kpi-meta">caixas apontadas hoje</span>
           </article>
           <article className="kpi-card">
-            <p className="kpi-label">Producao Planejada</p>
-            <strong className="kpi-value">{formatCompactNumber(overview.plannedTotal)}</strong>
-            <span className="kpi-meta">meta operacional</span>
-          </article>
-          <article className="kpi-card">
-            <p className="kpi-label">Eficiencia</p>
+            <p className="kpi-label">Eficiência</p>
             <strong className="kpi-value">{overview.efficiency.toFixed(1)}%</strong>
             <span className={`kpi-trend ${overview.efficiency >= 80 ? 'up' : 'down'}`}>
-              {overview.efficiency >= 80 ? 'Acima da faixa' : 'Abaixo da faixa'}
+              {overview.efficiency >= 80 ? 'Dentro da meta' : 'Abaixo da meta'}
             </span>
           </article>
           <article className="kpi-card">
             <p className="kpi-label">Disponibilidade</p>
             <strong className="kpi-value">{overview.availability.toFixed(1)}%</strong>
             <span className={`kpi-trend ${overview.availability >= 70 ? 'up' : 'down'}`}>
-              {overview.producingCount} produzindo | {overview.stoppedCount} paradas
+              {overview.producingCount} em produção
             </span>
           </article>
           <article className="kpi-card">
-            <p className="kpi-label">OEE Estimado</p>
-            <strong className="kpi-value">{overview.oee.toFixed(1)}%</strong>
-            <span className="kpi-meta">integrado em tempo real</span>
-          </article>
-          <article className="kpi-card">
-            <p className="kpi-label">Paradas Abertas</p>
-            <strong className="kpi-value">{formatHHMMSS(overview.downtimeSeconds)}</strong>
-            <span className={`kpi-trend ${overview.lowEffCount > 0 ? 'down' : 'up'}`}>
-              {overview.lowEffCount} baixa eficiencia | {overview.activeCount} maquinas ativas
+            <p className="kpi-label">Paradas</p>
+            <strong className="kpi-value">{overview.openStopCount}</strong>
+            <span className="kpi-meta">
+              {overview.openStopCount > 0 ? `${formatHHMMSS(overview.openStopSeconds)} em aberto` : 'Nenhuma parada aberta'}
             </span>
           </article>
         </div>
@@ -478,8 +525,8 @@ export default function Painel({
         <div className="dashboard-charts-grid">
           <article className="overview-chart-card">
             <header>
-              <h3>Producao por Periodo</h3>
-              <span>Real x Meta (janela operacional)</span>
+              <h3>Produção por Período</h3>
+              <span>Real x Meta</span>
             </header>
             <div className="line-chart-wrap" role="img" aria-label="Grafico de linha de producao por periodo">
               <svg viewBox={`0 0 ${lineChartWidth} ${lineChartHeight}`} preserveAspectRatio="none" className="line-chart-svg">
@@ -500,7 +547,7 @@ export default function Painel({
                 <path d={realPath} className="line-real" />
               </svg>
               <div className="line-chart-legend">
-                <span><i className="dot dot-real" />Producao real</span>
+                <span><i className="dot dot-real" />Produção real</span>
                 <span><i className="dot dot-goal" />Meta</span>
               </div>
               <div className="line-chart-labels">
@@ -513,8 +560,8 @@ export default function Painel({
 
           <article className="overview-chart-card donut-card">
             <header>
-              <h3>Producao por Maquina</h3>
-              <span>Distribuicao do volume atual</span>
+              <h3>Produção por Máquina</h3>
+              <span>Distribuição do volume atual</span>
             </header>
             <div className="donut-wrap">
               <div className="donut-chart" style={{ background: donutBackground }}>
@@ -535,207 +582,90 @@ export default function Painel({
             </div>
           </article>
         </div>
-      </section>
 
-      <div className="board">
-        {machineIds.map((m) => {
-          const lista = source[m] ?? [];
-          const ativa = lista[0] || null;
-
-          const openStop = ativa
-            ? paradas.find((p) => p.order_id === String(ativa.id) && !p.resumed_at)
-            : null;
-
-          const sinceMs = openStop ? new Date(openStop.started_at).getTime() : null;
-
-          const durText = sinceMs
-            ? (() => {
-                const _ = tick;
-                const total = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
-                return formatHHMMSS(total);
-              })()
-            : null;
-
-          // Timer de baixa eficiência usando started_at do log aberto
-          const lowEffText =
-            ativa?.status === "BAIXA_EFICIENCIA" && lowEffStartedAt[m]
-              ? (() => {
-                  const _ = tick;
-                  const secs =
-                    (Date.now() - new Date(lowEffStartedAt[m]).getTime()) / 1000;
-                  return formatHHMMSS(secs);
-                })()
-              : null;
-
-          let semProgText = null;
-          // Mostrar cronômetro "Sem Programação" quando não há ativa
-          // ou quando a ordem está em "AGUARDANDO" (antes de iniciar produção)
-          if (!ativa || ativa.status === "AGUARDANDO") {
-            const lastFinISO = lastFinalizadoPorMaquina?.[m] || null;
-            if (lastFinISO) {
-              const _ = tick;
-              const since = new Date(lastFinISO).getTime();
-              const total = Math.max(0, Math.floor((Date.now() - since) / 1000));
-              semProgText = formatHHMMSS(total);
-            }
-          }
-
-          const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || "";
-          const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
-          const itemTech = itemCode ? itemTechByCode[itemCode] : null;
-          const cycleSeconds = Number(itemTech?.cycleSeconds || 0);
-          const cavities = Number(itemTech?.cavities || 0);
-
-          // lidas / saldo: scanned_count agora pode vir do fetch inicial ou do realtime
-          const lidas = Number(ativa?.scanned_count || 0);
-          const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0;
-
-          const priorityValue = machinePriorities?.[m];
-
-          return (
-            <div key={m} className="column">
-              <div
-                className={
-                  "column-header " +
-                  (ativa?.status === "PARADA" ? "blink-red" : "")
-                }
-                style={{ display: "flex", alignItems: "center", gap: 8 }}
-              >
-                <div className="hdr-left" style={{ display: "flex", gap: 8 }}>
-                  {m}
-
-                  {ativa?.status === "PARADA" && durText && (
-                    <span className="parada-timer">{durText}</span>
-                  )}
-
-                  {lowEffText && (
-                    <span className="loweff-timer">{lowEffText}</span>
-                  )}
-
-                  {semProgText && (
-                    <span className="semprog-timer">{semProgText}</span>
-                  )}
-                </div>
-                <div className="hdr-right" style={{ marginLeft: "auto" }}>
-                  <span className={`priority-chip ${priorityTone(priorityValue)}`}>
-                    PRIORIDADE: {priorityValue ?? "-"}
-                  </span>
-                </div>
+        <section className="orders-layout">
+          <div className="orders-table-card">
+            <header>
+              <div>
+                <h3>Ordens em Andamento</h3>
+                <span>Visão geral das ordens ativas e progresso em tempo real</span>
               </div>
+              <span className="orders-meta">{ongoingOrders.length} ordens ativas</span>
+            </header>
 
-              <div className="column-body">
-                {ativa ? (
-                  <div className={statusClass(ativa.status)}>
-                      {opCode && (
-                      <div className="hdr-right op-inline" style={{ marginBottom: 4, textAlign: 'left' }}>
-                        O.P - {opCode}
-                      </div>
-                    )}
-                    <Etiqueta
-                      o={ativa}
-                      variant="painel"
-                      lidasCaixas={["P1", "P2", "P3"].includes(m) ? lidas : undefined}
-                      saldoCaixas={["P1", "P2", "P3"].includes(m) ? saldo : undefined}
-                      paradaReason={openStop?.reason}
-                      paradaNotes={openStop?.notes}
-                    />
-
-                    {ativa?.status === "PARADA" && openStop?.reason && (
-                      <div className="stop-reason-below">{openStop.reason}</div>
-                    )}
-
-                    {ativa?.status === "BAIXA_EFICIENCIA" && ativa?.loweff_notes && (
-                      <div className="loweff-info-below">
-                        <div className="loweff-reason-below">
-                          {ativa.loweff_notes}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="sep" />
-
-                    <div className="grid2">
-                      <div>
-                        <div className="label">Situação</div>
-
-                        <select
-                          className="select"
-                          value={ativa.status}
-                          onChange={async (e) => {
-                            if (readOnly) return;
-                            const novoStatus = e.target.value;
-                            // chama callback pai para atualizar status (mantém comportamento atual)
-                            try {
-                              onStatusChange(ativa, novoStatus);
-                            } catch (err) {
-                              console.warn("onStatusChange falhou:", err);
-                            }
-                          }}
-                          disabled={readOnly || ativa.status === "AGUARDANDO"}
-                        >
-                          {STATUS.filter((s) =>
-                            jaIniciou(ativa) ? s !== "AGUARDANDO" : true
-                          ).map((s) => (
-                            <option key={s} value={s}>
-                              {s === "AGUARDANDO"
-                                ? "Aguardando"
-                                : s === "PRODUZINDO"
-                                ? "Produzindo"
-                                : s === "BAIXA_EFICIENCIA"
-                                ? "Baixa Eficiência"
-                                : "Parada"}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="flex" style={{ justifyContent: "flex-end", gap: 8 }}>
-                        {ativa.status === "AGUARDANDO" ? (
-                          <button
-                            className="btn"
-                            disabled={readOnly}
-                            onClick={() => {
-                              if (readOnly) return;
-                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-                              setStartModal({
-                                ordem: ativa,
-                                operador: "",
-                                data: nowBr.toISODate(),
-                                hora: nowBr.toFormat("HH:mm"),
-                              });
-                            }}
-                          >
-                            Iniciar Produção
-                          </button>
-                        ) : (
-                          <button className="btn" disabled={readOnly} onClick={() => { if (!readOnly) setFinalizando(ativa) }}>
-                            Finalizar
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid2 painel-tech-grid" style={{ marginTop: 12 }}>
-                      <div>
-                        <div className="label">Ciclo</div>
-                        <div className="small painel-tech-value">
-                          {cycleSeconds > 0 ? `${cycleSeconds} s` : "-"}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="label">Cavidades</div>
-                        <div className="small painel-tech-value">{cavities > 0 ? cavities : "-"}</div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="muted">Sem Programação</div>
-                )}
-              </div>
+            <div className="orders-table-responsive">
+              <table className="orders-table">
+                <thead>
+                  <tr>
+                    <th>Ordem</th>
+                    <th>Produto</th>
+                    <th>Qtd Planejada</th>
+                    <th>Qtd Produzida</th>
+                    <th>Progresso</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ongoingOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="orders-empty">
+                        Nenhuma ordem em andamento no momento.
+                      </td>
+                    </tr>
+                  ) : (
+                    ongoingOrders.map((order) => (
+                      <tr key={`${order.machine}-${order.order}`}>
+                        <td>{order.order}</td>
+                        <td>{order.product}</td>
+                        <td>{order.plannedQty.toLocaleString('pt-BR')}</td>
+                        <td>{order.producedQty.toLocaleString('pt-BR')}</td>
+                        <td className="progress-cell">
+                          <div className="progress-bar" aria-label={`Progresso ${order.progress}%`}>
+                            <div className="progress-bar-fill" style={{ width: `${order.progress}%` }} />
+                          </div>
+                          <span className="progress-label">{order.progress}%</span>
+                        </td>
+                        <td>
+                          <span className={getStatusBadge(order.status)}>
+                            {getStatusLabel(order.status)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-      </div>
+          </div>
+
+          <div className="stop-reason-card">
+            <header>
+              <div>
+                <h3>Paradas por Motivo</h3>
+                <span>Distribuição de paradas</span>
+              </div>
+            </header>
+            <div className="stop-reason-list">
+              {overview.stopReasons.length === 0 ? (
+                <div className="orders-empty">Nenhuma parada registrada.</div>
+              ) : (
+                overview.stopReasons.map((item) => (
+                  <div key={item.reason} className="stop-reason-item">
+                    <div className="stop-reason-label">
+                      <strong>{item.reason}</strong>
+                      <span>{item.count}x</span>
+                    </div>
+                    <div className="stop-reason-bar">
+                      <div className="stop-reason-bar-fill" style={{ width: `${item.percent}%` }} />
+                    </div>
+                    <div className="stop-reason-meta">{item.percent}%</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+      </section>
     </div>
   );
 }

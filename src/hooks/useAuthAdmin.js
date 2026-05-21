@@ -25,13 +25,44 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
     ;(async () => {
       const { data } = await supabase.auth.getUser()
       if (!active) return
-      setAuthUser(data?.user ?? null)
+
+      if (data?.user) {
+        setAuthUser(data.user)
+        setAuthChecked(true)
+        return
+      }
+
+      if (isDemoTenant) {
+        try {
+          const stored = localStorage.getItem('demoAuthUser')
+          if (stored) {
+            const parsed = JSON.parse(stored)
+            setAuthUser(parsed)
+          }
+        } catch {
+          // ignore corrupt demo session
+        }
+      }
       setAuthChecked(true)
     })()
 
     const { data: listenerData } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return
-      setAuthUser(session?.user ?? null)
+      if (session?.user) {
+        setAuthUser(session.user)
+        setAuthChecked(true)
+        return
+      }
+      if (isDemoTenant) {
+        try {
+          const stored = localStorage.getItem('demoAuthUser')
+          setAuthUser(stored ? JSON.parse(stored) : null)
+        } catch {
+          setAuthUser(null)
+        }
+      } else {
+        setAuthUser(null)
+      }
       setAuthChecked(true)
     })
     authSubscription = listenerData?.subscription ?? null
@@ -44,7 +75,22 @@ export default function useAuthAdmin(tenantCompanyId = null, { isDemoTenant = fa
         // noop
       }
     }
-  }, [])
+  }, [isDemoTenant])
+
+  useEffect(() => {
+    if (!isDemoTenant) return
+    const onDemoAuthChange = () => {
+      try {
+        const stored = localStorage.getItem('demoAuthUser')
+        setAuthUser(stored ? JSON.parse(stored) : null)
+      } catch {
+        setAuthUser(null)
+      }
+      setAuthChecked(true)
+    }
+    window.addEventListener('demo-auth-changed', onDemoAuthChange)
+    return () => window.removeEventListener('demo-auth-changed', onDemoAuthChange)
+  }, [isDemoTenant])
 
   const isAdmin = useMemo(() => {
     const email = authUser?.email?.toLowerCase()
