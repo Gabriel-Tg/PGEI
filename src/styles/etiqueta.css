@@ -130,3 +130,76 @@
   margin: 3px 0;
 }
 
+.qtd-apontada-block {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f5fbff;
+  border: 1px solid rgba(32, 164, 255, 0.22);
+}
+
+.qtd-apontada-fila {
+  margin-top: 10px;
+}
+
+.qtd-apontada-block, .qtd-apontada-line span, .qtd-apontada-line strong, .qtd-apontada-percent {
+  color: #0f2438;
+}
+
+.qtd-apontada-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.9em;
+}
+
+.qtd-apontada-line span {
+  font-weight: 700;
+  color: #17486f;
+}
+
+.qtd-apontada-line strong {
+  font-size: 1.05em;
+}
+
+.qtd-apontada-progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(7, 35, 58, 0.12);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.qtd-apontada-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #20a4ff, #3ce7b4);
+  transition: width 0.35s ease;
+}
+
+.qtd-apontada-percent {
+  margin-top: 4px;
+  font-size: 0.78em;
+  font-weight: 700;
+  color: #1f547c;
+}
+
+.qtd-apontada-compact {
+  margin-top: 4px;
+  padding: 6px;
+}
+
+.qtd-apontada-compact .qtd-apontada-line {
+  font-size: 0.82em;
+}
+
+.qtd-apontada-compact .qtd-apontada-progress {
+  height: 6px;
+}
+
+.qtd-apontada-compact .qtd-apontada-percent {
+  font-size: 0.72em;
+}
+

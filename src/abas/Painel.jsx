@@ -296,6 +296,7 @@ export default function Painel({
   authUser,
   machinePriorities = {},
   machineIds = MAQUINAS,
+  tenantMachines = [],
   clientId = null,
   readOnly = false,
 }) {
@@ -329,7 +330,18 @@ export default function Painel({
   const [trendHoverIndex, setTrendHoverIndex] = useState(null);
   const [donutHoverMachine, setDonutHoverMachine] = useState(null);
   const [stopReasonHover, setStopReasonHover] = useState(null);
+  const [periodRefreshNonce, setPeriodRefreshNonce] = useState(0);
   const source = localAtivos || {};
+
+  const machineTypeById = useMemo(() => {
+    const map = {};
+    (tenantMachines || []).forEach((m) => {
+      const code = String(m?.machine_code || "").trim().toUpperCase();
+      if (!code) return;
+      map[code] = String(m?.apontamento_tipo || "manual");
+    });
+    return map;
+  }, [tenantMachines]);
 
   // Sincroniza props -> localAtivos, mas preservando scanned_count vindo do realtime (merge)
   useEffect(() => {
@@ -440,6 +452,12 @@ export default function Painel({
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
+      let entriesQuery = supabase
+        .from("injection_production_entries")
+        .select("id, created_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+        .gte("created_at", startIso)
+        .lte("created_at", endIso);
+
       let stopsQuery = supabase
         .from("machine_stops")
         .select("id, machine_id, reason, started_at, resumed_at")
@@ -460,28 +478,45 @@ export default function Painel({
 
       if (clientId) {
         scansQuery = scansQuery.eq("company_id", clientId);
+        entriesQuery = entriesQuery.eq("company_id", clientId);
         stopsQuery = stopsQuery.eq("company_id", clientId);
         lowEffQuery = lowEffQuery.eq("company_id", clientId);
         scrapQuery = scrapQuery.eq("company_id", clientId);
       }
 
-      const [scansRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([scansQuery, stopsQuery, lowEffQuery, scrapQuery]);
+      const [scansRes, entriesRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([
+        scansQuery,
+        entriesQuery,
+        stopsQuery,
+        lowEffQuery,
+        scrapQuery,
+      ]);
       if (cancelled) return;
 
       const scans = scansRes?.data || [];
+      const entries = entriesRes?.data || [];
       const stops = stopsRes?.data || [];
       const lowEff = lowEffRes?.data || [];
       const scraps = scrapRes?.data || [];
 
-      const producedBoxes = scans.length;
-      const producedPieces = scans.reduce((acc, scan) => acc + Number(scan?.qty_pieces || 0), 0);
+      const producedBoxesFromScans = scans.length;
+      const producedPiecesFromScans = scans.reduce((acc, scan) => acc + Number(scan?.qty_pieces || 0), 0);
+      const producedPiecesFromEntries = entries.reduce((acc, row) => acc + Number(row?.good_qty || 0), 0);
+      const producedPieces = producedPiecesFromScans + producedPiecesFromEntries;
+      const producedBoxes = producedBoxesFromScans;
       const producedTotal = producedBoxes;
+
       const machineOutputMap = Object.fromEntries(machineIds.map((m) => [m, { boxes: 0, pieces: 0 }]));
       scans.forEach((scan) => {
         const machine = String(scan?.machine_id || "").toUpperCase();
         if (!machineOutputMap[machine]) machineOutputMap[machine] = { boxes: 0, pieces: 0 };
         machineOutputMap[machine].boxes += 1;
         machineOutputMap[machine].pieces += Number(scan?.qty_pieces || 0);
+      });
+      entries.forEach((entry) => {
+        const machine = String(entry?.machine_id || "").toUpperCase();
+        if (!machineOutputMap[machine]) machineOutputMap[machine] = { boxes: 0, pieces: 0 };
+        machineOutputMap[machine].pieces += Number(entry?.good_qty || 0);
       });
       const machineOutput = Object.entries(machineOutputMap).map(([machine, value]) => ({
         machine,
@@ -494,38 +529,100 @@ export default function Painel({
       const scrapPctBase = producedPieces + scrapPieces;
       const scrapPct = scrapPctBase > 0 ? (scrapPieces / scrapPctBase) * 100 : 0;
 
-      const orderMap = new Map();
-      scans.forEach((scan) => {
-        const ord = scan?.order || null;
-        const key = String(ord?.id || scan?.order_id || `${scan?.machine_id || "SEM"}-${scan?.id}`);
-        if (!orderMap.has(key)) {
-          const plannedBoxes = Number(ord?.boxes || 0);
-          const stdPieces = parsePiecesPerBox(ord?.standard);
-          const plannedPieces = Number(ord?.qty || (plannedBoxes > 0 && stdPieces > 0 ? plannedBoxes * stdPieces : 0));
-          orderMap.set(key, {
-            machine: String(scan?.machine_id || ord?.machine_id || "-").toUpperCase(),
-            order: ord?.code || scan?.order_id || "-",
-            product: ord?.product || "-",
-            plannedBoxes,
-            plannedPieces,
-            producedBoxes: 0,
-            producedPieces: 0,
-            finalized: Boolean(ord?.finalized),
-            status: ord?.status || "AGUARDANDO",
-          });
-        }
-        const curr = orderMap.get(key);
-        curr.producedBoxes += 1;
-        curr.producedPieces += Number(scan?.qty_pieces || 0);
-      });
-      const ongoingOrders = Array.from(orderMap.values())
-        .map((row) => ({
-          ...row,
-          progress: row.plannedBoxes > 0 ? Math.min(100, Math.round((row.producedBoxes / row.plannedBoxes) * 100)) : 0,
-        }))
-        .filter((row) => !row.finalized && isOrderOngoingStatus(row.status));
+      const activeOrders = machineIds
+        .map((machine) => {
+          const ativa = (source[machine] || [])[0] || null;
+          if (!ativa) return null;
+          return { machine, ativa };
+        })
+        .filter(Boolean);
 
-      const plannedTotal = ongoingOrders.reduce((acc, row) => acc + Number(row.plannedBoxes || 0), 0);
+      const activeOrderIds = activeOrders
+        .map(({ ativa }) => String(ativa?.id || ""))
+        .filter(Boolean);
+
+      const activeScanByOrder = {};
+      const activeEntryByOrder = {};
+      const activePulseByOrder = {};
+      const activeCavityByOrder = {};
+
+      if (activeOrderIds.length) {
+        let activeScansQuery = supabase
+          .from("production_scans")
+          .select("order_id, qty_pieces")
+          .in("order_id", activeOrderIds);
+
+        let activeEntriesQuery = supabase
+          .from("injection_production_entries")
+          .select("order_id, good_qty, pulse_count, cavities_used")
+          .in("order_id", activeOrderIds);
+
+        if (clientId) {
+          activeScansQuery = activeScansQuery.eq("company_id", clientId);
+          activeEntriesQuery = activeEntriesQuery.eq("company_id", clientId);
+        }
+
+        const [activeScansRes, activeEntriesRes] = await Promise.all([activeScansQuery, activeEntriesQuery]);
+        if (cancelled) return;
+
+        (activeScansRes?.data || []).forEach((row) => {
+          const key = String(row?.order_id || "");
+          if (!key) return;
+          if (!activeScanByOrder[key]) activeScanByOrder[key] = { pieces: 0 };
+          activeScanByOrder[key].pieces += Number(row?.qty_pieces || 0);
+        });
+
+        (activeEntriesRes?.data || []).forEach((row) => {
+          const key = String(row?.order_id || "");
+          if (!key) return;
+          activeEntryByOrder[key] = (activeEntryByOrder[key] || 0) + Number(row?.good_qty || 0);
+          activePulseByOrder[key] = (activePulseByOrder[key] || 0) + Number(row?.pulse_count || 0);
+          const cavities = Number(row?.cavities_used || 0);
+          if (cavities > 0) activeCavityByOrder[key] = cavities;
+        });
+      }
+
+      const ongoingOrders = activeOrders.map(({ machine, ativa }) => {
+        const orderId = String(ativa?.id || "");
+        const apontamentoTipo = String(machineTypeById[machine] || "manual");
+        const plannedPieces = getOrderPlannedPieces(ativa);
+        const stdPieces = parsePiecesPerBox(ativa?.standard);
+        const scanPieces = Number(activeScanByOrder[orderId]?.pieces || 0);
+        const entryPieces = Number(activeEntryByOrder[orderId] || 0);
+        const fallbackScannedPieces = stdPieces > 0
+          ? Number(ativa?.scanned_count || 0) * stdPieces
+          : Number(ativa?.scanned_count || 0);
+
+        const producedPieces = apontamentoTipo === "sensor"
+          ? entryPieces
+          : Math.max(scanPieces, fallbackScannedPieces);
+
+        const plannedBoxes = Number(ativa?.boxes || 0);
+        const producedBoxes = stdPieces > 0
+          ? Math.round(producedPieces / stdPieces)
+          : Number(ativa?.scanned_count || 0);
+
+        const progress = plannedPieces > 0
+          ? Math.min(100, Math.round((producedPieces / plannedPieces) * 100))
+          : 0;
+
+        return {
+          machine,
+          order: ativa?.code || ativa?.op_code || ativa?.id || "-",
+          product: ativa?.product || "-",
+          plannedBoxes,
+          plannedPieces,
+          producedBoxes,
+          producedPieces,
+          progress,
+          status: ativa?.status || "AGUARDANDO",
+          apontamentoTipo,
+          pulses: Number(activePulseByOrder[orderId] || 0),
+          cavitiesUsed: Number(activeCavityByOrder[orderId] || 0),
+        };
+      }).filter((row) => isOrderOngoingStatus(row.status));
+
+      const plannedTotal = ongoingOrders.reduce((acc, row) => acc + Number(row.plannedPieces || 0), 0);
       const producingCount = machineOutput.filter((item) => Number(item.value || 0) > 0).length;
       const stoppedMachines = new Set(stops.map((s) => String(s.machine_id || "").toUpperCase()).filter(Boolean));
       const lowEffMachines = new Set(lowEff.map((s) => String(s.machine_id || "").toUpperCase()).filter(Boolean));
@@ -614,7 +711,7 @@ export default function Painel({
     });
 
     return () => { cancelled = true; };
-  }, [periodFilter, clientId, machineIds, source, paradas, itemTechByCode]);
+  }, [periodFilter, clientId, machineIds, machineTypeById, source, paradas, itemTechByCode, periodRefreshNonce]);
 
   // util helper para testar se um item corresponde a um order_id / code
   function matchesOrder(item, orderIdOrCode) {
@@ -635,10 +732,10 @@ export default function Painel({
     return candidates.includes(target);
   }
 
-  // Realtime subscription: quando houver INSERT em production_scans, atualiza counted scans e chama onScanned
+  // Realtime: scans, entradas de produção e eventos de sensor sem refresh manual
   useEffect(() => {
     const channel = supabase
-      .channel("scans-ch")
+      .channel("painel-rt")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "production_scans" },
@@ -717,9 +814,70 @@ export default function Painel({
                 console.warn("onScanned callback falhou:", err);
               }
             }
+
+            setPeriodRefreshNonce((prev) => prev + 1);
           } catch (err) {
             console.error("Erro no handler realtime scans:", err);
           }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "injection_production_entries" },
+        (payload) => {
+          const row = payload?.new;
+          if (!row) return;
+          if (clientId && String(row.company_id || "") !== String(clientId)) return;
+
+          const orderId = String(row.order_id || "");
+          const goodQty = Number(row.good_qty || 0);
+          if (!orderId || goodQty <= 0) {
+            setPeriodRefreshNonce((prev) => prev + 1);
+            return;
+          }
+
+          setLocalAtivos((prev) => {
+            if (!prev) return prev;
+            const copy = { ...prev };
+            let found = false;
+
+            for (const machine of Object.keys(copy)) {
+              copy[machine] = (copy[machine] || []).map((item) => {
+                if (matchesOrder(item, orderId)) {
+                  found = true;
+                  return {
+                    ...item,
+                    sensor_produced_pieces: Number(item?.sensor_produced_pieces || 0) + goodQty,
+                  };
+                }
+                return item;
+              });
+            }
+
+            return found ? copy : prev;
+          });
+
+          setPeriodRefreshNonce((prev) => prev + 1);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "machine_sensor_events" },
+        (payload) => {
+          const row = payload?.new;
+          if (!row) return;
+          if (clientId && String(row.company_id || "") !== String(clientId)) return;
+          setPeriodRefreshNonce((prev) => prev + 1);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "machines" },
+        (payload) => {
+          const row = payload?.new;
+          if (!row) return;
+          if (clientId && String(row.company_id || "") !== String(clientId)) return;
+          setPeriodRefreshNonce((prev) => prev + 1);
         }
       )
       .subscribe();
@@ -731,8 +889,7 @@ export default function Painel({
         console.warn("Falha ao remover canal realtime:", err);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clientId, onScanned]);
 
   // Estado para armazenar o started_at do log aberto de baixa eficiência por máquina
   const [lowEffStartedAt, setLowEffStartedAt] = useState({});
@@ -969,8 +1126,11 @@ export default function Painel({
         const producedQty = Number(ativa?.scanned_count || 0);
         const stdPieces = parsePiecesPerBox(ativa?.standard);
         const plannedPieces = Number(ativa?.qty || (plannedQty > 0 && stdPieces > 0 ? plannedQty * stdPieces : 0));
-        const producedPieces = producedQty * (stdPieces || 0);
-        const progress = plannedQty > 0 ? Math.min(100, Math.round((producedQty / plannedQty) * 100)) : 0;
+        const apontamentoTipo = String(machineTypeById[machine] || "manual");
+        const producedPieces = apontamentoTipo === "sensor"
+          ? Number(ativa?.sensor_produced_pieces || 0)
+          : (stdPieces > 0 ? producedQty * stdPieces : producedQty);
+        const progress = plannedPieces > 0 ? Math.min(100, Math.round((producedPieces / plannedPieces) * 100)) : 0;
 
         return {
           machine,
@@ -982,10 +1142,13 @@ export default function Painel({
           producedPieces,
           progress,
           status: ativa?.status || "AGUARDANDO",
+          apontamentoTipo,
+          pulses: 0,
+          cavitiesUsed: 0,
         };
       })
       .filter((row) => row && isOrderOngoingStatus(row.status));
-  }, [machineIds, source, periodData.ongoingOrders]);
+  }, [machineIds, machineTypeById, source, periodData.ongoingOrders]);
 
   function getStatusBadge(status) {
     const normalized = String(status || "").toUpperCase();
@@ -1005,6 +1168,13 @@ export default function Painel({
     if (normalized === "FINALIZADA") return "Finalizada";
     if (normalized === "AGUARDANDO") return "Aguardando";
     return status || "-";
+  }
+
+  function getApontamentoLabel(tipo) {
+    const normalized = String(tipo || "manual").toLowerCase();
+    if (normalized === "sensor") return "Sensor";
+    if (normalized === "bipagem") return "Bipagem";
+    return "Manual";
   }
 
   return (
@@ -1185,8 +1355,8 @@ export default function Painel({
                   <tr>
                     <th>Ordem</th>
                     <th>Produto</th>
-                    <th>Qtd Planejada</th>
-                    <th>Qtd Produzida</th>
+                    <th>Máquina</th>
+                    <th>Qtd Apontada</th>
                     <th>Progresso</th>
                     <th>Status</th>
                   </tr>
@@ -1194,7 +1364,7 @@ export default function Painel({
                 <tbody>
                   {ongoingOrders.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="orders-empty">
+                      <td colSpan="7" className="orders-empty">
                         Nenhuma ordem em andamento no momento.
                       </td>
                     </tr>
@@ -1203,8 +1373,8 @@ export default function Painel({
                       <tr key={`${order.machine}-${order.order}`}>
                         <td>{order.order}</td>
                         <td>{order.product}</td>
-                        <td>{order.plannedBoxes.toLocaleString('pt-BR')} cx • {order.plannedPieces.toLocaleString('pt-BR')} pç</td>
-                        <td>{order.producedBoxes.toLocaleString('pt-BR')} cx • {order.producedPieces.toLocaleString('pt-BR')} pç</td>
+                        <td>{order.machine}</td>
+                        <td>{order.producedPieces.toLocaleString('pt-BR')} / {order.plannedPieces.toLocaleString('pt-BR')} pç</td>
                         <td className="progress-cell">
                           <div className="progress-bar" aria-label={`Progresso ${order.progress}%`}>
                             <div className="progress-bar-fill" style={{ width: `${order.progress}%` }} />
@@ -1235,8 +1405,7 @@ export default function Painel({
                     </div>
                     <p className="orders-mobile-product">{order.product}</p>
                     <div className="orders-mobile-qty">
-                      <span>Produzido: {order.producedBoxes.toLocaleString('pt-BR')} cx</span>
-                      <span>Meta: {order.plannedBoxes.toLocaleString('pt-BR')} cx</span>
+                      <span>Qtd Apontada: {order.producedPieces.toLocaleString('pt-BR')} / {order.plannedPieces.toLocaleString('pt-BR')} pç</span>
                     </div>
                     <div className="progress-bar" aria-label={`Progresso ${order.progress}%`}>
                       <div className="progress-bar-fill" style={{ width: `${order.progress}%` }} />

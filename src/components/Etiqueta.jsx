@@ -10,13 +10,61 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   const isWeekendStop = o.status === 'PARADA' && o.reason === 'FIM DE SEMANA'
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-')
 
-  // classe para a pílula de saldo
-  const saldoClass = (() => {
-    if (typeof saldoCaixas !== 'number') return ''
-    if (saldoCaixas === 0) return 'ok'     // concluído
-    if (saldoCaixas <= 3) return 'warn'    // reta final
-    return ''                              // neutro
+  const toNum = (value) => {
+    const num = Number(value)
+    return Number.isFinite(num) ? num : 0
+  }
+
+  const plannedPiecesFromOrder = (() => {
+    const qty = toNum(o.qty)
+    if (qty > 0) return qty
+
+    const boxes = toNum(o.boxes)
+    if (boxes > 0) return boxes
+
+    if (typeof lidasCaixas === 'number' && typeof saldoCaixas === 'number') {
+      return Math.max(0, toNum(lidasCaixas) + toNum(saldoCaixas))
+    }
+
+    return 0
   })()
+
+  const producedPieces = (() => {
+    const sensorPieces = toNum(o.sensor_produced_pieces)
+    if (sensorPieces > 0) return sensorPieces
+
+    const boxesPlanned = toNum(o.boxes)
+    const lidas = typeof lidasCaixas === 'number' ? toNum(lidasCaixas) : toNum(o.scanned_count)
+
+    if (lidas > 0 && boxesPlanned > 0 && plannedPiecesFromOrder > 0) {
+      return Math.round((lidas / boxesPlanned) * plannedPiecesFromOrder)
+    }
+
+    return lidas
+  })()
+
+  const progressPct = plannedPiecesFromOrder > 0
+    ? Math.min(100, Math.round((producedPieces / plannedPiecesFromOrder) * 100))
+    : 0
+
+  const showQtdApontada = producedPieces > 0 || plannedPiecesFromOrder > 0
+
+  function renderQtdApontada(extraClass = '') {
+    if (!showQtdApontada) return null
+
+    return (
+      <div className={`qtd-apontada-block ${extraClass}`.trim()}>
+        <div className="qtd-apontada-line">
+          <span>Qtd Apontada:</span>
+          <strong>{producedPieces.toLocaleString('pt-BR')} / {plannedPiecesFromOrder.toLocaleString('pt-BR')}</strong>
+        </div>
+        <div className="qtd-apontada-progress" aria-label={`Progresso ${progressPct}%`}>
+          <div className="qtd-apontada-progress-fill" style={{ width: `${progressPct}%` }} />
+        </div>
+        <div className="qtd-apontada-percent">{progressPct}%</div>
+      </div>
+    )
+  }
 
   // ===== variante FILA =====
   if (variant === 'fila') {
@@ -35,22 +83,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
           {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
           {o.notes && <div className="muted">{o.notes}</div>}
         </div>
-        {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-          <div className="etiqueta-fila-side">
-            {typeof lidasCaixas === 'number' && (
-              <div className="etiqueta-fila-lidas">
-                <span style={{fontWeight:'bold',fontSize:'1.2em'}}>Lidas:</span><br/>
-                <span style={{fontWeight:'bold',fontSize:'2em'}}>{lidasCaixas}</span>
-              </div>
-            )}
-            {typeof saldoCaixas === 'number' && (
-              <div className={`etiqueta-fila-saldo ${saldoClass}`} style={{marginTop:12}}>
-                <span style={{fontWeight:'bold',fontSize:'1.2em'}}>Saldo:</span><br/>
-                <span style={{fontWeight:'bold',fontSize:'2em'}}>{saldoCaixas}</span>
-              </div>
-            )}
-          </div>
-        )}
+        {renderQtdApontada('qtd-apontada-fila')}
       </div>
     )
   }
@@ -66,31 +99,14 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
       {o.color && <div><b>Cor:</b> {o.color}</div>}
       {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
 
-      {o.boxes && (
-        <>
-          <div><b>Volumes:</b> {o.boxes}</div>
-          {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-            <div className="pet-pill-row">
-              {typeof lidasCaixas === 'number' && (
-                <span className="pet-pill" title="Caixas já bipadas">
-                  Apontadas: <b>{lidasCaixas}</b>
-                </span>
-              )}
-              {typeof saldoCaixas === 'number' && (
-                <span className={`pet-pill ${saldoClass}`} title={`Faltam ${saldoCaixas} caixas`}>
-                  Saldo: <b>{saldoCaixas}</b>
-                </span>
-              )}
-            </div>
-          )}
-        </>
-      )}
+      {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
 
       {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
 
       {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
       {o.notes && <div className="muted">{o.notes}</div>}
+      {renderQtdApontada()}
     </div>
    )
   }
@@ -108,31 +124,14 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
       {o.color && <div><b>Cor:</b> {o.color}</div>}
       {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
 
-      {o.boxes && (
-        <>
-          <div><b>Volumes:</b> {o.boxes}</div>
-          {(typeof lidasCaixas === 'number' || typeof saldoCaixas === 'number') && (
-            <div className={`pill-row ${compactPills ? 'compact-inside' : ''}`}>
-              {typeof lidasCaixas === 'number' && (
-                <span className={`pill ${compactPills ? 'compact-pill' : ''}`} title="Caixas já bipadas">
-                  Apontadas: <b>{lidasCaixas}</b>
-                </span>
-              )}
-              {typeof saldoCaixas === 'number' && (
-                <span className={`pill ${saldoClass} ${compactPills ? 'compact-pill' : ''}`} title={`Faltam ${saldoCaixas} caixas`}>
-                  Saldo: <b>{saldoCaixas}</b>
-                </span>
-              )}
-            </div>
-          )}
-        </>
-      )}
+      {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
 
       {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
 
       {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
       {o.notes && <div className="muted">{o.notes}</div>}
+      {renderQtdApontada(compactPills ? 'qtd-apontada-compact' : '')}
     </div>
   )
 }

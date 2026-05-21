@@ -7,7 +7,7 @@ import { getTurnoAtual, statusClass } from "../lib/utils";
 import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
-import { REFUGO_MOTIVOS } from "../domain/constants";
+import { REFUGO_MOTIVOS, MOTIVOS_PARADA } from "../domain/constants";
 
 export default function Pet01({
   registroGrupos,
@@ -22,6 +22,7 @@ export default function Pet01({
   setResumeModal,
   setFinalizando,
   machineId: machineIdProp,
+  machineMeta = null,
   clientId = null,
 }) {
   const machineId = String(machineIdProp || "P1").toUpperCase();
@@ -42,6 +43,7 @@ export default function Pet01({
   const [shiftInfo, setShiftInfo] = useState(null); // { shiftKey, start, end }
   const [responsavelKey, setResponsavelKey] = useState("");
   const [fichaModalOpen, setFichaModalOpen] = useState(false);
+  const [autoStopPromptedOrderId, setAutoStopPromptedOrderId] = useState(null);
 
 
   // toast de notificação superior
@@ -125,10 +127,45 @@ const [currentShift, setCurrentShift] = useState(() => {
   };
 
   // ---------- TOAST helper ----------
-  function showToast(msg, type = "ok", ms = 2400) {
+  const showToast = useCallback((msg, type = "ok", ms = 2400) => {
     setToast({ visible: true, type, msg });
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), ms);
-  }
+  }, []);
+
+  const formatCycleValue = useCallback((value) => {
+    const num = Number(value)
+    if (!Number.isFinite(num) || num <= 0) return '—'
+    return `${num.toFixed(3)}s`
+  }, [])
+
+  useEffect(() => {
+    if (!ativa || !machineMeta) {
+      setAutoStopPromptedOrderId(null)
+      return
+    }
+
+    const sensorAutoStopped = Boolean(machineMeta.sensor_auto_stopped)
+    const activeStatus = String(ativa.status || '').toUpperCase()
+    const isProducing = activeStatus === 'PRODUZINDO' || activeStatus === 'BAIXA_EFICIENCIA'
+
+    if (!sensorAutoStopped || !isProducing) {
+      setAutoStopPromptedOrderId(null)
+      return
+    }
+    if (autoStopPromptedOrderId === ativa.id) return
+
+    const nowBr = DateTime.now().setZone('America/Sao_Paulo')
+    setStopModal({
+      ordem: ativa,
+      operador: '',
+      motivo: MOTIVOS_PARADA[0],
+      obs: 'Parada sugerida automaticamente pelo sensor. Confirme a parada e registre o motivo.',
+      data: nowBr.toISODate(),
+      hora: nowBr.toFormat('HH:mm'),
+    })
+    setAutoStopPromptedOrderId(ativa.id)
+    showToast('Parada sugerida pelo sensor. Confirme no modal.', 'err', 4200)
+  }, [ativa, machineMeta, setStopModal, autoStopPromptedOrderId, showToast])
 
   const formatInt = useCallback((n) => {
     const num = Number(n) || 0;
@@ -644,6 +681,32 @@ if (typeof window !== "undefined") {
             </div>
           </div>
         </div>
+
+        {machineMeta?.apontamento_tipo === 'sensor' && (
+          <div className="pet01-sensor-panel">
+            <div>
+              <div className="pet01-sensor-label">Status sensor</div>
+              <div className="pet01-sensor-value">{machineMeta.sensor_status || '—'}</div>
+            </div>
+            <div>
+              <div className="pet01-sensor-label">Ciclo cadastrado</div>
+              <div className="pet01-sensor-value">{machineMeta.ciclo_cadastrado_seconds ? `${machineMeta.ciclo_cadastrado_seconds}s` : '—'}</div>
+            </div>
+            <div>
+              <div className="pet01-sensor-label">Ciclo real</div>
+              <div className="pet01-sensor-value">{formatCycleValue(machineMeta.sensor_last_cycle_seconds)}</div>
+            </div>
+            <div>
+              <div className="pet01-sensor-label">Ciclo médio</div>
+              <div className="pet01-sensor-value">{formatCycleValue(machineMeta.sensor_avg_cycle_seconds)}</div>
+            </div>
+            {machineMeta.sensor_auto_stopped && (
+              <div className="pet01-sensor-warning">
+                Parada automática detectada pelo sensor. Modal de parada sugerida aberto.
+              </div>
+            )}
+          </div>
+        )}
 
         <div className={statusClass(ativa?.status)}>
           <Etiqueta o={ativa} variant="pet01" saldoCaixas={saldo} lidasCaixas={lidas} />

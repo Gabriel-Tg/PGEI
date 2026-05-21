@@ -38,7 +38,26 @@ export default function AdminPanel() {
     admin_username: 'admin',
     admin_password: '',
   })
-  const [machineForm, setMachineForm] = useState({ company_id: '', machine_code: '', machine_name: '', route_slug: '', sector: '', active: true })
+  const [machineForm, setMachineForm] = useState({
+    company_id: '',
+    machine_code: '',
+    machine_name: '',
+    route_slug: '',
+    sector: '',
+    active: true,
+    apontamento_tipo: 'manual',
+    esp32_id: '',
+    sensor_token: '',
+    sensor_token_last4: '',
+  })
+
+  async function sha256Hex(value) {
+    const text = String(value || '')
+    const data = new TextEncoder().encode(text)
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+  }
 
   function normalizeEdgeFunctionError(err) {
     const message = String(err?.message || '')
@@ -91,7 +110,10 @@ export default function AdminPanel() {
     try {
       const [{ data: clientsData, error: clientsErr }, { data: machinesData, error: machinesErr }] = await Promise.all([
         supabase.from('companies').select('id, name, slug, subdomain, active, is_demo, created_at').order('created_at', { ascending: false }),
-        supabase.from('machines').select('id, company_id, machine_code, machine_name, route_slug, sector, active, created_at').order('created_at', { ascending: false }),
+        supabase
+          .from('machines')
+          .select('id, company_id, machine_code, machine_name, route_slug, sector, active, apontamento_tipo, esp32_id, sensor_token_last4, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, created_at')
+          .order('created_at', { ascending: false }),
       ])
 
       if (clientsErr) throw clientsErr
@@ -213,6 +235,10 @@ export default function AdminPanel() {
       route_slug: '',
       sector: '',
       active: true,
+      apontamento_tipo: 'manual',
+      esp32_id: '',
+      sensor_token: '',
+      sensor_token_last4: '',
     })
     setShowMachineModal(true)
   }
@@ -239,6 +265,10 @@ export default function AdminPanel() {
       route_slug: machine.route_slug || '',
       sector: machine.sector || '',
       active: !!machine.active,
+      apontamento_tipo: machine.apontamento_tipo || 'manual',
+      esp32_id: machine.esp32_id || '',
+      sensor_token: '',
+      sensor_token_last4: machine.sensor_token_last4 || '',
     })
     setShowMachineModal(true)
   }
@@ -332,6 +362,12 @@ export default function AdminPanel() {
   async function handleCreateMachine(event) {
     event.preventDefault()
 
+    const sensorToken = String(machineForm.sensor_token || '').trim()
+    const sensorTokenHash = sensorToken ? await sha256Hex(sensorToken) : ''
+    const sensorTokenLast4 = sensorToken
+      ? sensorToken.slice(-4)
+      : (String(machineForm.sensor_token_last4 || '').trim() || null)
+
     const payload = {
       company_id: machineForm.company_id,
       machine_code: String(machineForm.machine_code || '').trim().toUpperCase(),
@@ -339,6 +375,13 @@ export default function AdminPanel() {
       route_slug: normalizeSlug(machineForm.route_slug || machineForm.machine_code),
       sector: String(machineForm.sector || '').trim() || null,
       active: !!machineForm.active,
+      apontamento_tipo: String(machineForm.apontamento_tipo || 'manual'),
+      esp32_id: String(machineForm.esp32_id || '').trim().toLowerCase() || null,
+    }
+
+    if (sensorTokenHash) {
+      payload.sensor_token_hash = sensorTokenHash
+      payload.sensor_token_last4 = sensorTokenLast4
     }
 
     if (!payload.company_id || !payload.machine_code) {
@@ -373,6 +416,8 @@ export default function AdminPanel() {
       'production_scans',
       'scrap_logs',
       'machine_stops',
+      'machine_sensor_events',
+      'machine_sensor_heartbeats',
       'injection_production_entries',
       'low_efficiency_logs',
       'shift_responsibles',
@@ -433,6 +478,26 @@ export default function AdminPanel() {
     await loadData()
   }
 
+  async function handleMachineApontamentoTypeChange(machine, nextType) {
+    if (!machine?.id) return
+    const normalizedType = String(nextType || 'manual')
+    const { error } = await supabase
+      .from('machines')
+      .update({ apontamento_tipo: normalizedType })
+      .eq('id', machine.id)
+
+    if (error) {
+      alert(error.message || 'Falha ao atualizar tipo de apontamento da máquina.')
+      return
+    }
+
+    setMachines((prev) => prev.map((item) => (
+      item.id === machine.id
+        ? { ...item, apontamento_tipo: normalizedType }
+        : item
+    )))
+  }
+
   function renderSection() {
     if (activeSection === 'dashboard') {
       return (
@@ -455,7 +520,14 @@ export default function AdminPanel() {
     }
 
     if (activeSection === 'machines') {
-      return <MachinesSection machines={machines} onEditMachine={openEditMachineModal} onDeleteMachine={handleDeleteMachine} />
+      return (
+        <MachinesSection
+          machines={machines}
+          onEditMachine={openEditMachineModal}
+          onDeleteMachine={handleDeleteMachine}
+          onChangeApontamentoType={handleMachineApontamentoTypeChange}
+        />
+      )
     }
 
     return null
@@ -660,6 +732,37 @@ export default function AdminPanel() {
                     <option value="1">Sim</option>
                     <option value="0">Não</option>
                   </select>
+                </label>
+
+                <label>
+                  Tipo de apontamento
+                  <select
+                    value={machineForm.apontamento_tipo}
+                    onChange={(e) => setMachineForm((prev) => ({ ...prev, apontamento_tipo: e.target.value }))}
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="bipagem">Bipagem</option>
+                    <option value="sensor">Sensor (ESP32)</option>
+                  </select>
+                </label>
+
+                <label>
+                  ESP32 ID
+                  <input
+                    value={machineForm.esp32_id}
+                    onChange={(e) => setMachineForm((prev) => ({ ...prev, esp32_id: e.target.value }))}
+                    placeholder="argos-box-01"
+                  />
+                </label>
+
+                <label className="full-width">
+                  Token do sensor {editingMachineId ? '(deixe vazio para manter)' : ''}
+                  <input
+                    type="password"
+                    value={machineForm.sensor_token}
+                    onChange={(e) => setMachineForm((prev) => ({ ...prev, sensor_token: e.target.value }))}
+                    placeholder={editingMachineId && machineForm.sensor_token_last4 ? `Token atual termina com ${machineForm.sensor_token_last4}` : 'Defina um token seguro'}
+                  />
                 </label>
 
                 <div className="full-width admin-form-actions">

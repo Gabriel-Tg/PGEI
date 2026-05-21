@@ -4,7 +4,14 @@ function statusLabel(active) {
   return active ? 'Ativa' : 'Inativa'
 }
 
-export default function MachinesSection({ machines, onEditMachine, onDeleteMachine }) {
+function apontamentoLabel(tipo) {
+  const value = String(tipo || 'manual')
+  if (value === 'bipagem') return 'Bipagem'
+  if (value === 'sensor') return 'Sensor'
+  return 'Manual'
+}
+
+export default function MachinesSection({ machines, onEditMachine, onDeleteMachine, onChangeApontamentoType }) {
   return (
     <section className="admin-section-card">
       <div className="admin-section-head">
@@ -21,6 +28,8 @@ export default function MachinesSection({ machines, onEditMachine, onDeleteMachi
               <th>Nome</th>
               <th>Rota</th>
               <th>Status</th>
+              <th>Apontamento</th>
+              <th>Troca Rápida</th>
               <th>Acoes</th>
             </tr>
           </thead>
@@ -33,6 +42,22 @@ export default function MachinesSection({ machines, onEditMachine, onDeleteMachi
                 <td>{machine.route_slug ? `/${machine.route_slug}` : '-'}</td>
                 <td>
                   <span className={`badge ${machine.active ? 'active' : 'inactive'}`}>{statusLabel(machine.active)}</span>
+                </td>
+                <td>
+                  <span className={`badge apontamento ${String(machine.apontamento_tipo || 'manual')}`}>
+                    {apontamentoLabel(machine.apontamento_tipo)}
+                  </span>
+                </td>
+                <td>
+                  <select
+                    className="admin-quick-select"
+                    value={String(machine.apontamento_tipo || 'manual')}
+                    onChange={(event) => onChangeApontamentoType?.(machine, event.target.value)}
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="bipagem">Bipagem</option>
+                    <option value="sensor">Sensor</option>
+                  </select>
                 </td>
                 <td>
                   <div className="admin-action-row">

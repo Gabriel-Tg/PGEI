@@ -11,6 +11,7 @@ import NovaOrdem from './abas/NovaOrdem'
 import Rastreio from './abas/Rastreio'
 import Estoque from './abas/Estoque'
 import PainelTV from './abas/PainelTV'
+import Sensores from './abas/Sensores'
 import Tablets from './pages/Tablets'
 import Ficha from './pages/Ficha'
 import Prioridade from './pages/Prioridade'
@@ -184,6 +185,7 @@ function TenantApp({ tenantCompany = null }){
   const canManageUsers = !!permissions?.canManageUsers
   const canViewTvPanel = !!permissions?.canViewTvPanel
   const canManageOperational = !!permissions?.canManageOperational
+  const canViewSensors = !!authUser && !!permissions?.canViewDashboard
   const canAccessList = canUseProduction || canApproveOperational || canManageOperational
   const isTvOnly = !!permissions?.isTv
   const mustChangePassword = !!authUser?.user_metadata?.must_change_password
@@ -191,6 +193,7 @@ function TenantApp({ tenantCompany = null }){
   const tabNavOrder = useMemo(() => {
     const ids = []
     if (canViewDashboard) ids.push('painel')
+    if (canViewSensors) ids.push('sensores')
     if (canAccessList) ids.push('lista')
     if (canMakeApontamentos) ids.push('apontamento')
     if (canCreateOrder) ids.push('nova')
@@ -199,11 +202,12 @@ function TenantApp({ tenantCompany = null }){
     if (canManageUsers) ids.push('usuarios')
     if (canManageCatalog) ids.push('admin-itens')
     return ids
-  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
+  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, canViewSensors])
 
   const tabItems = useMemo(() => {
     const items = []
     if (canViewDashboard) items.push({ id: 'painel', label: 'Dashboard', icon: 'dashboard' })
+    if (canViewSensors) items.push({ id: 'sensores', label: 'Sensores', icon: 'monitoring' })
     if (canAccessList) items.push({ id: 'lista', label: 'Painel', icon: 'production' })
     if (canMakeApontamentos) items.push({ id: 'apontamento', label: 'Apontamento', icon: 'apontamento' })
     if (canCreateOrder) items.push({ id: 'nova', label: 'Ordens', icon: 'orders' })
@@ -212,7 +216,7 @@ function TenantApp({ tenantCompany = null }){
     if (canManageUsers) items.push({ id: 'usuarios', label: 'Configurações', icon: 'settings' })
     if (canManageCatalog) items.push({ id: 'admin-itens', label: 'Cadastro Itens', icon: 'catalog' })
     return items
-  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
+  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, canViewSensors])
 
   const mobileTabItems = useMemo(() => {
     const preferredOrder = ['painel', 'lista', 'apontamento', 'nova', 'usuarios']
@@ -227,6 +231,7 @@ function TenantApp({ tenantCompany = null }){
   const currentTabLabel = useMemo(() => {
     if (tab === 'admin-itens') return 'Cadastro de Itens'
     if (tab === 'apontamento') return 'Apontamento'
+    if (tab === 'sensores') return 'Monitoramento Industrial'
     const current = tabItems.find((item) => item.id === tab)
     return current?.label || 'Painel'
   }, [tab, tabItems])
@@ -297,6 +302,15 @@ function TenantApp({ tenantCompany = null }){
           <svg {...commonProps}>
             <circle cx="11" cy="11" r="6" />
             <path d="M16 16l4 4" />
+          </svg>
+        )
+      case 'monitoring':
+        return (
+          <svg {...commonProps}>
+            <rect x="3" y="4" width="18" height="14" rx="2" />
+            <path d="M7 14h2" />
+            <path d="M11 12h2" />
+            <path d="M15 10h2" />
           </svg>
         )
       case 'management':
@@ -423,7 +437,7 @@ function TenantApp({ tenantCompany = null }){
       setMachinesLoading(true)
       const { data, error } = await supabase
         .from('machines')
-        .select('id, company_id, machine_code, route_slug, active')
+        .select('id, company_id, machine_code, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at')
         .eq('company_id', tenantCompanyId)
         .eq('active', true)
         .order('machine_code', { ascending: true })
@@ -617,6 +631,11 @@ function TenantApp({ tenantCompany = null }){
       return
     }
 
+    if (!canViewSensors && tab === 'sensores') {
+      setTabInstant('painel')
+      return
+    }
+
     if (!canAccessList && tab === 'lista') {
       setTabInstant('painel')
       return
@@ -650,7 +669,7 @@ function TenantApp({ tenantCompany = null }){
     if (!canManageCatalog && tab === 'admin-itens') {
       setTabInstant('painel')
     }
-  }, [authChecked, authUser, tab, hasAccess, mustChangePassword, canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, goToTab, setTabInstant])
+  }, [authChecked, authUser, tab, hasAccess, mustChangePassword, canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, goToTab, setTabInstant, canViewSensors])
 
   async function handleSignOut() {
     try {
@@ -783,6 +802,7 @@ function TenantApp({ tenantCompany = null }){
           registroGrupos={orderRecordGroups}
           ativosP1={ativosMaquina}
           machineId={machineId}
+          machineMeta={resolvedMachine}
           clientId={tenantCompanyId}
           tick={tick}
           paradas={stops}
@@ -898,9 +918,24 @@ function TenantApp({ tenantCompany = null }){
             onScanned={fetchOpenOrders}
             authUser={authUser}
             machinePriorities={machinePriorities}
+            tenantMachines={tenantMachines}
             clientId={tenantCompanyId}
             readOnly={isTvOnly}
           />
+      )
+    }
+
+    if (tab === 'sensores' && tenantAccessChecked && hasAccess && canViewSensors) {
+      if (!tenantMachinesReady) {
+        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
+      }
+      return (
+        <Sensores
+          clientId={tenantCompanyId}
+          machineIds={machineIds}
+          tenantMachines={tenantMachines}
+          ativosPorMaquina={ativosPorMaquina}
+        />
       )
     }
 
