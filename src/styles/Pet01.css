@@ -182,15 +182,25 @@
 
 /* SITUAÇÃO (select) */
 .pet01-field{ margin-top: 10px; display:flex; gap:16px; align-items:center; }
-.pet01-field label{ font-weight:700; color:var(--pet01-subtext); margin-right:6px; }
+.pet01-field label{ font-weight:700; color:var(--muted-strong); margin-right:6px; }
 .pet01-field select{
   padding:10px 12px;
   border-radius:10px;
-  border:1px solid #e6eef6;
+  border:1px solid rgba(89, 161, 245, 0.35);
   min-width:190px;
-  background: #fbfdff;
+  background: rgba(7, 24, 46, 0.82);
+  color: var(--text);
   font-size: 1.03rem !important; 
   font-weight:900;
+}
+.pet01-field select:focus{
+  outline: none;
+  border-color: var(--secondary);
+  box-shadow: 0 0 0 3px rgba(var(--secondary-rgb), 0.2);
+  background: rgba(7, 28, 54, 0.9);
+}
+.pet01-field select option{
+  color: #0f172a;
 }
 
 /* borda esquerda colorida no card conforme status */
@@ -608,27 +618,77 @@
   justify-content: center;
 }
 
-.pet01-tablet-toggle {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 9000;
-  width: 52px;
-  height: 52px;
-  border-radius: 999px;
-  border: 0;
-  font-weight: 800;
-  font-size: 13px;
-  cursor: pointer;
-  box-shadow: 0 8px 20px rgba(2, 8, 23, 0.25);
+/* =========================
+   Modern Skin Override (Tablet)
+   ========================= */
+.pet01-wrapper--p1 {
+  --pet01-bg: radial-gradient(1200px 500px at 15% -10%, #173a68 0%, rgba(23, 58, 104, 0) 60%),
+              radial-gradient(900px 420px at 110% 20%, #1f6d5a 0%, rgba(31, 109, 90, 0) 55%),
+              linear-gradient(165deg, #061425 0%, #081c34 55%, #0a223f 100%);
+  --pet01-text: #e9f4ff;
+  --pet01-subtext: #9fc1e3;
+  --pet01-card-bg: linear-gradient(170deg, rgba(9, 23, 42, 0.92), rgba(8, 20, 38, 0.88));
+  --pet01-shadow: 0 20px 46px rgba(0, 8, 18, 0.42);
 }
 
-.pet01-tablet-toggle.on {
-  background: linear-gradient(90deg, #16a34a, #22c55e);
-  color: white;
+.pet01-wrapper--p1 .pet01-title {
+  color: #f3f9ff;
+  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
-.pet01-tablet-toggle.off {
-  background: linear-gradient(90deg, #6b7280, #9ca3af);
-  color: white;
+.pet01-wrapper--p1 .pet01-card {
+  border: 1px solid rgba(84, 149, 224, 0.24);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 22px 52px rgba(0, 6, 18, 0.45);
+}
+
+.pet01-wrapper--p1 .pet01-card .op-inline {
+  color: #f2fbff;
+  font-size: clamp(26px, 2.2vw, 34px);
+  letter-spacing: 0.45px;
+  text-shadow: 0 5px 14px rgba(0, 0, 0, 0.4);
+}
+
+.pet01-wrapper--p1 .pet01-card > .small,
+.pet01-wrapper--p1 .pet01-card > .etiqueta {
+  background: linear-gradient(165deg, rgba(8, 18, 34, 0.96), rgba(10, 24, 45, 0.94)) !important;
+  border: 1px solid rgba(89, 148, 221, 0.24) !important;
+  box-shadow: 0 10px 26px rgba(0, 6, 20, 0.35) !important;
+  color: #eaf4ff !important;
+}
+
+.pet01-wrapper--p1 .pet01-inline-metrics .pet01-metric-card {
+  background: linear-gradient(165deg, rgba(6, 20, 38, 0.95), rgba(9, 26, 48, 0.92));
+  border: 1px solid rgba(92, 156, 230, 0.28);
+  box-shadow: 0 14px 30px rgba(0, 6, 20, 0.35);
+}
+
+.pet01-wrapper--p1 .pet01-metric-label {
+  color: #d7e9ff;
+}
+
+.pet01-wrapper--p1 .pet01-metric-sub {
+  color: #9fc1e3;
+}
+
+.pet01-wrapper--p1 .pet01-metric-value {
+  color: #f3fbff;
+}
+
+.pet01-wrapper--p1 .pet01-metric-value.green {
+  color: #7ff2b9;
+}
+
+.pet01-wrapper--p1 .pet01-metric-value.red {
+  color: #ff9aa8;
+}
+
+.pet01-wrapper--p1 .pet01-operator-row {
+  color: #cfe6ff;
+}
+
+.pet01-wrapper--p1 .pet01-operator-icon {
+  border-color: rgba(95, 153, 224, 0.36);
+  background: rgba(9, 26, 48, 0.78);
+  color: #eaf5ff;
 }

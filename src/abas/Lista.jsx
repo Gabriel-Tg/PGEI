@@ -175,7 +175,7 @@ await supabase.rpc('reorder_machine_queue', {
 
   return (
     <>
-      <div className="grid">
+      <div className="grid lista-grid">
         <div className="tablehead"><div>MÁQUINA</div><div>PAINEL</div><div>FILA</div></div>
 
         {machineIds.map((m) => {

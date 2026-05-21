@@ -351,13 +351,13 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
                   left: 0,
                   right: 0,
                   top: '100%',
-                  background: '#fff',
-                  border: '1px solid #ddd',
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
                   borderRadius: 10,
                   marginTop: 6,
                   maxHeight: 240,
                   overflowY: 'auto',
-                  boxShadow: '0 6px 20px rgba(0,0,0,0.08)',
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.24)',
                 }}
               >
                 {loading && <div style={ddItemMuted}>buscando…</div>}
@@ -372,7 +372,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
                 ))}
               </div>
             )}
-            {err && <div style={{ color: '#b00020', fontSize: 12, marginTop: 6 }}>Erro: {err}</div>}
+            {err && <div style={{ color: 'var(--accent-red)', fontSize: 12, marginTop: 6 }}>Erro: {err}</div>}
           </div>
 
           {/* Cor (auto-preenchida, mas editável) */}
@@ -505,7 +505,7 @@ function formatOrderCreatedAt(value) {
 /* ===== estilos locais da dropdown/pílulas ===== */
 const ddItem = {
   padding: '10px 12px',
-  borderBottom: '1px solid #eee',
+  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
   cursor: 'pointer',
 }
 const ddItemMuted = {
@@ -514,18 +514,18 @@ const ddItemMuted = {
 }
 const pill = {
   padding: '6px 10px',
-  border: '1px solid #ddd',
+  border: '1px solid var(--border)',
   borderRadius: 999,
   fontSize: 12,
-  background: '#fafafa',
+  background: 'var(--bg-soft)',
 }
 const duplicateRow = {
   display: 'grid',
   gridTemplateColumns: 'minmax(90px, 1fr) minmax(120px, 1fr) minmax(150px, 1.2fr)',
   gap: 8,
   padding: '10px 12px',
-  border: '1px solid #e7e7e7',
+  border: '1px solid var(--border)',
   borderRadius: 10,
-  background: '#fafafa',
+  background: 'var(--bg-soft)',
   alignItems: 'center',
 }

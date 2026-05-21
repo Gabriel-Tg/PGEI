@@ -13,6 +13,10 @@ function safeTime(val){
   return DateTime.local().toFormat('HH:mm')
 }
 
+function resolveModalOrder(modal) {
+  return modal?.ordem || modal?.order || null
+}
+
 export default function GlobalModals({
   editando, setEditando, finalizando, setFinalizando, confirmData, setConfirmData,
   startModal, setStartModal, stopModal, setStopModal, resumeModal, setResumeModal,
@@ -132,7 +136,14 @@ export default function GlobalModals({
       </Modal>
 
       {/* Início Produção */}
-      <Modal open={!!startModal} onClose={()=>setStartModal(null)} title={startModal ? `Iniciar Produção • ${startModal.ordem.machine_id} • O.P ${startModal.ordem.code}` : ''}>
+      <Modal
+        open={!!startModal}
+        onClose={()=>setStartModal(null)}
+        title={(() => {
+          const order = resolveModalOrder(startModal)
+          return startModal ? `Iniciar Produção • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
+        })()}
+      >
         {startModal && (
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={startModal.operador} onChange={e=>setStartModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -153,7 +164,14 @@ export default function GlobalModals({
       </Modal>
 
       {/* Parada */}
-      <Modal open={!!stopModal} onClose={()=>setStopModal(null)} title={stopModal ? `Parar máquina • ${stopModal.ordem.machine_id} • O.P ${stopModal.ordem.code}` : ''}>
+      <Modal
+        open={!!stopModal}
+        onClose={()=>setStopModal(null)}
+        title={(() => {
+          const order = resolveModalOrder(stopModal)
+          return stopModal ? `Parar máquina • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
+        })()}
+      >
         {stopModal && (
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={stopModal.operador} onChange={e=>setStopModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -189,7 +207,14 @@ export default function GlobalModals({
       </Modal>
 
       {/* Retomada (de PARADA) */}
-      <Modal open={!!resumeModal} onClose={()=>setResumeModal(null)} title={resumeModal ? `Retomar produção • ${resumeModal.ordem.machine_id} • O.P ${resumeModal.ordem.code}` : ''}>
+      <Modal
+        open={!!resumeModal}
+        onClose={()=>setResumeModal(null)}
+        title={(() => {
+          const order = resolveModalOrder(resumeModal)
+          return resumeModal ? `Retomar produção • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
+        })()}
+      >
         {resumeModal && (
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={resumeModal.operador} onChange={e=>setResumeModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
@@ -210,7 +235,14 @@ export default function GlobalModals({
       </Modal>
 
       {/* Baixa Eficiência — INÍCIO */}
-      <Modal open={!!lowEffModal} onClose={()=>setLowEffModal(null)} title={lowEffModal ? `Baixa eficiência • ${lowEffModal.ordem.machine_id} • O.P ${lowEffModal.ordem.code}` : ''}>
+      <Modal
+        open={!!lowEffModal}
+        onClose={()=>setLowEffModal(null)}
+        title={(() => {
+          const order = resolveModalOrder(lowEffModal)
+          return lowEffModal ? `Baixa eficiência • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
+        })()}
+      >
         {lowEffModal && (
           <div className="grid">
             <div>
@@ -238,7 +270,14 @@ export default function GlobalModals({
       </Modal>
 
       {/* Encerrar Baixa Eficiência */}
-      <Modal open={!!lowEffEndModal} onClose={()=>setLowEffEndModal(null)} title={lowEffEndModal ? `Encerrar baixa eficiência • ${lowEffEndModal.ordem.machine_id} • O.P ${lowEffEndModal.ordem.code}` : ''}>
+      <Modal
+        open={!!lowEffEndModal}
+        onClose={()=>setLowEffEndModal(null)}
+        title={(() => {
+          const order = resolveModalOrder(lowEffEndModal)
+          return lowEffEndModal ? `Encerrar baixa eficiência • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
+        })()}
+      >
         {lowEffEndModal && (
           <div className="grid">
             <div className="grid2">

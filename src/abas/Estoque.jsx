@@ -333,7 +333,8 @@ function ProductCellWithHoverImage({
   )
 }
 
-export default function Estoque({ readOnly = false, allowedClient = '', enableProductImagePreview = false }) {
+export default function Estoque({ readOnly = false, allowedClient = '', enableProductImagePreview = false, clientId = null, companyId = null }) {
+  const tenantCompanyId = normalize(companyId || clientId) || null
   const [stockContext, setStockContext] = useState('inputs')
   const [tab, setTab] = useState('inventario')
   const [inventoryClientFilter, setInventoryClientFilter] = useState('')
@@ -1154,6 +1155,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
           const quantity = Number(item.quantity)
 
           return {
+            ...(tenantCompanyId ? { company_id: tenantCompanyId, client_id: tenantCompanyId } : {}),
             id: makeId(),
             date: note.date,
             invoice_number: note.invoiceNumber,
@@ -1204,6 +1206,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     const shift = getTurnoAtual(nowBr)
 
     const payload = {
+      ...(tenantCompanyId ? { company_id: tenantCompanyId, client_id: tenantCompanyId } : {}),
       created_at: nowBr.toUTC().toISO(),
       machine_id: normalize(order?.machine_id) || null,
       shift: shift ? String(shift) : '',
@@ -1410,6 +1413,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
         : (Number.isFinite(latestUnitValue) && latestUnitValue > 0 ? latestUnitValue : 1)
 
       return {
+        ...(tenantCompanyId ? { company_id: tenantCompanyId, client_id: tenantCompanyId } : {}),
         id: makeId(),
         date,
         invoice_number: MANUAL_PURCHASE_INVOICE,
@@ -1509,6 +1513,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
     }
 
     const payload = {
+      ...(tenantCompanyId ? { company_id: tenantCompanyId, client_id: tenantCompanyId } : {}),
       id: makeId(),
       date,
       invoice_number: invoiceNumber,
@@ -1635,6 +1640,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       if (purchaseUpdateError) throw purchaseUpdateError
 
       const returnPayload = {
+        ...(tenantCompanyId ? { company_id: tenantCompanyId, client_id: tenantCompanyId } : {}),
         id: makeId(),
         op,
         item_code: itemCode,
@@ -1774,6 +1780,7 @@ export default function Estoque({ readOnly = false, allowedClient = '', enablePr
       }
 
       requisitionInsertRows.push({
+        ...(tenantCompanyId ? { company_id: tenantCompanyId, client_id: tenantCompanyId } : {}),
         id: makeId(),
         item_code: itemCode,
         op,

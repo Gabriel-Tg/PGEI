@@ -214,6 +214,16 @@ function TenantApp({ tenantCompany = null }){
     return items
   }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
 
+  const mobileTabItems = useMemo(() => {
+    const preferredOrder = ['painel', 'lista', 'apontamento', 'nova', 'usuarios']
+    const byId = new Map(tabItems.map((item) => [item.id, item]))
+    const preferred = preferredOrder
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+
+    return preferred.length > 0 ? preferred : tabItems.slice(0, 5)
+  }, [tabItems])
+
   const currentTabLabel = useMemo(() => {
     if (tab === 'admin-itens') return 'Cadastro de Itens'
     if (tab === 'apontamento') return 'Apontamento'
@@ -367,6 +377,12 @@ function TenantApp({ tenantCompany = null }){
     fetchFinalizedOrders()
     fetchStops()
   }, [authChecked, tenantAccessChecked, authUser, hasAccess, tenantCompanyId])
+
+  useEffect(() => {
+    if (!authChecked || !tenantAccessChecked || !authUser || !hasAccess) return
+    if (tab !== 'painel') return
+    fetchOpenOrders()
+  }, [tab, authChecked, tenantAccessChecked, authUser, hasAccess, tenantCompanyId])
 
   useEffect(()=>{
      const nowBR = DateTime.now().setZone('America/Sao_Paulo')
@@ -1018,27 +1034,18 @@ if (tab === 'estoque' && hasGestaoAccess) {
 
       {showDashboardShell && (
         <div className="mobile-bottom-nav" aria-label="Menu principal">
-          {tabItems.map((item) => (
+          {mobileTabItems.map((item) => (
             <button
               key={item.id}
               type="button"
               className={`mobile-bottom-nav-item ${tab === item.id ? 'active' : ''}`}
               onClick={() => goToTab(item.id)}
               title={item.label}
+              aria-label={item.label}
             >
               <span className="mobile-nav-icon" aria-hidden="true">{renderNavIcon(item.icon)}</span>
-              <span className="mobile-nav-label">{item.label}</span>
             </button>
           ))}
-          <button
-            type="button"
-            className="mobile-bottom-nav-item mobile-signout"
-            onClick={handleSignOut}
-            title="Sair"
-          >
-            <span className="mobile-nav-icon" aria-hidden="true">{renderNavIcon('logout')}</span>
-            <span className="mobile-nav-label">Sair</span>
-          </button>
         </div>
       )}
 

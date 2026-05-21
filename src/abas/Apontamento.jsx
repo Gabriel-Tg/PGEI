@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { Fragment, useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { DateTime } from 'luxon';
 import { supabase } from '../lib/supabaseClient';
 import { MAQUINAS, REFUGO_MOTIVOS, TURNOS } from '../domain/constants';
@@ -846,7 +846,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                       const respInfo = responsavelPorTurno[respKey];
 
                       return (
-                        <div key={t.key} className="turno-card">
+                        <div key={`${maq}-${t.key}`} className="turno-card">
                           <div className="turno-label">
                             <div className="turno-donut">
                             {/*<BigDonutPct pct={eficienciaPct} />*/}
@@ -913,7 +913,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                                 ) : (
                                   <ul className="caixas-list">
                                     {caixasSorted.map((c, i) => (
-                                      <li key={i}>
+                                      <li key={`${c.order_id || 'no-order'}-${c.num || 'no-box'}-${c.hora || i}`}>
                                         Caixa {c.num}: {fmtDateTime(c.hora)}
                                         {c.order ? ` — O.S: ${c.order.code || c.order.id} (Padrão: ${c.order.standard})` : ''}
                                       </li>
@@ -937,7 +937,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                                     }).map((m, i) => {
                                       const os = m.order?.code || m.order_code || '-';
                                       return (
-                                        <li key={i}>
+                                        <li key={m.id || `${os}-${m.created_at || i}`}>
                                           {m.created_at ? fmtDateTime(m.created_at) : '-'} — {m.good_qty} peças — O.S: {os}
                                         </li>
                                       );
@@ -955,7 +955,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                                       const tb = DateTime.fromISO(String(b.created_at));
                                       return ta.toMillis() - tb.toMillis();
                                     }).map((r, i) => (
-                                      <li key={i}>
+                                      <li key={r.id || `${r.created_at || 'no-date'}-${r.qty || 0}-${i}`}>
                                         {fmtDateTime(r.created_at)} — {r.qty} peças ({r.reason})
                                       </li>
                                     ))}
@@ -1005,7 +1005,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                                         const ms = Math.max(0, s.fim - s.ini);
                                         return (
                                           <li
-                                            key={i}
+                                            key={`${s.id || 'stop'}-${s.ini}-${s.fim}-${i}`}
                                             title={(() => {
                                               const oIni = s.origIni ? fmtDateTime(s.origIni) : '-';
                                               const oFim = s.origFim ? fmtDateTime(s.origFim) : '— (em aberto)';
@@ -1113,8 +1113,8 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
             <div className="label" style={{ gridColumn: '1 / -1' }}>
               Refugo
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, marginTop: 6 }}>
-                {manualForm.scrapEntries.map((entry, idx) => (
-                  <>
+                  {manualForm.scrapEntries.map((entry, idx) => (
+                  <Fragment key={`scrap-entry-${idx}`}>
                     <input
                       key={`qty-${idx}`}
                       type="number"
@@ -1148,7 +1148,6 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                       {REFUGO_MOTIVOS.map(m=> <option key={m} value={m}>{m}</option>)}
                     </select>
                     <button
-                      key={`add-${idx}`}
                       type="button"
                       className="btn"
                       onClick={() =>
@@ -1161,7 +1160,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                     >
                       +
                     </button>
-                  </>
+                  </Fragment>
                 ))}
               </div>
             </div>
@@ -1201,7 +1200,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                   {
                     let q = supabase
                       .from('orders')
-                      .select('id, code, product, machine_id, created_at')
+                      .select('id, code, product, machine_id, created_at, company_id')
                       .eq('code', payload.osCode)
                       .eq('machine_id', payload.machine)
                       .order('created_at', { ascending: false })
@@ -1215,19 +1214,23 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                     ordSel = ordData[0];
                   }
 
+                  const effectiveCompanyId = String(clientId || ordSel?.company_id || '').trim() || null;
+                  if (!effectiveCompanyId) {
+                    showToast('Empresa não identificada para registrar o apontamento.', 'err');
+                    return;
+                  }
+
                   // Converter a data escolhida (sem hora) para meio-dia BR e gravar UTC
                   const diaZ = DateTime.fromISO(String(payload.date), { zone: 'America/Sao_Paulo' }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 });
                   const createdAtUtcIso = diaZ.toUTC().toISO();
 
                   // 1) Inserir produção manual
                   const prodIns = {
-                    ...(clientId ? { company_id: clientId } : {}),
-                    entry_date: diaZ.toISODate(),
+                    company_id: effectiveCompanyId,
                     created_at: createdAtUtcIso,
                     machine_id: payload.machine,
                     shift: String(payload.turno),
                     order_id: ordSel.id,
-                    order_code: ordSel.code,
                     product: ordSel.product || '',
                     good_qty: Number(payload.goodQty || 0),
                   };
@@ -1241,7 +1244,7 @@ export default function Apontamento({ isAdmin: isAdminProp = false, clientId = n
                   // 2) Inserir refugos (scrap_logs), se houver
                   if (payload.scrapEntries.length > 0) {
                     const scrapRows = payload.scrapEntries.map((s) => ({
-                      ...(clientId ? { company_id: clientId } : {}),
+                      company_id: effectiveCompanyId,
                       created_at: createdAtUtcIso,
                       machine_id: payload.machine,
                       shift: String(payload.turno),

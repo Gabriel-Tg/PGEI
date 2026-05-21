@@ -299,11 +299,11 @@
 
 .rastreio-summary-detail-note {
   font-size: 13px;
-  color: #475569;
+  color: var(--muted-strong);
   padding: 10px 12px;
   border-radius: 10px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(18, 37, 64, 0.72);
+  border: 1px solid rgba(86, 144, 220, 0.3);
 }
 
 .rastreio-summary-kpis {
@@ -348,7 +348,7 @@
 .rastreio-section-subtitle {
   font-size: 13px;
   font-weight: 800;
-  color: #1e3a8a;
+  color: #9ecbff;
   margin-bottom: 8px;
 }
 
@@ -360,21 +360,21 @@
 
 .rastreio-order-chip {
   min-width: 180px;
-  border: 1px solid #dbeafe;
+  border: 1px solid rgba(86, 144, 220, 0.3);
   border-radius: 12px;
   padding: 10px 12px;
-  background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  background: linear-gradient(135deg, rgba(9, 24, 43, 0.94), rgba(8, 20, 36, 0.9));
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .rastreio-order-chip strong {
-  color: #0f172a;
+  color: var(--text);
 }
 
 .rastreio-order-chip span {
-  color: #475569;
+  color: var(--muted-strong);
   font-size: 12px;
 }
 
@@ -392,22 +392,22 @@
 }
 
 .panel-box {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--card);
   padding: 14px;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.15);
 }
 
 .panel-title {
   margin: 0 0 10px 0;
   font-size: 15px;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .divider {
   height: 1px;
-  background: #e5e7eb;
+  background: rgba(255, 255, 255, 0.1);
   margin: 10px 0;
 }
 
@@ -422,10 +422,10 @@
   text-transform: uppercase;
 }
 
-.badge-stop { background: #fee2e2; color: #b91c1c; }
-.badge-scan { background: #e0f2fe; color: #075985; }
-.badge-manual { background: #ecfdf3; color: #166534; }
-.badge-scrap { background: #fff7ed; color: #9a3412; }
+.badge-stop { background: rgba(255, 95, 119, 0.16); color: #ffb1bf; border: 1px solid rgba(255, 95, 119, 0.35); }
+.badge-scan { background: rgba(34, 199, 255, 0.16); color: #96deff; border: 1px solid rgba(34, 199, 255, 0.32); }
+.badge-manual { background: rgba(56, 242, 161, 0.15); color: #8ff8cf; border: 1px solid rgba(56, 242, 161, 0.3); }
+.badge-scrap { background: rgba(248, 193, 88, 0.16); color: #ffd58c; border: 1px solid rgba(248, 193, 88, 0.33); }
 
 .trace-list {
   display: flex;
@@ -434,11 +434,11 @@
 }
 
 .trace-item {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  background: linear-gradient(145deg, #ffffff, #f8fafc);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  background: linear-gradient(145deg, rgba(10, 25, 45, 0.94), rgba(8, 20, 36, 0.9));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
 }
 
 .trace-head {
@@ -452,7 +452,7 @@
 
 .trace-date {
   font-size: 13px;
-  color: #0f172a;
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -465,29 +465,29 @@
 .trace-info label {
   display: block;
   font-size: 12px;
-  color: #475569;
+  color: var(--muted-strong);
 }
 
 .trace-info strong {
   display: block;
   font-size: 13px;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .empty-state {
   padding: 14px;
-  border: 1px dashed #cbd5e1;
+  border: 1px dashed rgba(119, 154, 196, 0.35);
   border-radius: 10px;
-  color: #475569;
-  background: #f8fafc;
+  color: var(--muted-strong);
+  background: rgba(9, 25, 45, 0.72);
   text-align: center;
 }
 
 .error-box {
   padding: 10px 12px;
-  background: #fef2f2;
-  border: 1px solid #fecdd3;
-  color: #991b1b;
+  background: rgba(255, 95, 119, 0.12);
+  border: 1px solid rgba(255, 95, 119, 0.34);
+  color: #ffbec9;
   border-radius: 8px;
 }
 
@@ -501,7 +501,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #0d6efd;
+  background: var(--secondary);
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -523,9 +523,9 @@
   width: min(920px, 100%);
   max-height: 85vh;
   overflow: auto;
-  background: #fff;
+  background: var(--card);
   border-radius: 14px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   box-shadow: 0 18px 48px rgba(2, 6, 23, 0.22);
   padding: 14px;
   display: flex;
@@ -543,13 +543,13 @@
 .rastreio-modal-head h3 {
   margin: 0;
   font-size: 18px;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .rastreio-modal-close {
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  color: #0f172a;
+  border: 1px solid var(--border);
+  background: rgba(9, 23, 42, 0.82);
+  color: var(--text);
   border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
@@ -564,10 +564,12 @@
 
 .rastreio-modal-form select,
 .rastreio-modal-form input {
-  border: 1px solid #d0d5dd;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 14px;
+  background: var(--bg-soft);
+  color: var(--text);
 }
 
 .rastreio-modal-form button {
@@ -591,17 +593,17 @@
   grid-template-columns: 130px 1fr 1fr;
   gap: 10px;
   text-align: left;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
-  color: #0f172a;
+  background: rgba(8, 24, 44, 0.86);
+  color: var(--text);
   padding: 10px 12px;
   cursor: pointer;
 }
 
 .rastreio-order-option:hover {
-  border-color: #bfdbfe;
-  background: #f8fbff;
+  border-color: rgba(126, 184, 255, 0.45);
+  background: rgba(11, 30, 54, 0.95);
 }
 
 .order-option-code {

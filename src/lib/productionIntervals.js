@@ -172,7 +172,7 @@ export function calculateMachinePeriodMetrics({
       groups.flatMap((group) => mapRecordsToIntervals(group?.stops || [], {
         rangeStartMs,
         rangeEndMs,
-        endKey: ['ended_at', 'resumed_at', 'stopped_at'],
+        endKey: ['ended_at', 'resumed_at'],
         fallbackEndMs: clampNowMs,
       }))
     );

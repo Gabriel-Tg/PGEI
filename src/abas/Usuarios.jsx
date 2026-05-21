@@ -18,6 +18,7 @@ function normalizeUsername(value) {
 
 export default function Usuarios({ companyId = null, canManageUsers = false }) {
   const [users, setUsers] = useState([])
+  const [currentUserId, setCurrentUserId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -30,6 +31,18 @@ export default function Usuarios({ companyId = null, canManageUsers = false }) {
   })
 
   const canLoad = !!companyId && !!canManageUsers
+
+  useEffect(() => {
+    let active = true
+
+    ;(async () => {
+      const { data } = await supabase.auth.getUser()
+      if (!active) return
+      setCurrentUserId(data?.user?.id || null)
+    })()
+
+    return () => { active = false }
+  }, [])
 
   function normalizeEdgeFunctionError(err) {
     const message = String(err?.message || '')
@@ -50,7 +63,7 @@ export default function Usuarios({ companyId = null, canManageUsers = false }) {
 
     const { data, error: listErr } = await supabase
       .from('company_users')
-      .select('id, username, full_name, role, active, created_at')
+      .select('id, user_id, username, full_name, role, active, created_at')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
 
@@ -73,6 +86,33 @@ export default function Usuarios({ companyId = null, canManageUsers = false }) {
     ROLE_OPTIONS.forEach((item) => { map[item.value] = item.label })
     return map
   }, [])
+
+  const protectedInitialAdminUserId = useMemo(() => {
+    if (!Array.isArray(users) || users.length === 0) return null
+
+    const adminsByOldest = [...users]
+      .filter((item) => String(item?.role || '').toLowerCase() === 'admin')
+      .sort((a, b) => {
+        const aTime = new Date(a?.created_at || 0).getTime()
+        const bTime = new Date(b?.created_at || 0).getTime()
+        return aTime - bTime
+      })
+
+    if (adminsByOldest.length === 0) return null
+    const target = adminsByOldest[0]
+    return target?.user_id || target?.id || null
+  }, [users])
+
+  const visibleUsers = useMemo(() => {
+    if (!protectedInitialAdminUserId) return users
+
+    return users.filter((item) => {
+      const referenceId = item?.user_id || item?.id
+      if (!referenceId) return true
+      if (referenceId !== protectedInitialAdminUserId) return true
+      return referenceId === currentUserId
+    })
+  }, [currentUserId, protectedInitialAdminUserId, users])
 
   async function handleCreate(event) {
     event.preventDefault()
@@ -118,22 +158,6 @@ export default function Usuarios({ companyId = null, canManageUsers = false }) {
     setForm({ username: '', fullName: '', password: '', role: 'operator' })
     await loadUsers()
     setSaving(false)
-  }
-
-  async function handleToggleActive(userId, active) {
-    if (!canLoad) return
-    setError('')
-    const { error: updErr } = await supabase
-      .from('company_users')
-      .update({ active: !active })
-      .eq('id', userId)
-
-    if (updErr) {
-      setError(updErr.message || 'Falha ao atualizar status do usuário.')
-      return
-    }
-
-    await loadUsers()
   }
 
   if (!canManageUsers) {
@@ -210,8 +234,8 @@ export default function Usuarios({ companyId = null, canManageUsers = false }) {
       <section className="card" style={{ padding: 16 }}>
         <h3 style={{ marginTop: 0 }}>Usuários da empresa</h3>
         {loading ? <div>Carregando usuários...</div> : null}
-        {!loading && users.length === 0 ? <div>Nenhum usuário cadastrado.</div> : null}
-        {!loading && users.length > 0 ? (
+        {!loading && visibleUsers.length === 0 ? <div>Nenhum usuário disponível para gerenciamento.</div> : null}
+        {!loading && visibleUsers.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
@@ -220,21 +244,15 @@ export default function Usuarios({ companyId = null, canManageUsers = false }) {
                   <th style={{ textAlign: 'left', padding: '8px 6px' }}>Nome</th>
                   <th style={{ textAlign: 'left', padding: '8px 6px' }}>Perfil</th>
                   <th style={{ textAlign: 'left', padding: '8px 6px' }}>Status</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {visibleUsers.map((user) => (
                   <tr key={user.id}>
                     <td style={{ padding: '8px 6px' }}>{user.username || '-'}</td>
                     <td style={{ padding: '8px 6px' }}>{user.full_name || '-'}</td>
                     <td style={{ padding: '8px 6px' }}>{roleLabel[user.role] || user.role}</td>
                     <td style={{ padding: '8px 6px' }}>{user.active ? 'Ativo' : 'Inativo'}</td>
-                    <td style={{ padding: '8px 6px' }}>
-                      <button className="btn" onClick={() => handleToggleActive(user.id, !!user.active)}>
-                        {user.active ? 'Desativar' : 'Ativar'}
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>

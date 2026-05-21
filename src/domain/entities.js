@@ -44,8 +44,6 @@ export function mapOrder(row = {}) {
     interruptedAt: row.interrupted_at || null,
     interrupted_by: row.interrupted_by || null,
     interruptedBy: row.interrupted_by || null,
-    stopped_at: row.stopped_at || null,
-    stoppedAt: row.stopped_at || null,
     loweff_started_at: row.loweff_started_at || null,
     loweffStartedAt: row.loweff_started_at || null,
     loweff_ended_at: row.loweff_ended_at || null,

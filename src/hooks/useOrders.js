@@ -55,6 +55,14 @@ export default function useOrders(clientId = null){
   useEffect(()=>{ 
     fetchOpenOrders(); fetchFinalizedOrders(); fetchStops()
 
+    let scansRefreshTimer = null
+    function scheduleOpenOrdersRefresh() {
+      if (scansRefreshTimer) window.clearTimeout(scansRefreshTimer)
+      scansRefreshTimer = window.setTimeout(() => {
+        fetchOpenOrders()
+      }, 120)
+    }
+
     const chOrders = supabase.channel('orders-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'orders' }, (p)=>{
         const r = p.new; if(!r) return;
@@ -85,7 +93,21 @@ export default function useOrders(clientId = null){
           return [r,...prev]
         })
       }).subscribe()
-    return ()=>{ supabase.removeChannel(chOrders); supabase.removeChannel(chStops) }
+    const chScans = supabase.channel('scans-rt')
+      .on('postgres_changes', { event:'*', schema:'public', table:'production_scans' }, (p)=>{
+        const row = p.new || p.old
+        if (!row) return
+        // Mantem atualização reativa entre abas (Painel/TV/Lista), mesmo sem callback local.
+        if (clientId && row.company_id !== clientId) return
+        scheduleOpenOrdersRefresh()
+      }).subscribe()
+
+    return ()=>{
+      if (scansRefreshTimer) window.clearTimeout(scansRefreshTimer)
+      supabase.removeChannel(chOrders)
+      supabase.removeChannel(chStops)
+      supabase.removeChannel(chScans)
+    }
   },[clientId])
 
   // helpers
@@ -122,9 +144,8 @@ export default function useOrders(clientId = null){
 
   // ========================= Helpers/Actions internas =========================
   async function setStatus(order, newStatus) {
-    const patch = { status: newStatus, stopped_at: null }
-    if (newStatus === 'PARADA') patch.stopped_at = new Date().toISOString()
-    const before = { status: order.status, stopped_at: order.stopped_at }
+    const patch = { status: newStatus }
+    const before = { status: order.status }
     patchOrderLocal(order.id, patch)
     const res = await supabase.from('orders').update(patch).eq('id', order.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao alterar status: ' + res.error.message); patchOrderLocal(order.id, before) }
@@ -347,14 +368,20 @@ export default function useOrders(clientId = null){
 
   // ========================= Confirmadores (agora recebem payloads) =========================
 
-  async function confirmStart({ order, operador, data, hora }) {
+  async function confirmStart(payload = {}) {
+    const order = payload.order || payload.ordem
+    const operador = payload.operador
+    const data = payload.data
+    const hora = payload.hora
+
+    if (!order?.id) { alert('Não foi possível identificar a ordem para iniciar.'); return }
     if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
     const iso = localDateTimeToISO(data, hora)
 
     // Detecta reinício (já tinha started_at e foi interrompida)
     const isRestart = !!order.started_at && !!order.interrupted_at
 
-    const payload = isRestart
+    const updatePayload = isRestart
       ? {
           // reinício após interrupção
           status: 'PRODUZINDO',
@@ -370,8 +397,8 @@ export default function useOrders(clientId = null){
           interrupted_at: null, interrupted_by: null,
         }
 
-    patchOrderLocal(order.id, payload)
-    const res = await supabase.from('orders').update(payload).eq('id', order.id).select('*').maybeSingle()
+    patchOrderLocal(order.id, updatePayload)
+    const res = await supabase.from('orders').update(updatePayload).eq('id', order.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao iniciar: '+res.error.message); return }
     if (res.data) patchOrderLocal(res.data.id, res.data)
   }

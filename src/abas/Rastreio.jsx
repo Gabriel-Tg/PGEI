@@ -316,7 +316,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
           <div className="rastreio-header">
             <div>
               <h2 style={{ margin: 0 }}>Rastreio de O.S</h2>
-              <div style={{ color: '#475569', fontSize: 13 }}>Agrupado por O.S • Paradas, produção e refugo em um só lugar.</div>
+              <div style={{ color: 'var(--muted-strong)', fontSize: 13 }}>Agrupado por O.S • Paradas, produção e refugo em um só lugar.</div>
             </div>
             {loading && (
               <div className="loading-dots" aria-label="Carregando">
