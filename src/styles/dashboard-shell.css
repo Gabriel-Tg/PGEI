@@ -13,6 +13,43 @@
   grid-template-columns: 88px minmax(0, 1fr);
 }
 
+.dashboard-shell.is-collapsed .dashboard-sidebar {
+  padding: 18px 10px;
+  gap: 12px;
+}
+
+.dashboard-shell.is-collapsed .sidebar-brand {
+  justify-content: center;
+}
+
+.dashboard-shell.is-collapsed .sidebar-logo {
+  width: 36px;
+  height: 36px;
+}
+
+.dashboard-shell.is-collapsed .sidebar-collapse-btn,
+.dashboard-shell.is-collapsed .sidebar-nav-item,
+.dashboard-shell.is-collapsed .sidebar-signout {
+  justify-content: center;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+.dashboard-shell.is-collapsed .sidebar-nav {
+  gap: 10px;
+}
+
+.dashboard-shell.is-collapsed .sidebar-nav-icon {
+  min-width: 40px;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+}
+
+.dashboard-shell.is-collapsed .sidebar-signout {
+  margin-top: auto;
+}
+
 .dashboard-sidebar {
   position: sticky;
   top: 20px;

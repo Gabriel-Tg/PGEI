@@ -123,7 +123,7 @@ export default function App() {
 function TenantApp({ tenantCompany = null }){
   const [tab, setTab] = useState('login')
   const [tabDirection, setTabDirection] = useState(0)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [nowLabel, setNowLabel] = useState(() => DateTime.now().setZone('America/Sao_Paulo').toFormat('dd/LL/yyyy HH:mm:ss'))
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 5 }})
   const touchSensor = useSensor(TouchSensor, { pressDelay: 150, activationConstraint: { distance: 5 }})

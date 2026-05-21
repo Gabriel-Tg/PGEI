@@ -62,6 +62,11 @@ function getOrderRatePiecesPerHour(order, itemTechByCode) {
   return (3600 / cycleSeconds) * cavities;
 }
 
+function isOrderOngoingStatus(status) {
+  const normalized = String(status || "").toUpperCase();
+  return Array.isArray(STATUS) && STATUS.includes(normalized);
+}
+
 function getDashboardPeriodRange(periodKey) {
   const now = DateTime.now().setZone("America/Sao_Paulo");
   if (periodKey === "yesterday") {
@@ -431,7 +436,7 @@ export default function Painel({
 
       let scansQuery = supabase
         .from("production_scans")
-        .select("id, created_at, machine_id, order_id, scanned_box, qty_pieces, order:orders(id, code, product, boxes, qty, standard, status, machine_id)")
+        .select("id, created_at, machine_id, order_id, scanned_box, qty_pieces, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
@@ -505,6 +510,7 @@ export default function Painel({
             plannedPieces,
             producedBoxes: 0,
             producedPieces: 0,
+            finalized: Boolean(ord?.finalized),
             status: ord?.status || "AGUARDANDO",
           });
         }
@@ -512,10 +518,12 @@ export default function Painel({
         curr.producedBoxes += 1;
         curr.producedPieces += Number(scan?.qty_pieces || 0);
       });
-      const ongoingOrders = Array.from(orderMap.values()).map((row) => ({
-        ...row,
-        progress: row.plannedBoxes > 0 ? Math.min(100, Math.round((row.producedBoxes / row.plannedBoxes) * 100)) : 0,
-      }));
+      const ongoingOrders = Array.from(orderMap.values())
+        .map((row) => ({
+          ...row,
+          progress: row.plannedBoxes > 0 ? Math.min(100, Math.round((row.producedBoxes / row.plannedBoxes) * 100)) : 0,
+        }))
+        .filter((row) => !row.finalized && isOrderOngoingStatus(row.status));
 
       const plannedTotal = ongoingOrders.reduce((acc, row) => acc + Number(row.plannedBoxes || 0), 0);
       const producingCount = machineOutput.filter((item) => Number(item.value || 0) > 0).length;
@@ -950,7 +958,7 @@ export default function Painel({
 
   const ongoingOrders = useMemo(() => {
     if (Array.isArray(periodData.ongoingOrders) && periodData.ongoingOrders.length > 0) {
-      return periodData.ongoingOrders;
+      return periodData.ongoingOrders.filter((row) => isOrderOngoingStatus(row?.status));
     }
     return machineIds
       .map((machine) => {
@@ -976,7 +984,7 @@ export default function Painel({
           status: ativa?.status || "AGUARDANDO",
         };
       })
-      .filter(Boolean);
+      .filter((row) => row && isOrderOngoingStatus(row.status));
   }, [machineIds, source, periodData.ongoingOrders]);
 
   function getStatusBadge(status) {
@@ -1165,8 +1173,8 @@ export default function Painel({
           <div className="orders-table-card">
             <header>
               <div>
-                <h3>Produção por Ordem</h3>
-                <span>Resumo de desempenho em {overview.periodLabel.toLowerCase()}</span>
+                <h3>Ordens em Andamento</h3>
+                <span>Resumo de desempenho {overview.periodLabel.toLowerCase()}</span>
               </div>
               <span className="orders-meta">{ongoingOrders.length} ordens no periodo</span>
             </header>

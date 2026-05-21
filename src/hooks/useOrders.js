@@ -199,7 +199,7 @@ export default function useOrders(clientId = null){
 
   async function finalizeOrder(order, payload){
     const iso = localDateTimeToISO(payload.data, payload.hora)
-    const p = { finalized:true, finalized_by: payload.por, finalized_at: iso }
+    const p = { finalized:true, status: 'FINALIZADA', finalized_by: payload.por, finalized_at: iso }
     const before = orders.find(o=>o.id===order.id)
 
     // Se houver baixa eficiência aberta, encerra o log no mesmo timestamp da finalização
