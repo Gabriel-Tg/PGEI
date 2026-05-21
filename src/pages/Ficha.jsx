@@ -21,13 +21,14 @@ const emptyForm = {
 
 const ddItem = {
   padding: '10px 12px',
-  borderBottom: '1px solid #eee',
+  borderBottom: '1px solid rgba(104, 162, 248, 0.24)',
   cursor: 'pointer',
 }
 
 const ddItemMuted = {
   padding: '10px 12px',
-  opacity: 0.7,
+  opacity: 0.8,
+  color: 'var(--muted)',
 }
 
 export default function Ficha() {
@@ -635,13 +636,13 @@ export default function Ficha() {
                         left: 0,
                         right: 0,
                         top: '100%',
-                        background: '#fff',
-                        border: '1px solid #ddd',
+                        background: 'linear-gradient(160deg, rgba(10, 24, 44, 0.98), rgba(8, 20, 38, 0.98))',
+                        border: '1px solid rgba(91, 164, 250, 0.34)',
                         borderRadius: 10,
                         marginTop: 6,
                         maxHeight: 240,
                         overflowY: 'auto',
-                        boxShadow: '0 6px 20px rgba(0,0,0,0.08)',
+                        boxShadow: '0 12px 28px rgba(0, 0, 0, 0.32)',
                       }}
                     >
                       {itemLoading && <div style={ddItemMuted}>buscando…</div>}
@@ -656,7 +657,7 @@ export default function Ficha() {
                       ))}
                     </div>
                   )}
-                  {itemErr && <div style={{ color: '#b00020', fontSize: 12, marginTop: 6 }}>Erro: {itemErr}</div>}
+                  {itemErr && <div style={{ color: 'var(--accent-red)', fontSize: 12, marginTop: 6 }}>Erro: {itemErr}</div>}
                 </div>
 
                 <label>Responsável</label>
@@ -704,24 +705,13 @@ export default function Ficha() {
         <div className="ficha-list-header" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h3>Fichas cadastradas</h3>
           <span className="muted">Mostrando {filteredList.length} item(s)</span>
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              flexWrap: 'wrap',
-              marginLeft: 'auto',
-              background: '#f7f7f9',
-              padding: '8px 12px',
-              borderRadius: 10,
-              boxShadow: 'inset 0 0 0 1px #e2e2e2',
-            }}
-          >
+          <div className="ficha-search-panel">
             <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Máquina
               <select
                 value={searchFilters.machine}
                 onChange={(e) => setSearchFilters((f) => ({ ...f, machine: e.target.value }))}
-                style={{ minWidth: 110, padding: '6px 10px', borderRadius: 8, border: '1px solid #d5d5d5' }}
+                style={{ minWidth: 110, padding: '6px 10px', borderRadius: 8 }}
               >
                 <option value="">Todas</option>
                 <option value="P1">P1</option>
@@ -738,7 +728,7 @@ export default function Ficha() {
                   onChange={(e) => setSearchFilters((f) => ({ ...f, item: e.target.value }))}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applySearch(); } }}
                   placeholder="Ex: 500007"
-                  style={{ minWidth: 140, padding: '6px 10px', borderRadius: 8, border: '1px solid #d5d5d5' }}
+                  style={{ minWidth: 140, padding: '6px 10px', borderRadius: 8 }}
                 />
               </label>
               <button

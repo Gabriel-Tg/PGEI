@@ -1,0 +1,94 @@
+.prioridade-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  animation: prioridadeFadeIn 280ms ease;
+}
+
+@keyframes prioridadeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.prioridade-hero {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(77, 224, 255, 0.16), transparent 40%),
+    linear-gradient(155deg, rgba(9, 23, 43, 0.92), rgba(7, 18, 34, 0.9));
+  border: 1px solid rgba(91, 164, 250, 0.28);
+  box-shadow: var(--shadow-soft);
+}
+
+.prioridade-hero h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+  letter-spacing: -0.02em;
+}
+
+.prioridade-hero p {
+  margin: 8px 0 0;
+  color: var(--muted-strong);
+}
+
+.prioridade-loading {
+  margin-bottom: 12px;
+  color: var(--muted-strong);
+}
+
+.prioridade-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.prioridade-card {
+  display: grid;
+  grid-template-columns: 72px 1fr minmax(120px, 140px);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(91, 164, 250, 0.24);
+  background: linear-gradient(160deg, rgba(10, 24, 44, 0.92), rgba(8, 20, 38, 0.9));
+  box-shadow: var(--shadow-soft);
+}
+
+.prioridade-machine {
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  color: var(--heading);
+}
+
+.prioridade-input {
+  margin-left: auto;
+  width: 100%;
+}
+
+.prioridade-input:disabled {
+  opacity: 0.7;
+}
+
+@media (max-width: 760px) {
+  .prioridade-page {
+    padding: 16px;
+  }
+
+  .prioridade-card {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .prioridade-input {
+    margin-left: 0;
+    max-width: 160px;
+  }
+}

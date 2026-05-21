@@ -511,19 +511,29 @@ function TenantApp({ tenantCompany = null }){
   }, [tenantCompanyId])
 
   async function handlePriorityChange(machineId, priorityValue) {
-    if (!canManageOperational) {
+    if (!isAdmin) {
       alert('Seu perfil não possui permissão para alterar prioridades.')
+      return
+    }
+    if (!tenantCompanyId) {
+      alert('Empresa não identificada para salvar prioridade.')
       return
     }
     try {
       const val = priorityValue === '' || priorityValue == null ? null : Number(priorityValue)
+      if (val != null && (!Number.isFinite(val) || val < 0 || val > 10)) {
+        alert('Prioridade inválida. Use um valor entre 0 e 10.')
+        return
+      }
       const payload = {
-        ...(tenantCompanyId ? { company_id: tenantCompanyId } : {}),
+        company_id: tenantCompanyId,
         machine_id: machineId,
         priority: val,
-        updated_by: authUser?.email || null,
       }
-      const { data, error } = await supabase.from('machine_priorities').upsert(payload).select()
+      const { data, error } = await supabase
+        .from('machine_priorities')
+        .upsert(payload, { onConflict: 'company_id,machine_id' })
+        .select()
       if (error) {
         alert('Não foi possível salvar a prioridade agora.')
         console.warn('Erro ao salvar prioridade:', error)
@@ -814,6 +824,7 @@ function TenantApp({ tenantCompany = null }){
           onChangePriority={handlePriorityChange}
           loading={prioritiesLoading}
           authUser={authUser}
+          canEditPriorities={isAdmin}
         />
       </div>
     )
