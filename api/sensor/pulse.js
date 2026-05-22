@@ -81,7 +81,7 @@ export default async function handler(req, res) {
   const machineCode = normalizeMachineCode(body.machine_id)
   const esp32Id = normalizeEsp32Id(body.esp32_id)
   const pulseCount = parsePositiveInt(body.pulse_count, 0)
-  const eventUid = String(body.event_uid || req.headers['x-event-id'] || '').trim()
+  const eventUid = String(body.event_uid || body.event_id || req.headers['x-event-id'] || '').trim()
 
   if (!machineCode || !esp32Id || !pulseCount) {
     sendJson(res, 400, { error: 'machine_id, esp32_id and pulse_count are required' })

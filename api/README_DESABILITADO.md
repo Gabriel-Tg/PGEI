@@ -1,21 +1,17 @@
-# ⚠️ ROTAS MIGRADAS PARA NEXT.JS APP ROUTER
+# Rotas serverless ativas no Vercel
 
-As rotas antigas nesta pasta foram **desabilitadas** e migradas para:
+Este projeto e um app React + Vite. As rotas HTTP ativas para sensores ficam nesta pasta, no formato Serverless Functions do Vercel:
 
 ```
-app/api/sensor/pulse/route.ts
-app/api/sensor/heartbeat/route.ts
+api/sensor/pulse.js
+api/sensor/heartbeat.js
 ```
 
-## Motivo
-- Next.js App Router (estrutura moderna)
-- Compatibilidade com Vercel
-- Melhor suporte a TypeScript
-- Erros 405 corrigidos
+## Importante
 
-## Arquivos Antigos (desabilitados)
-- ❌ `sensor/pulse.js` → ✅ `app/api/sensor/pulse/route.ts`
-- ❌ `sensor/heartbeat.js` → ✅ `app/api/sensor/heartbeat/route.ts`
+- O build do front-end sai em `dist`.
+- O projeto nao tem dependencia de Next.js; arquivos em `app/api/.../route.ts` nao devem ser considerados a fonte ativa das APIs neste app.
+- O endpoint aceita apenas `POST`. Requisicoes `GET` retornam `405 Method not allowed` por design.
 
 ## Endpoints Ativos
 ```

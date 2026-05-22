@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 
 # ================================================================================
-# TESTE API SENSOR PULSE - Next.js App Router
+# TESTE API SENSOR PULSE - Vercel Serverless Function
 # ================================================================================
 
 Write-Host "`n🧪 TESTE API SENSOR PULSE" -ForegroundColor Cyan
@@ -47,16 +47,30 @@ try {
     Write-Host "`n✅ SUCESSO!" -ForegroundColor Green
     Write-Host "Status: $($response.StatusCode)" -ForegroundColor Green
     Write-Host "`n📥 Response:" -ForegroundColor Green
-    Write-Host ($response.Content | ConvertFrom-Json | ConvertTo-Json) -ForegroundColor Gray
+    if ($response.Content) {
+        Write-Host ($response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10) -ForegroundColor Gray
+    }
 
 } catch {
     Write-Host "`n❌ ERRO!" -ForegroundColor Red
-    Write-Host "Status: $($_.Exception.Response.StatusCode)" -ForegroundColor Red
+    $statusCode = $_.Exception.Response.StatusCode.value__
+    if (-not $statusCode) { $statusCode = $_.Exception.Response.StatusCode }
+    Write-Host "Status: $statusCode" -ForegroundColor Red
     Write-Host "`n📥 Response:" -ForegroundColor Red
     
     try {
-        $errorContent = $_.Exception.Response.Content.ReadAsStream() | Get-Content -Raw
-        Write-Host $errorContent -ForegroundColor Gray
+        $stream = $_.Exception.Response.GetResponseStream()
+        $reader = New-Object System.IO.StreamReader($stream)
+        $errorContent = $reader.ReadToEnd()
+        if ($errorContent) {
+            try {
+                Write-Host ($errorContent | ConvertFrom-Json | ConvertTo-Json -Depth 10) -ForegroundColor Gray
+            } catch {
+                Write-Host $errorContent -ForegroundColor Gray
+            }
+        } else {
+            Write-Host $_.Exception.Message -ForegroundColor Gray
+        }
     } catch {
         Write-Host $_.Exception.Message -ForegroundColor Gray
     }
