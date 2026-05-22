@@ -16,6 +16,46 @@ export default function useOrders(clientId = null){
   const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query)
 
   // basic fetchers
+  async function hydrateSensorProduction(openOrders) {
+    const rows = Array.isArray(openOrders) ? openOrders : []
+    const orderIds = rows.map((o) => o?.id).filter(Boolean)
+    if (!orderIds.length) return rows
+
+    let query = supabase
+      .from('injection_production_entries')
+      .select('order_id, good_qty, pulse_count, cavities_used')
+      .in('order_id', orderIds)
+
+    query = withClient(query)
+    const { data, error } = await query
+    if (error) {
+      console.warn('Falha ao carregar producao por sensor:', error)
+      return rows
+    }
+
+    const totalsByOrder = new Map()
+    ;(data || []).forEach((entry) => {
+      const key = String(entry?.order_id || '')
+      if (!key) return
+      const current = totalsByOrder.get(key) || { pieces: 0, pulses: 0, cavities: 0 }
+      current.pieces += Number(entry?.good_qty || 0)
+      current.pulses += Number(entry?.pulse_count || 0)
+      const cavities = Number(entry?.cavities_used || 0)
+      if (cavities > 0) current.cavities = cavities
+      totalsByOrder.set(key, current)
+    })
+
+    return rows.map((order) => {
+      const totals = totalsByOrder.get(String(order?.id || '')) || { pieces: 0, pulses: 0, cavities: 0 }
+      return {
+        ...order,
+        sensor_produced_pieces: totals.pieces,
+        sensor_pulse_count: totals.pulses,
+        sensor_cavities_used: totals.cavities,
+      }
+    })
+  }
+
   async function fetchOpenOrders(){
     // NOTE: scanned_count:production_scans(count) -> agrega o count de production_scans por order_id
     const res = await withClient(supabase
@@ -39,7 +79,8 @@ export default function useOrders(clientId = null){
         return mapOrder({ ...row, scanned_count: scannedCount })
       });
 
-      setOrders(normalized)
+      const withSensorProduction = await hydrateSensorProduction(normalized)
+      setOrders(withSensorProduction)
     }
   }
 
@@ -98,7 +139,14 @@ export default function useOrders(clientId = null){
         const row = p.new || p.old
         if (!row) return
         // Mantem atualização reativa entre abas (Painel/TV/Lista), mesmo sem callback local.
-        if (clientId && row.company_id !== clientId) return
+        if (clientId && String(row.company_id || '') !== String(clientId)) return
+        scheduleOpenOrdersRefresh()
+      }).subscribe()
+    const chEntries = supabase.channel('injection-entries-rt')
+      .on('postgres_changes', { event:'*', schema:'public', table:'injection_production_entries' }, (p)=>{
+        const row = p.new || p.old
+        if (!row) return
+        if (clientId && String(row.company_id || '') !== String(clientId)) return
         scheduleOpenOrdersRefresh()
       }).subscribe()
 
@@ -107,6 +155,7 @@ export default function useOrders(clientId = null){
       supabase.removeChannel(chOrders)
       supabase.removeChannel(chStops)
       supabase.removeChannel(chScans)
+      supabase.removeChannel(chEntries)
     }
   },[clientId])
 

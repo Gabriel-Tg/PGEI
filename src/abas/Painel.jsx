@@ -256,8 +256,11 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
         const piecesPerBox = parsePiecesPerBox(order?.standard);
         if (!(ratePiecesPerHour > 0) || !(plannedPieces > 0)) continue;
 
+        const sensorPieces = Number(order?.sensor_produced_pieces || 0);
         const producedBoxes = Number(order?.scanned_count || 0);
-        const producedPieces = piecesPerBox > 0 ? producedBoxes * piecesPerBox : 0;
+        const producedPieces = sensorPieces > 0
+          ? sensorPieces
+          : (piecesPerBox > 0 ? producedBoxes * piecesPerBox : 0);
         const remainingPieces = Math.max(0, plannedPieces - producedPieces);
         if (remainingPieces <= 0) continue;
 
@@ -370,6 +373,10 @@ export default function Painel({
             match && typeof match.scanned_count !== "undefined"
               ? Number(match.scanned_count || 0)
               : null;
+          const incomingSensorPieces = Number(inItem.sensor_produced_pieces || 0);
+          const prevSensorPieces = match
+            ? Number(match.sensor_produced_pieces || 0)
+            : 0;
 
           return {
             ...inItem,
@@ -377,6 +384,12 @@ export default function Painel({
               Number.isFinite(prevCount) && prevCount > incomingCount
                 ? prevCount
                 : incomingCount,
+            sensor_produced_pieces: Math.max(incomingSensorPieces, prevSensorPieces),
+            sensor_pulse_count: Math.max(
+              Number(inItem.sensor_pulse_count || 0),
+              Number(match?.sensor_pulse_count || 0)
+            ),
+            sensor_cavities_used: Number(inItem.sensor_cavities_used || 0) || Number(match?.sensor_cavities_used || 0) || 0,
           };
         });
       }
@@ -831,6 +844,8 @@ export default function Painel({
 
           const orderId = String(row.order_id || "");
           const goodQty = Number(row.good_qty || 0);
+          const pulseCount = Number(row.pulse_count || 0);
+          const cavitiesUsed = Number(row.cavities_used || 0);
           if (!orderId || goodQty <= 0) {
             setPeriodRefreshNonce((prev) => prev + 1);
             return;
@@ -848,6 +863,8 @@ export default function Painel({
                   return {
                     ...item,
                     sensor_produced_pieces: Number(item?.sensor_produced_pieces || 0) + goodQty,
+                    sensor_pulse_count: Number(item?.sensor_pulse_count || 0) + pulseCount,
+                    sensor_cavities_used: cavitiesUsed || Number(item?.sensor_cavities_used || 0),
                   };
                 }
                 return item;
@@ -858,6 +875,14 @@ export default function Painel({
           });
 
           setPeriodRefreshNonce((prev) => prev + 1);
+
+          if (typeof onScanned === "function") {
+            try {
+              onScanned(row);
+            } catch (err) {
+              console.warn("onScanned callback falhou para apontamento por sensor:", err);
+            }
+          }
         }
       )
       .on(
@@ -1011,9 +1036,14 @@ export default function Painel({
       const piecesPerHour = (3600 / cycleSeconds) * cavities;
       const metaPiecesNow = (elapsedSeconds / 3600) * piecesPerHour;
 
-      const producedBoxes = Number(ativa?.scanned_count || 0);
       const piecesPerBox = parsePiecesPerBox(ativa?.standard);
-      const producedPieces = piecesPerBox > 0 ? producedBoxes * piecesPerBox : 0;
+      const apontamentoTipo = String(machineTypeById[machine] || "manual");
+      const producedPieces = apontamentoTipo === "sensor"
+        ? Number(ativa?.sensor_produced_pieces || 0)
+        : (piecesPerBox > 0 ? Number(ativa?.scanned_count || 0) * piecesPerBox : Number(ativa?.scanned_count || 0));
+      const producedBoxes = piecesPerBox > 0
+        ? producedPieces / piecesPerBox
+        : Number(ativa?.scanned_count || 0);
       const metaBoxesNow = piecesPerBox > 0 ? (metaPiecesNow / piecesPerBox) : 0;
 
       dynamicProducedBoxes += producedBoxes;
@@ -1053,7 +1083,7 @@ export default function Painel({
       trendLabels: periodData.trendLabels || [],
       periodLabel: periodData.periodLabel || "Hoje",
     };
-  }, [machineIds, periodData, source, itemTechByCode, tick]);
+  }, [machineIds, periodData, source, itemTechByCode, machineTypeById, tick]);
 
   const lineChartWidth = 560;
   const lineChartHeight = 220;
