@@ -4,12 +4,14 @@ export default function ComoFuncionaPage() {
   const flow = [
     {
       title: 'Ordem criada e priorizada',
+      color: '#000000',  
       description: 'A ordem de produção é criada e organizada por máquina para execução sem ruído.',
       image: '/Nova%20Ordem.png',
       alt: 'Tela de nova ordem de produção no ARGOS',
     },
     {
       title: 'Apontamento no chão de fábrica',
+      color: '#000000',
       description: 'O operador aponta produção e paradas no sistema, com registro no momento do evento.',
       image: '/Parada%20de%20máquina.png',
       alt: 'Tela de apontamento de parada de máquina no ARGOS',
