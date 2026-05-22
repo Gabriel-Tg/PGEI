@@ -6,6 +6,7 @@ import { MAQUINAS, STATUS } from "../domain/constants";
 import { statusClass, jaIniciou } from "../lib/utils";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
+import { ACTIVE_TURNOS, getShiftWindowAt } from "../lib/shifts";
 
 // Helper para formatar HH:MM:SS
 function formatHHMMSS(totalSeconds) {
@@ -98,8 +99,21 @@ function getDashboardPeriodRange(periodKey) {
   };
 }
 
-function buildTrendSeries(scans, periodKey, rangeStart) {
-  const rows = Array.isArray(scans) ? scans : [];
+function buildTrendSeries(scans, entries, periodKey, rangeStart) {
+  const scanRows = Array.isArray(scans) ? scans : [];
+  const entryRows = Array.isArray(entries) ? entries : [];
+  const rows = [
+    ...scanRows.map((row) => ({
+      created_at: row?.created_at,
+      boxes: 1,
+      pieces: Number(row?.qty_pieces || 0),
+    })),
+    ...entryRows.map((row) => ({
+      created_at: row?.created_at,
+      boxes: 0,
+      pieces: Number(row?.good_qty || 0),
+    })),
+  ];
 
   if (periodKey === "week") {
     const labels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
@@ -109,8 +123,8 @@ function buildTrendSeries(scans, periodKey, rangeStart) {
       const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
       if (!dt.isValid) return;
       const idx = Math.max(0, Math.min(6, dt.weekday - 1));
-      countBoxes[idx] += 1;
-      countPieces[idx] += Number(scan?.qty_pieces || 0);
+      countBoxes[idx] += Number(scan?.boxes || 0);
+      countPieces[idx] += Number(scan?.pieces || 0);
     });
     const cumulativeBoxes = [];
     countBoxes.reduce((acc, val) => {
@@ -136,8 +150,8 @@ function buildTrendSeries(scans, periodKey, rangeStart) {
       const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
       if (!dt.isValid) return;
       const dayIdx = Math.max(0, Math.min(daysInMonth - 1, Number(dt.day || 1) - 1));
-      countBoxes[dayIdx] += 1;
-      countPieces[dayIdx] += Number(scan?.qty_pieces || 0);
+      countBoxes[dayIdx] += Number(scan?.boxes || 0);
+      countPieces[dayIdx] += Number(scan?.pieces || 0);
     });
     const cumulativeBoxes = [];
     countBoxes.reduce((acc, val) => {
@@ -154,16 +168,16 @@ function buildTrendSeries(scans, periodKey, rangeStart) {
     return { labels, trendBoxes: cumulativeBoxes, trendPieces: cumulativePieces };
   }
 
-  const labels = ["00h", "03h", "06h", "09h", "12h", "15h", "18h", "21h", "24h"];
-  const countBoxes = new Array(8).fill(0);
-  const countPieces = new Array(8).fill(0);
+  const labels = Array.from({ length: 25 }, (_, idx) => `${String(idx).padStart(2, "0")}h`);
+  const countBoxes = new Array(24).fill(0);
+  const countPieces = new Array(24).fill(0);
   rows.forEach((scan) => {
     const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
     if (!dt.isValid) return;
     const diffHours = dt.diff(rangeStart, "hours").hours;
-    const bucket = Math.max(0, Math.min(7, Math.floor(diffHours / 3)));
-    countBoxes[bucket] += 1;
-    countPieces[bucket] += Number(scan?.qty_pieces || 0);
+    const bucket = Math.max(0, Math.min(23, Math.floor(diffHours)));
+    countBoxes[bucket] += Number(scan?.boxes || 0);
+    countPieces[bucket] += Number(scan?.pieces || 0);
   });
 
   const trendBoxes = [0];
@@ -183,9 +197,40 @@ function buildTrendSeries(scans, periodKey, rangeStart) {
   return { labels, trendBoxes, trendPieces };
 }
 
+function buildShiftOutput(scans, entries) {
+  const byShift = Object.fromEntries(
+    ACTIVE_TURNOS.map((turno) => [turno.key, {
+      key: turno.key,
+      label: turno.label,
+      boxes: 0,
+      pieces: 0,
+      pulses: 0,
+    }])
+  );
+
+  (Array.isArray(scans) ? scans : []).forEach((scan) => {
+    const shiftKey = getShiftWindowAt(scan?.created_at)?.shiftKey;
+    if (!shiftKey || !byShift[shiftKey]) return;
+    byShift[shiftKey].boxes += 1;
+    byShift[shiftKey].pieces += Number(scan?.qty_pieces || 0);
+  });
+
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const shiftKey = getShiftWindowAt(entry?.created_at)?.shiftKey;
+    if (!shiftKey || !byShift[shiftKey]) return;
+    byShift[shiftKey].pieces += Number(entry?.good_qty || 0);
+    byShift[shiftKey].pulses += Number(entry?.pulse_count || 0);
+  });
+
+  const currentShiftKey = getShiftWindowAt()?.shiftKey || null;
+  return ACTIVE_TURNOS.map((turno) => ({
+    ...byShift[turno.key],
+    active: turno.key === currentShiftKey,
+  }));
+}
+
 function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, source, machineIds, itemTechByCode }) {
   const safeLabels = Array.isArray(labels) ? labels : [];
-  const nowMs = Date.now();
   const periodStartMs = periodStart.toMillis();
   const periodEndMs = periodEnd.toMillis();
   const pointsMs = safeLabels.map((_, idx) => {
@@ -195,8 +240,7 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
     if (periodKey === "month") {
       return periodStart.plus({ days: idx + 1 }).toMillis();
     }
-    // Hoje/Ontem: 0h..24h em passos de 3h
-    return periodStart.plus({ hours: idx * 3 }).toMillis();
+    return periodStart.plus({ hours: idx }).toMillis();
   });
 
   const goalBoxes = [];
@@ -216,38 +260,8 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
       const firstStartMs = firstStartRef ? DateTime.fromISO(String(firstStartRef)).toMillis() : NaN;
       if (!Number.isFinite(firstStartMs)) return;
 
-      // Para pontos no passado, mantém a curva de meta acumulada desde o início da ordem.
-      if (pointMs <= nowMs) {
-        let cursorMsPast = Math.max(firstStartMs, periodStartMs);
-        if (pointMs <= cursorMsPast) return;
-
-        for (let i = 0; i < queue.length; i += 1) {
-          const order = queue[i];
-          const ratePiecesPerHour = getOrderRatePiecesPerHour(order, itemTechByCode);
-          const plannedPieces = getOrderPlannedPieces(order);
-          const piecesPerBox = parsePiecesPerBox(order?.standard);
-          if (!(ratePiecesPerHour > 0) || !(plannedPieces > 0)) continue;
-
-          const orderDurationSec = plannedPieces / (ratePiecesPerHour / 3600);
-          const availableSec = Math.max(0, (pointMs - cursorMsPast) / 1000);
-          if (availableSec <= 0) break;
-
-          const usedSec = Math.min(orderDurationSec, availableSec);
-          const orderPieces = (usedSec / 3600) * ratePiecesPerHour;
-          const orderBoxes = piecesPerBox > 0 ? (orderPieces / piecesPerBox) : 0;
-
-          sumPieces += orderPieces;
-          sumBoxes += orderBoxes;
-
-          cursorMsPast += usedSec * 1000;
-          if (usedSec < orderDurationSec) break;
-        }
-        return;
-      }
-
-      // Para projeção futura, parte do produzido atual e simula APENAS o restante da fila.
-      let cursorMsFuture = Math.max(nowMs, periodStartMs, firstStartMs);
-      if (pointMs <= cursorMsFuture) return;
+      let cursorMs = Math.max(firstStartMs, periodStartMs);
+      if (pointMs <= cursorMs) return;
 
       for (let i = 0; i < queue.length; i += 1) {
         const order = queue[i];
@@ -256,16 +270,8 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
         const piecesPerBox = parsePiecesPerBox(order?.standard);
         if (!(ratePiecesPerHour > 0) || !(plannedPieces > 0)) continue;
 
-        const sensorPieces = Number(order?.sensor_produced_pieces || 0);
-        const producedBoxes = Number(order?.scanned_count || 0);
-        const producedPieces = sensorPieces > 0
-          ? sensorPieces
-          : (piecesPerBox > 0 ? producedBoxes * piecesPerBox : 0);
-        const remainingPieces = Math.max(0, plannedPieces - producedPieces);
-        if (remainingPieces <= 0) continue;
-
-        const orderDurationSec = remainingPieces / (ratePiecesPerHour / 3600);
-        const availableSec = Math.max(0, (pointMs - cursorMsFuture) / 1000);
+        const orderDurationSec = plannedPieces / (ratePiecesPerHour / 3600);
+        const availableSec = Math.max(0, (pointMs - cursorMs) / 1000);
         if (availableSec <= 0) break;
 
         const usedSec = Math.min(orderDurationSec, availableSec);
@@ -275,7 +281,7 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
         sumPieces += orderPieces;
         sumBoxes += orderBoxes;
 
-        cursorMsFuture += usedSec * 1000;
+        cursorMs += usedSec * 1000;
         if (usedSec < orderDurationSec) break;
       }
     });
@@ -320,11 +326,12 @@ export default function Painel({
     openStopSeconds: 0,
     machineOutput: [],
     stopReasons: [],
-    trendLabels: ["00h", "03h", "06h", "09h", "12h", "15h", "18h", "21h", "24h"],
-    trendReal: [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    trendGoal: [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    trendRealPieces: [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    trendGoalPieces: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    trendLabels: Array.from({ length: 25 }, (_, idx) => `${String(idx).padStart(2, "0")}h`),
+    trendReal: Array(25).fill(0),
+    trendGoal: Array(25).fill(0),
+    trendRealPieces: Array(25).fill(0),
+    trendGoalPieces: Array(25).fill(0),
+    shiftOutput: ACTIVE_TURNOS.map((turno) => ({ ...turno, boxes: 0, pieces: 0, pulses: 0, active: false })),
     scrapPieces: 0,
     scrapPct: 0,
     ongoingOrders: [],
@@ -533,7 +540,7 @@ export default function Painel({
       });
       const machineOutput = Object.entries(machineOutputMap).map(([machine, value]) => ({
         machine,
-        value: Number(value?.boxes || 0),
+        value: Number(value?.pieces || 0),
         boxes: Number(value?.boxes || 0),
         pieces: Number(value?.pieces || 0),
       }));
@@ -681,7 +688,8 @@ export default function Painel({
           percent: reasonTotalMs > 0 ? Math.round((Number(totalMs || 0) / reasonTotalMs) * 100) : 0,
         }));
 
-      const trendBase = buildTrendSeries(scans, periodFilter, period.start);
+      const trendBase = buildTrendSeries(scans, entries, periodFilter, period.start);
+      const shiftOutput = buildShiftOutput(scans, entries);
       const dynamicGoal = buildDynamicGoalSeries({
         periodKey: periodFilter,
         labels: trendBase.labels,
@@ -712,6 +720,7 @@ export default function Painel({
         trendGoal,
         trendRealPieces: trendBase.trendPieces,
         trendGoalPieces,
+        shiftOutput,
         scrapPieces,
         scrapPct,
         ongoingOrders,
@@ -1078,6 +1087,7 @@ export default function Painel({
       trendGoal: periodData.trendGoal || [],
       trendRealPieces: periodData.trendRealPieces || [],
       trendGoalPieces: periodData.trendGoalPieces || [],
+      shiftOutput: periodData.shiftOutput || [],
       scrapPieces: Number(periodData.scrapPieces || 0),
       scrapPct: Number(periodData.scrapPct || 0),
       trendLabels: periodData.trendLabels || [],
@@ -1087,9 +1097,11 @@ export default function Painel({
 
   const lineChartWidth = 560;
   const lineChartHeight = 220;
-  const lineMax = Math.max(1, ...overview.trendGoal, ...overview.trendReal);
-  const realPath = buildLinePath(overview.trendReal, lineChartWidth, lineChartHeight, lineMax);
-  const goalPath = buildLinePath(overview.trendGoal, lineChartWidth, lineChartHeight, lineMax);
+  const lineRealValues = overview.trendRealPieces.length ? overview.trendRealPieces : overview.trendReal;
+  const lineGoalValues = overview.trendGoalPieces.length ? overview.trendGoalPieces : overview.trendGoal;
+  const lineMax = Math.max(1, ...lineGoalValues, ...lineRealValues);
+  const realPath = buildLinePath(lineRealValues, lineChartWidth, lineChartHeight, lineMax);
+  const goalPath = buildLinePath(lineGoalValues, lineChartWidth, lineChartHeight, lineMax);
   const trendLen = Math.max(1, overview.trendLabels.length);
   const trendStep = trendLen > 1 ? lineChartWidth / (trendLen - 1) : lineChartWidth;
 
@@ -1115,8 +1127,8 @@ export default function Painel({
     realPieces: Number(overview.trendRealPieces[effectiveTrendIndex] || 0),
     goalPieces: Number(overview.trendGoalPieces[effectiveTrendIndex] || 0),
     x: trendStep * effectiveTrendIndex,
-    realY: lineChartHeight - ((Number(overview.trendReal[effectiveTrendIndex] || 0) / lineMax) * lineChartHeight),
-    goalY: lineChartHeight - ((Number(overview.trendGoal[effectiveTrendIndex] || 0) / lineMax) * lineChartHeight),
+    realY: lineChartHeight - ((Number(lineRealValues[effectiveTrendIndex] || 0) / lineMax) * lineChartHeight),
+    goalY: lineChartHeight - ((Number(lineGoalValues[effectiveTrendIndex] || 0) / lineMax) * lineChartHeight),
   };
 
   const donutTotal = Math.max(1, overview.machineOutput.reduce((acc, item) => acc + item.value, 0));
@@ -1145,7 +1157,24 @@ export default function Painel({
 
   const ongoingOrders = useMemo(() => {
     if (Array.isArray(periodData.ongoingOrders) && periodData.ongoingOrders.length > 0) {
-      return periodData.ongoingOrders.filter((row) => isOrderOngoingStatus(row?.status));
+      return periodData.ongoingOrders
+        .map((row) => {
+          const machine = String(row?.machine || "").toUpperCase();
+          const ativa = (source[machine] || [])[0] || null;
+          if (String(row?.apontamentoTipo || "").toLowerCase() !== "sensor" || !ativa) return row;
+
+          const localPieces = Number(ativa?.sensor_produced_pieces || 0);
+          const producedPieces = Math.max(Number(row?.producedPieces || 0), localPieces);
+          const plannedPieces = Number(row?.plannedPieces || 0);
+          return {
+            ...row,
+            producedPieces,
+            progress: plannedPieces > 0 ? Math.min(100, Math.round((producedPieces / plannedPieces) * 100)) : 0,
+            pulses: Math.max(Number(row?.pulses || 0), Number(ativa?.sensor_pulse_count || 0)),
+            cavitiesUsed: Number(row?.cavitiesUsed || 0) || Number(ativa?.sensor_cavities_used || 0),
+          };
+        })
+        .filter((row) => isOrderOngoingStatus(row?.status));
     }
     return machineIds
       .map((machine) => {
@@ -1303,15 +1332,28 @@ export default function Painel({
               {trendTooltip && (
                 <div className="chart-tooltip line-tooltip">
                   <strong>{trendTooltip.label}</strong>
-                  <span>Produzido: {formatCompactNumber(trendTooltip.real)} caixas</span>
-                  <span>Meta: {formatCompactNumber(trendTooltip.goal)} caixas</span>
                   <span>Produzido: {formatCompactNumber(trendTooltip.realPieces)} peças</span>
                   <span>Meta: {formatCompactNumber(trendTooltip.goalPieces)} peças</span>
+                  <span>Caixas: {formatCompactNumber(trendTooltip.real)} / {formatCompactNumber(trendTooltip.goal)}</span>
                 </div>
               )}
               <div className="line-chart-legend">
                 <span><i className="dot dot-real" />Produção real</span>
                 <span><i className="dot dot-goal" />Meta</span>
+              </div>
+              <div className="shift-summary-grid" aria-label="Resumo de producao por turno">
+                {(overview.shiftOutput || []).map((shift) => (
+                  <div key={shift.key} className={`shift-summary-item ${shift.active ? "is-active" : ""}`}>
+                    <div>
+                      <strong>{shift.label}</strong>
+                      <span>{shift.active ? "Turno atual" : "Periodo"}</span>
+                    </div>
+                    <div className="shift-summary-values">
+                      <b>{formatCompactNumber(shift.pieces || 0)} pç</b>
+                      <span>{formatCompactNumber(shift.boxes || 0)} cx • {formatCompactNumber(shift.pulses || 0)} pulsos</span>
+                    </div>
+                  </div>
+                ))}
               </div>
               <div
                 className="line-chart-labels"
@@ -1337,7 +1379,7 @@ export default function Painel({
                   <span className="donut-center-sub">
                     {activeDonutItem
                       ? `${formatCompactNumber(activeDonutItem.pieces || 0)} pecas`
-                      : `${formatCompactNumber(donutTotal)} caixas`}
+                      : `${formatCompactNumber(donutTotal)} pecas`}
                   </span>
                 </div>
               </div>
@@ -1362,7 +1404,7 @@ export default function Painel({
             {activeDonutItem && (
               <div className="chart-tooltip donut-tooltip">
                 <strong>{activeDonutItem.machine}</strong>
-                <span>{formatCompactNumber(activeDonutItem.boxes || activeDonutItem.value || 0)} caixas</span>
+                <span>{formatCompactNumber(activeDonutItem.boxes || 0)} caixas</span>
                 <span>{formatCompactNumber(activeDonutItem.pieces || 0)} pecas</span>
               </div>
             )}
