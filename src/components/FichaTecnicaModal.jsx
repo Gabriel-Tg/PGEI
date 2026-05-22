@@ -350,8 +350,7 @@ export default function FichaTecnicaModal({ machineId, itemCode, open, onClose, 
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <button
-              className={`btn ${editingSheet?.id === sheet.id ? 'primary' : 'ghost'}`}
-              style={editingSheet?.id === sheet.id ? { background: '#ffb703', color: '#1a1a1a' } : undefined}
+              className={`btn ${editingSheet?.id === sheet.id ? 'primary ficha-edit-active' : 'ghost'}`}
               onClick={() => {
                 if (editingSheet?.id === sheet.id) {
                   setEditingSheet(null)
@@ -436,7 +435,7 @@ export default function FichaTecnicaModal({ machineId, itemCode, open, onClose, 
 
   return (
     <div className="pet01-modal-bg" role="dialog" aria-modal>
-      <div className="pet01-modal" style={{ maxWidth: 720, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+      <div className="pet01-modal ficha-tech-modal" style={{ maxWidth: 720, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <h3>Ficha Técnica • Máquina {machineId} • Item {itemCode || 'N/A'}</h3>
           <button className="btn ghost" onClick={onClose}>Fechar</button>

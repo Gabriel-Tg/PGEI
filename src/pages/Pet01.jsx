@@ -750,7 +750,7 @@ if (typeof window !== "undefined") {
       <div className="pet01-next">
         <h2>Próximo Item</h2>
         {proximo ? (
-          <div style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px #0001', padding: 12, marginTop: 8 }}>
+          <div className="pet01-next-card">
             <Etiqueta o={proximo} variant="fila" saldoCaixas={null} lidasCaixas={null} />
           </div>
         ) : (
@@ -763,7 +763,7 @@ if (typeof window !== "undefined") {
   <div className="pet01-modal-bg" role="dialog" aria-modal>
     <div className="pet01-modal">
       <h3>Responsável do Turno</h3>
-      <p style={{ marginTop: 4, color: '#444' }}>
+      <p className="pet01-modal-description">
         Informe o operador responsável da {machineId} para o Turno {shiftInfo?.shiftKey || ""}. Este passo é obrigatório no início do turno.
       </p>
 

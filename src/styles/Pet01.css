@@ -730,3 +730,152 @@
   background: rgba(9, 26, 48, 0.78);
   color: #eaf5ff;
 }
+
+.pet01-wrapper--p1 .pet01-next h2 {
+  color: #f3f9ff;
+  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.pet01-wrapper--p1 .pet01-next-card {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: linear-gradient(165deg, rgba(8, 18, 34, 0.96), rgba(10, 24, 45, 0.94));
+  border: 1px solid rgba(89, 148, 221, 0.24);
+  box-shadow: 0 10px 26px rgba(0, 6, 20, 0.35);
+  color: #eaf4ff;
+}
+
+.pet01-wrapper--p1 .pet01-next-card .small,
+.pet01-wrapper--p1 .pet01-next-card .etiqueta {
+  background: transparent !important;
+  color: #eaf4ff !important;
+  border-color: rgba(89, 148, 221, 0.18) !important;
+  box-shadow: none !important;
+}
+
+.pet01-wrapper--p1 .pet01-next-card b,
+.pet01-wrapper--p1 .pet01-next-card strong {
+  color: #f6fbff !important;
+}
+
+.pet01-wrapper--p1 .pet01-modal-bg {
+  background: rgba(1, 8, 18, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.pet01-wrapper--p1 .pet01-modal {
+  background: linear-gradient(165deg, rgba(8, 18, 34, 0.98), rgba(10, 24, 45, 0.96));
+  border: 1px solid rgba(89, 148, 221, 0.28);
+  box-shadow: 0 28px 70px rgba(0, 6, 20, 0.58);
+  color: #eaf4ff;
+}
+
+.pet01-wrapper--p1 .pet01-modal h3 {
+  color: #f6fbff;
+}
+
+.pet01-wrapper--p1 .pet01-modal p,
+.pet01-wrapper--p1 .pet01-modal-description {
+  margin-top: 4px;
+  color: #a9c7e7;
+}
+
+.pet01-wrapper--p1 .pet01-modal label {
+  color: #d7e9ff;
+}
+
+.pet01-wrapper--p1 .pet01-modal input,
+.pet01-wrapper--p1 .pet01-modal select {
+  background: rgba(7, 24, 46, 0.88);
+  border: 1px solid rgba(89, 161, 245, 0.35);
+  color: #eaf4ff;
+}
+
+.pet01-wrapper--p1 .pet01-modal input:focus,
+.pet01-wrapper--p1 .pet01-modal select:focus {
+  outline: none;
+  border-color: var(--secondary);
+  box-shadow: 0 0 0 3px rgba(77, 224, 255, 0.18);
+  background: rgba(7, 28, 54, 0.94);
+}
+
+.pet01-wrapper--p1 .pet01-modal input::placeholder {
+  color: #7f9bc0;
+}
+
+.pet01-wrapper--p1 .pet01-modal select option {
+  background: #0a182d;
+  color: #eaf4ff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal {
+  max-width: min(920px, calc(100vw - 32px)) !important;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-history {
+  border-top-color: rgba(104, 162, 248, 0.22);
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-rev-card {
+  background: linear-gradient(165deg, rgba(7, 20, 38, 0.9), rgba(9, 26, 48, 0.86));
+  border-color: rgba(104, 162, 248, 0.24);
+  color: #eaf4ff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-rev-card.active {
+  border-color: rgba(77, 224, 255, 0.44);
+  box-shadow: 0 14px 32px rgba(0, 6, 20, 0.3);
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-desc,
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-block-title,
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-template h3,
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-template h4,
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-structured-view h4 {
+  color: #f6fbff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .muted {
+  color: #9fc1e3;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-chip {
+  background: rgba(28, 136, 255, 0.2);
+  border-color: rgba(91, 164, 250, 0.34);
+  color: #d5e8ff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-grid > div,
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-molde-row,
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-rev-card pre {
+  background: rgba(5, 18, 34, 0.62);
+  border-color: rgba(104, 162, 248, 0.2);
+  color: #eaf4ff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-grid > div {
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-grid > label {
+  color: #d7e9ff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-molde-header {
+  background: rgba(18, 47, 84, 0.72);
+  border-color: rgba(104, 162, 248, 0.26);
+  color: #f6fbff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal .ficha-edit-active {
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.pet01-wrapper--p1 .ficha-tech-modal textarea {
+  width: 100%;
+  resize: vertical;
+}
