@@ -11,6 +11,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -24,8 +25,8 @@ const char* WIFI_SSID = "ALTERAR_AQUI_NOME_WIFI";
 const char* WIFI_PASSWORD = "ALTERAR_AQUI_SENHA_WIFI";
 
 // API
-const char* API_URL = "http://192.168.1.100:3001/api/sensor/pulse";
-const char* HEARTBEAT_URL = "http://192.168.1.100:3001/api/sensor/heartbeat";
+const char* API_URL = "https://app.techargos.com.br/api/sensor/pulse";
+const char* HEARTBEAT_URL = "https://app.techargos.com.br/api/sensor/heartbeat";
 const char* SENSOR_TOKEN = "ALTERAR_AQUI_TOKEN_SENSOR";
 
 // Máquina e Identificação
@@ -38,7 +39,7 @@ const char* ESP32_ID = "ALTERAR_AQUI_ESP32_ID";      // Ex: "ESP32_01"
 
 #define SENSOR_PIN 32           // GPIO32 - entrada do sensor indutivo
 #define BAUD_RATE 115200        // Serial Monitor
-#define DEBOUNCE_DELAY_MS 100   // Debounce do sensor
+#define DEBOUNCE_DELAY_MS 30    // Debounce do sensor (reduzido para não perder ciclos rápidos)
 
 // ================================================================================
 //  CONFIGURAÇÕES DE REDE E API
@@ -54,11 +55,17 @@ const char* ESP32_ID = "ALTERAR_AQUI_ESP32_ID";      // Ex: "ESP32_01"
 //  VARIÁVEIS GLOBAIS
 // ================================================================================
 
+// ISR - Apenas variáveis críticas
 volatile unsigned long lastPulseTime = 0;
-volatile uint32_t pulseCount = 0;
+volatile uint32_t pulseQueue = 0;  // Fila de pulsos pendentes
+volatile bool pulseDetected = false;
+
+// Loop principal
 unsigned long lastHeartbeatTime = 0;
 unsigned long lastWifiCheckTime = 0;
 unsigned long lastQueueProcessTime = 0;
+unsigned long lastSendTime = 0;
+unsigned long pulseCount = 0;  // Contador total de pulsos processados
 bool wifiConnected = false;
 bool systemInitialized = false;
 
@@ -95,10 +102,10 @@ void setup() {
   }
   Serial.println("✓ LittleFS inicializado");
   
-  // Configurar pino do sensor
-  pinMode(SENSOR_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), handleSensorPulse, RISING);
-  Serial.println("✓ Sensor configurado (GPIO32 - Interrupt)");
+  // Configurar pino do sensor com PULLUP (compatível com NPN/PC817)
+  pinMode(SENSOR_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), handleSensorPulse, FALLING);
+  Serial.println("✓ Sensor configurado (GPIO32 - PULLUP - FALLING edge)");
   
   // Sincronizar hora com NTP
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -124,23 +131,31 @@ void loop() {
     checkWifiConnection();
   }
   
+  // Processar fila de pulsos (PRIORIDADE ALTA)
+  if (pulseDetected || pulseQueue > 0) {
+    pulseDetected = false;  // Limpar flag
+    if (wifiConnected) {
+      processPulseQueue();
+    }
+  }
+  
   // Enviar heartbeat periodicamente
   if (wifiConnected && (currentTime - lastHeartbeatTime >= HEARTBEAT_INTERVAL_S)) {
     lastHeartbeatTime = currentTime;
     sendHeartbeat();
   }
   
-  // Processar fila offline
+  // Processar fila offline (sincronizar eventos que falharam)
   if (wifiConnected && (currentTime - lastQueueProcessTime >= PROCESS_QUEUE_INTERVAL_S)) {
     lastQueueProcessTime = currentTime;
     processOfflineQueue();
   }
   
-  delay(100);  // Pequena pausa para evitar travamento
+  delay(50);  // Pausa reduzida para responsividade melhor
 }
 
 // ================================================================================
-//  INTERRUPÇÃO DO SENSOR
+//  INTERRUPÇÃO DO SENSOR - ISR OTIMIZADA (apenas incrementa fila)
 // ================================================================================
 
 void IRAM_ATTR handleSensorPulse() {
@@ -152,21 +167,17 @@ void IRAM_ATTR handleSensorPulse() {
   }
   
   lastPulseTime = currentTime;
-  pulseCount++;
   
-  // Log serial
-  Serial.print("📊 Pulso detectado #");
-  Serial.print(pulseCount);
-  Serial.print(" | Timestamp: ");
-  Serial.println(currentTime);
+  // APENAS incrementar fila - nada mais!
+  pulseQueue++;  // Contar pulsos neste evento
+  pulseDetected = true;  // Sinalizar que há pulsos para processar
   
-  // Tentar enviar imediatamente
-  if (wifiConnected) {
-    sendPulse(pulseCount, currentTime);
-  } else {
-    // Salvar offline
-    saveOfflineEvent(pulseCount, currentTime);
-  }
+  // NÃO faça aqui:
+  // - Serial.print / Serial.println
+  // - HTTP requests
+  // - LittleFS operations
+  // - String concatenation
+  // - Qualquer operação pesada
 }
 
 // ================================================================================
@@ -243,13 +254,35 @@ void checkWifiConnection() {
 }
 
 // ================================================================================
-//  ENVIAR PULSO PARA API
+//  PROCESSAR FILA DE PULSOS (chamado do loop principal)
 // ================================================================================
 
-bool sendPulse(uint32_t pulse, unsigned long timestamp) {
+void processPulseQueue() {
+  if (pulseQueue == 0) return;
+  
+  uint32_t pulsesToSend = pulseQueue;
+  pulseQueue = 0;  // Limpar fila
+  
+  Serial.print("📊 Processando pulsos: #");
+  Serial.println(pulsesToSend);
+  
+  // Enviar pulsos para API
+  if (!sendPulse(pulsesToSend)) {
+    // Se falhar, salvar offline
+    saveOfflineEvent(pulsesToSend);
+  } else {
+    // Incrementar contador de sucesso
+    pulseCount += pulsesToSend;
+  }
+}
+
+// ================================================================================
+//  ENVIAR PULSO PARA API (fora da ISR)
+// ================================================================================
+
+bool sendPulse(uint32_t pulse) {
   if (!wifiConnected) {
-    saveOfflineEvent(pulse, timestamp);
-    return false;
+    return false;  // Deixar para a fila offline
   }
   
   // Gerar event_id único
@@ -259,20 +292,27 @@ bool sendPulse(uint32_t pulse, unsigned long timestamp) {
   DynamicJsonDocument doc(256);
   doc["machine_id"] = MACHINE_ID;
   doc["esp32_id"] = ESP32_ID;
-  doc["token"] = SENSOR_TOKEN;
   doc["pulse_count"] = pulse;
-  doc["timestamp"] = getFormattedTimestamp(timestamp);
+  doc["timestamp"] = getFormattedTimestamp(millis());
   doc["event_id"] = eventId;
   
   // Serializar JSON
   String jsonString;
   serializeJson(doc, jsonString);
   
-  // Enviar para API
+  // Enviar para API com SSL seguro
+  WiFiClientSecure client;
+  client.setInsecure();  // ESP32: aceitar certificados auto-assinados
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(API_URL);
+  
+  if (!http.begin(client, API_URL)) {
+    Serial.println("❌ Erro ao inicializar HTTPClient");
+    return false;
+  }
+  
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-sensor-token", SENSOR_TOKEN);
   
   Serial.print("📤 Enviando pulso #");
   Serial.print(pulse);
@@ -293,9 +333,6 @@ bool sendPulse(uint32_t pulse, unsigned long timestamp) {
     Serial.print(" - ");
     Serial.println(http.getString());
     http.end();
-    
-    // Salvar como offline
-    saveOfflineEvent(pulse, timestamp);
     return false;
   }
 }
@@ -304,16 +341,15 @@ bool sendPulse(uint32_t pulse, unsigned long timestamp) {
 //  SALVAR EVENTO OFFLINE
 // ================================================================================
 
-void saveOfflineEvent(uint32_t pulse, unsigned long timestamp) {
+void saveOfflineEvent(uint32_t pulse) {
   String eventId = generateEventId();
   String filename = "/events_" + String(millis() % 1000000) + ".json";
   
   DynamicJsonDocument doc(256);
   doc["machine_id"] = MACHINE_ID;
   doc["esp32_id"] = ESP32_ID;
-  doc["token"] = SENSOR_TOKEN;
   doc["pulse_count"] = pulse;
-  doc["timestamp"] = getFormattedTimestamp(timestamp);
+  doc["timestamp"] = getFormattedTimestamp(millis());
   doc["event_id"] = eventId;
   doc["saved_at"] = millis();
   
@@ -373,10 +409,18 @@ void processOfflineQueue() {
 // ================================================================================
 
 bool retrySendEvent(String jsonString) {
+  WiFiClientSecure client;
+  client.setInsecure();  // ESP32: aceitar certificados auto-assinados
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(API_URL);
+  
+  if (!http.begin(client, API_URL)) {
+    Serial.println("❌ Erro ao inicializar HTTPClient para retry");
+    return false;
+  }
+  
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-sensor-token", SENSOR_TOKEN);
   
   Serial.print("📤 Reenviando evento offline...");
   
@@ -416,10 +460,18 @@ void sendHeartbeat() {
   String jsonString;
   serializeJson(doc, jsonString);
   
+  WiFiClientSecure client;
+  client.setInsecure();  // ESP32: aceitar certificados auto-assinados
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.begin(HEARTBEAT_URL);
+  
+  if (!http.begin(client, HEARTBEAT_URL)) {
+    Serial.println("❌ Erro ao inicializar HTTPClient para heartbeat");
+    return;
+  }
+  
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-sensor-token", SENSOR_TOKEN);
   
   Serial.print("💓 Heartbeat enviado | Pulsos totais: ");
   Serial.print(pulseCount);

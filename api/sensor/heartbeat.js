@@ -51,17 +51,20 @@ export default async function handler(req, res) {
     return
   }
 
-  const token = readSensorToken(req)
-  if (!token) {
-    sendJson(res, 401, { error: 'Missing sensor token' })
-    return
-  }
+  const headerToken = readSensorToken(req)
 
   let body
   try {
     body = await parseJsonBody(req)
   } catch {
     sendJson(res, 400, { error: 'Invalid JSON body' })
+    return
+  }
+
+  // Token: prioritário no header, fallback no body
+  const token = headerToken || body.token || ''
+  if (!token) {
+    sendJson(res, 401, { error: 'Missing sensor token' })
     return
   }
 
