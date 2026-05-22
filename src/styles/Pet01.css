@@ -118,7 +118,7 @@
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--panel);
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 14px;
   margin-bottom: 12px;
@@ -131,14 +131,44 @@
 .pet01-sensor-label {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #475569;
+  color: #9aaec9;
   margin-bottom: 6px;
 }
 
 .pet01-sensor-value {
   font-size: 1rem;
   font-weight: 800;
-  color: #0f172a;
+  color: #ffffff;
+}
+
+.pet01-cycle-timer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: none;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+}
+
+.pet01-cycle-timer.ok {
+  background: transparent;
+  border-color: transparent;
+  color: #127849;
+}
+
+.pet01-cycle-timer.over {
+  background: transparent;
+  border-color: transparent;
+  color: #c62828;
+}
+
+.pet01-cycle-timer.idle {
+  background: transparent;
+  border-color: transparent;
+  color: #64748b;
 }
 
 .pet01-sensor-warning {
@@ -719,6 +749,24 @@
 
 .pet01-wrapper--p1 .pet01-metric-value.red {
   color: #ff9aa8;
+}
+
+.pet01-wrapper--p1 .pet01-cycle-timer.ok {
+  background: transparent;
+  border-color: transparent;
+  color: #7ff2b9;
+}
+
+.pet01-wrapper--p1 .pet01-cycle-timer.over {
+  background: transparent;
+  border-color: transparent;
+  color: #ff9aa8;
+}
+
+.pet01-wrapper--p1 .pet01-cycle-timer.idle {
+  background: transparent;
+  border-color: transparent;
+  color: #9fc1e3;
 }
 
 .pet01-wrapper--p1 .pet01-operator-row {

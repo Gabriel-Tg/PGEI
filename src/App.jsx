@@ -27,6 +27,12 @@ import AdminPanel from './admin/AdminPanel'
 import { supabase } from './lib/supabaseClient'
 import { canAccessPath } from './domain/rbac'
 
+function getOrderItemCode(order = {}) {
+  const product = String(order?.product || '').trim()
+  const code = product.split('-')[0]?.trim()
+  return code || null
+}
+
 export default function App() {
   const [loadingTenant, setLoadingTenant] = useState(true)
   const [tenantCompany, setTenantCompany] = useState(null)
@@ -162,6 +168,7 @@ function TenantApp({ tenantCompany = null }){
   const [tenantMachines, setTenantMachines] = useState([])
   const [machinesLoading, setMachinesLoading] = useState(false)
   const [machinesResolved, setMachinesResolved] = useState(false)
+  const [itemTechByCode, setItemTechByCode] = useState({})
   const tenantCompanyId = tenantCompany?.id || null
   const machineIds = useMemo(() => {
     if (!tenantCompanyId) return MAQUINAS
@@ -384,6 +391,58 @@ function TenantApp({ tenantCompany = null }){
     activeByMachine, orderRecordGroups, lastFinalizedByMachine, onStatusChange
   } = useOrders(tenantCompanyId)
   const ativosPorMaquina = activeByMachine || {}
+
+  const activeItemCodes = useMemo(() => {
+    const codes = new Set()
+    Object.values(ativosPorMaquina || {}).forEach((orders) => {
+      ;(orders || []).forEach((order) => {
+        const code = getOrderItemCode(order)
+        if (code) codes.add(code)
+      })
+    })
+    return Array.from(codes).sort((a, b) => a.localeCompare(b))
+  }, [ativosPorMaquina])
+
+  const activeItemCodesKey = activeItemCodes.join('|')
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadActiveItemTech() {
+      if (!tenantCompanyId || activeItemCodes.length === 0) {
+        setItemTechByCode({})
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('items')
+        .select('code, cycle_seconds, cavities')
+        .eq('company_id', tenantCompanyId)
+        .in('code', activeItemCodes)
+
+      if (cancelled) return
+
+      if (error) {
+        console.warn('Falha ao carregar ciclo/cavidades dos itens ativos:', error)
+        setItemTechByCode({})
+        return
+      }
+
+      const mapped = {}
+      ;(data || []).forEach((item) => {
+        const code = String(item?.code || '').trim()
+        if (!code) return
+        mapped[code] = {
+          cycleSeconds: Number(item?.cycle_seconds || 0) || null,
+          cavities: Number(item?.cavities || 0) || null,
+        }
+      })
+      setItemTechByCode(mapped)
+    }
+
+    loadActiveItemTech()
+    return () => { cancelled = true }
+  }, [tenantCompanyId, activeItemCodesKey])
 
   useEffect(() => {
     if (!authChecked || !tenantAccessChecked || !authUser || !hasAccess) return
@@ -803,6 +862,7 @@ function TenantApp({ tenantCompany = null }){
           ativosP1={ativosMaquina}
           machineId={machineId}
           machineMeta={resolvedMachine}
+          itemTechByCode={itemTechByCode}
           clientId={tenantCompanyId}
           tick={tick}
           paradas={stops}
@@ -935,6 +995,7 @@ function TenantApp({ tenantCompany = null }){
           machineIds={machineIds}
           tenantMachines={tenantMachines}
           ativosPorMaquina={ativosPorMaquina}
+          itemTechByCode={itemTechByCode}
         />
       )
     }

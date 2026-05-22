@@ -1,17 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DateTime } from 'luxon'
 import { supabase } from '../lib/supabaseClient'
-import { computeMachineSensorStatus, formatDateTimeBr, sensorStatusLabel } from '../lib/sensorRuntime'
+import { computeMachineSensorStatus, formatDateTimeBr, formatRunningCycleSeconds, getRunningCycleSeconds, latestIsoTimestamp, runningCycleTone, sensorStatusLabel } from '../lib/sensorRuntime'
 import '../styles/sensores.css'
 
 function normalizeMachineCode(value) {
   return String(value || '').trim().toUpperCase()
 }
 
-export default function Sensores({ clientId = null, machineIds = [], tenantMachines = [], ativosPorMaquina = {} }) {
+function getOrderItemCode(order = {}) {
+  const product = String(order?.product || '').trim()
+  const code = product.split('-')[0]?.trim()
+  return code || null
+}
+
+export default function Sensores({ clientId = null, machineIds = [], tenantMachines = [], ativosPorMaquina = {}, itemTechByCode = {} }) {
   const [events, setEvents] = useState([])
   const [heartbeats, setHeartbeats] = useState([])
   const [loading, setLoading] = useState(false)
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -91,9 +103,6 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
   }, [machineIds, tenantMachines])
 
   const machineRows = useMemo(() => {
-    const nowMs = Date.now()
-    const oneHourAgo = nowMs - (60 * 60 * 1000)
-
     const eventByMachine = {}
     const hbByMachine = {}
 
@@ -116,15 +125,21 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
       const machineEvents = eventByMachine[machineId] || []
       const machineHeartbeats = hbByMachine[machineId] || []
       const activeOrder = (ativosPorMaquina?.[machineId] || [])[0] || null
+      const activeItemCode = getOrderItemCode(activeOrder)
+      const activeItemTech = activeItemCode ? itemTechByCode?.[activeItemCode] : null
 
       const lastEvent = machineEvents[0] || null
       const lastHb = machineHeartbeats[0] || null
+      const lastPulseAt = latestIsoTimestamp(machineMeta?.sensor_last_pulse_at, lastEvent?.created_at)
+      const runningCycleSeconds = getRunningCycleSeconds(lastPulseAt, nowMs)
 
       const status = computeMachineSensorStatus({
         ...machineMeta,
-        sensor_last_pulse_at: machineMeta?.sensor_last_pulse_at || lastEvent?.created_at,
+        sensor_last_pulse_at: lastPulseAt,
         sensor_last_heartbeat_at: machineMeta?.sensor_last_heartbeat_at || lastHb?.created_at,
       }, nowMs)
+
+      const configuredCycleSeconds = Number(machineMeta?.ciclo_cadastrado_seconds || activeItemTech?.cycleSeconds || 0) || null
 
       return {
         machineId,
@@ -133,14 +148,15 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
         status,
         statusLabel: sensorStatusLabel(status),
         activeOrderCode: activeOrder?.code || '-',
-        configuredCycleSeconds: Number(machineMeta?.ciclo_cadastrado_seconds || 0) || null,
-        lastCycleSeconds: Number(machineMeta?.sensor_last_cycle_seconds || 0) || null,
+        configuredCycleSeconds,
+        runningCycleSeconds,
+        runningCycleClass: runningCycleTone(runningCycleSeconds, configuredCycleSeconds),
         avgCycleSeconds: Number(machineMeta?.sensor_avg_cycle_seconds || 0) || null,
         autoStopped: Boolean(machineMeta?.sensor_auto_stopped),
         autoStopAt: machineMeta?.sensor_auto_stop_at || null,
       }
     })
-  }, [events, heartbeats, machineSet, tenantMachines, ativosPorMaquina])
+  }, [events, heartbeats, machineSet, tenantMachines, ativosPorMaquina, itemTechByCode, nowMs])
 
   const summary = useMemo(() => {
     const sensorRows = machineRows.filter((row) => row.tipo === 'sensor')
@@ -149,7 +165,7 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
     return {
       sensorsTotal: sensorRows.length,
       online: countStatus('online'),
-      receiving: countStatus('recebendo_pulsos'),
+      receiving: countStatus('Ativo - recebendo pulsos'),
       offline: countStatus('offline'),
       semComunicacao: countStatus('sem_comunicacao'),
       autoStopped: sensorRows.filter((row) => row.autoStopped).length,
@@ -157,7 +173,7 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
   }, [machineRows])
 
   const eventHistory = useMemo(() => events.slice(0, 30), [events])
-  const nowLabel = DateTime.now().setZone('America/Sao_Paulo').toFormat('dd/LL/yyyy HH:mm:ss')
+  const nowLabel = DateTime.fromMillis(nowMs).setZone('America/Sao_Paulo').toFormat('dd/LL/yyyy HH:mm:ss')
 
   return (
     <div className="sensor-page">
@@ -219,7 +235,7 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
                     <td><span className={`sensor-badge status ${row.status}`}>{row.statusLabel}</span></td>
                     <td>{row.esp32Id}</td>
                     <td>{row.configuredCycleSeconds ? `${row.configuredCycleSeconds}s` : '—'}</td>
-                    <td>{row.lastCycleSeconds ? `${row.lastCycleSeconds.toFixed(3)}s` : '—'}</td>
+                    <td><span className={`sensor-cycle-timer ${row.runningCycleClass}`}>{formatRunningCycleSeconds(row.runningCycleSeconds)}</span></td>
                     <td>{row.avgCycleSeconds ? `${row.avgCycleSeconds.toFixed(3)}s` : '—'}</td>
                     <td className={row.autoStopped ? 'auto-stop-yes' : ''}>{row.autoStopped ? 'SIM' : '—'}</td>
                     <td>{row.activeOrderCode}</td>
@@ -248,7 +264,7 @@ export default function Sensores({ clientId = null, machineIds = [], tenantMachi
                     <span>{Number(ev.produced_quantity || 0)} peças</span>
                   </div>
                   <div>
-                    <span className={`sensor-badge inline ${ev.is_ignored ? 'offline' : 'recebendo_pulsos'}`}>
+                    <span className={`sensor-badge inline ${ev.is_ignored ? 'offline' : 'Ativo - recebendo pulsos'}`}>
                       {ev.is_ignored ? 'Ignorado' : 'Processado'}
                     </span>
                   </div>

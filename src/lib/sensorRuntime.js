@@ -6,6 +6,39 @@ export function parseIsoToMillis(value) {
   return Number.isFinite(ms) ? ms : 0
 }
 
+export function latestIsoTimestamp(...values) {
+  let latest = null
+  let latestMs = 0
+  values.forEach((value) => {
+    const ms = parseIsoToMillis(value)
+    if (ms > latestMs) {
+      latestMs = ms
+      latest = value
+    }
+  })
+  return latest
+}
+
+export function getRunningCycleSeconds(lastPulseAt, nowMs = Date.now()) {
+  const lastPulseMs = parseIsoToMillis(lastPulseAt)
+  if (!lastPulseMs) return null
+  return Math.max(0, Math.floor((nowMs - lastPulseMs) / 1000))
+}
+
+export function formatRunningCycleSeconds(seconds) {
+  const total = Number(seconds)
+  if (!Number.isFinite(total) || total < 0) return '—'
+  return `${total}s`
+}
+
+export function runningCycleTone(seconds, configuredCycleSeconds) {
+  const elapsed = Number(seconds)
+  const configured = Number(configuredCycleSeconds)
+  if (!Number.isFinite(elapsed) || elapsed < 0) return 'idle'
+  if (Number.isFinite(configured) && configured > 0 && elapsed > configured) return 'over'
+  return 'ok'
+}
+
 export function computeMachineSensorStatus(machine, nowMs = Date.now()) {
   const tipo = String(machine?.apontamento_tipo || 'manual')
   if (tipo !== 'sensor') return 'manual'

@@ -8,6 +8,7 @@ import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
 import { REFUGO_MOTIVOS, MOTIVOS_PARADA } from "../domain/constants";
+import { formatRunningCycleSeconds, getRunningCycleSeconds, runningCycleTone } from "../lib/sensorRuntime";
 
 export default function Pet01({
   registroGrupos,
@@ -23,6 +24,7 @@ export default function Pet01({
   setFinalizando,
   machineId: machineIdProp,
   machineMeta = null,
+  itemTechByCode = {},
   clientId = null,
 }) {
   const machineId = String(machineIdProp || "P1").toUpperCase();
@@ -44,6 +46,7 @@ export default function Pet01({
   const [responsavelKey, setResponsavelKey] = useState("");
   const [fichaModalOpen, setFichaModalOpen] = useState(false);
   const [autoStopPromptedOrderId, setAutoStopPromptedOrderId] = useState(null);
+  const [sensorLastPulseAt, setSensorLastPulseAt] = useState(machineMeta?.sensor_last_pulse_at || null);
 
 
   // toast de notificação superior
@@ -137,6 +140,43 @@ const [currentShift, setCurrentShift] = useState(() => {
     if (!Number.isFinite(num) || num <= 0) return '—'
     return `${num.toFixed(3)}s`
   }, [])
+
+  const activeItemCode = useMemo(() => String(ativa?.product || '').split('-')[0]?.trim() || '', [ativa?.product])
+  const activeItemTech = activeItemCode ? itemTechByCode?.[activeItemCode] : null
+  const configuredCycleSeconds = Number(machineMeta?.ciclo_cadastrado_seconds || activeItemTech?.cycleSeconds || 0) || null
+  const runningCycleSeconds = getRunningCycleSeconds(sensorLastPulseAt, Date.now())
+  const runningCycleClass = runningCycleTone(runningCycleSeconds, configuredCycleSeconds)
+
+  useEffect(() => {
+    setSensorLastPulseAt(machineMeta?.sensor_last_pulse_at || null)
+  }, [machineMeta?.sensor_last_pulse_at])
+
+  useEffect(() => {
+    if (!clientId || !machineId || machineMeta?.apontamento_tipo !== 'sensor') return undefined
+
+    const channel = supabase
+      .channel(`pet01-sensor-cycle-${clientId}-${machineId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'machine_sensor_events' },
+        (payload) => {
+          const row = payload?.new
+          if (!row) return
+          if (String(row.company_id || '') !== String(clientId)) return
+          if (String(row.machine_id || '').toUpperCase() !== machineId) return
+          setSensorLastPulseAt(row.created_at || new Date().toISOString())
+        }
+      )
+      .subscribe()
+
+    return () => {
+      try {
+        supabase.removeChannel(channel)
+      } catch (err) {
+        console.warn('Falha ao remover canal de ciclo real PET-01:', err)
+      }
+    }
+  }, [clientId, machineId, machineMeta?.apontamento_tipo])
 
   useEffect(() => {
     if (!ativa || !machineMeta) {
@@ -690,11 +730,11 @@ if (typeof window !== "undefined") {
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo cadastrado</div>
-              <div className="pet01-sensor-value">{machineMeta.ciclo_cadastrado_seconds ? `${machineMeta.ciclo_cadastrado_seconds}s` : '—'}</div>
+              <div className="pet01-sensor-value">{configuredCycleSeconds ? `${configuredCycleSeconds}s` : '—'}</div>
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo real</div>
-              <div className="pet01-sensor-value">{formatCycleValue(machineMeta.sensor_last_cycle_seconds)}</div>
+              <div className={`pet01-sensor-value pet01-cycle-timer ${runningCycleClass}`}>{formatRunningCycleSeconds(runningCycleSeconds)}</div>
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo médio</div>

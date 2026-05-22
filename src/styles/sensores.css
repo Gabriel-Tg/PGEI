@@ -140,6 +140,37 @@
   color: #c62828;
 }
 
+.sensor-cycle-timer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: none;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+}
+
+.sensor-cycle-timer.ok {
+  background: transparent;
+  border-color: transparent;
+  color: #7ff2b9;
+}
+
+.sensor-cycle-timer.over {
+  background: transparent;
+  border-color: transparent;
+  color: #ff9aa8;
+}
+
+.sensor-cycle-timer.idle {
+  background: transparent;
+  border-color: transparent;
+  color: #9fc1e3;
+}
+
 .sensor-table td.auto-stop-yes {
   color: #c62828;
   font-weight: 700;
