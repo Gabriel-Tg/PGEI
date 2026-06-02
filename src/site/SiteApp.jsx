@@ -1,5 +1,5 @@
 import React from 'react'
-import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import LandingPage from './LandingPage'
@@ -17,28 +17,32 @@ function ScrollToTopOnRouteChange() {
   return null
 }
 
-function NavItem({ to, children }) {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) => `site-nav-link ${isActive ? 'active' : ''}`}
-      end={to === '/'}
-    >
-      {children}
-    </NavLink>
-  )
-}
-
 export default function SiteApp() {
+  const whatsappMessage = encodeURIComponent('Olá! Quero agendar uma demonstração do ARGOS.')
+  const whatsappNumber = '5547984802413'
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`
+
   return (
     <div className="site-shell">
       <ScrollToTopOnRouteChange />
       <header className="site-nav-wrap">
-        <nav className="site-nav" aria-label="Paginas do site">
-          <NavItem to="/">Home</NavItem>
-          <NavItem to="/implantacao">Implantação</NavItem>
-          <NavItem to="/como-funciona">Como funciona</NavItem>
-          <NavItem to="/contato">Contato</NavItem>
+        <nav className="site-nav" aria-label="Navegação principal">
+          <a className="site-brand" href="/" aria-label="ARGOS">
+            <img src="/Argos sem fundo.png" alt="ARGOS Monitoramento Industrial" />
+          </a>
+          <div className="site-menu">
+            <a className="site-nav-link" href="/#solucoes">Soluções</a>
+            <a className="site-nav-link" href="/#recursos">Recursos</a>
+            <a className="site-nav-link" href="/#beneficios">Benefícios</a>
+            <a className="site-nav-link" href="/#como-funciona">Como Funciona</a>
+            <a className="site-nav-link" href="/#casos">Casos</a>
+            <a className="site-nav-link" href="/#sobre">Sobre</a>
+            <a className="site-nav-link" href="/#contato">Contato</a>
+          </div>
+          <a className="site-nav-cta" href={whatsappUrl} target="_blank" rel="noreferrer">
+            Agendar Demonstração
+            <span aria-hidden="true">→</span>
+          </a>
         </nav>
       </header>
 
