@@ -1,21 +1,10 @@
 // src/pages/Painel.jsx
 
 import React, { useEffect, useMemo, useState } from "react";
-import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS, STATUS } from "../domain/constants";
-import { statusClass, jaIniciou } from "../lib/utils";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
 import { ACTIVE_TURNOS, getShiftWindowAt } from "../lib/shifts";
-
-// Helper para formatar HH:MM:SS
-function formatHHMMSS(totalSeconds) {
-  const s = Math.max(0, Math.floor(totalSeconds || 0));
-  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
 
 function extractItemCodeFromOrderProduct(product) {
   if (!product) return null;
@@ -27,16 +16,42 @@ function formatCompactNumber(value) {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(num);
 }
 
-function buildLinePath(points, width, height, maxValue) {
-  if (!points.length || maxValue <= 0) return "";
-  const step = points.length > 1 ? width / (points.length - 1) : width;
-  return points
-    .map((val, index) => {
-      const x = index * step;
-      const y = height - (val / maxValue) * height;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
+function formatDecimal(value, digits = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function formatPercent(value, digits = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return `${formatDecimal(num, digits)}%`;
+}
+
+function formatSeconds(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  return `${formatDecimal(num, 1)}s`;
+}
+
+function formatMaybe(value, fallback = "-") {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function formatDurationShort(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}min`;
+  return `${minutes}min`;
+}
+
+function getElapsedSeconds(dateLike, fallbackSeconds = 0) {
+  if (!dateLike) return fallbackSeconds;
+  const started = DateTime.fromISO(String(dateLike));
+  if (!started.isValid) return fallbackSeconds;
+  return Math.max(0, Math.floor(DateTime.now().diff(started, "seconds").seconds));
 }
 
 function parsePiecesPerBox(value) {
@@ -80,16 +95,16 @@ function getDashboardPeriodRange(periodKey) {
   }
   if (periodKey === "week") {
     return {
-      start: now.startOf("week"),
-      end: now.endOf("week"),
-      label: "Esta semana",
+      start: now.minus({ days: 6 }).startOf("day"),
+      end: now.endOf("day"),
+      label: "Últimos 7 dias",
     };
   }
   if (periodKey === "month") {
     return {
-      start: now.startOf("month"),
-      end: now.endOf("month"),
-      label: "Este mes",
+      start: now.minus({ days: 29 }).startOf("day"),
+      end: now.endOf("day"),
+      label: "Últimos 30 dias",
     };
   }
   return {
@@ -116,13 +131,13 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
   ];
 
   if (periodKey === "week") {
-    const labels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
+    const labels = Array.from({ length: 7 }, (_, idx) => rangeStart.plus({ days: idx }).toFormat("dd/LL"));
     const countBoxes = new Array(7).fill(0);
     const countPieces = new Array(7).fill(0);
     rows.forEach((scan) => {
       const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
       if (!dt.isValid) return;
-      const idx = Math.max(0, Math.min(6, dt.weekday - 1));
+      const idx = Math.max(0, Math.min(6, Math.floor(dt.startOf("day").diff(rangeStart.startOf("day"), "days").days)));
       countBoxes[idx] += Number(scan?.boxes || 0);
       countPieces[idx] += Number(scan?.pieces || 0);
     });
@@ -142,14 +157,14 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
   }
 
   if (periodKey === "month") {
-    const daysInMonth = Math.max(28, Number(rangeStart?.daysInMonth || 30));
-    const labels = Array.from({ length: daysInMonth }, (_, idx) => String(idx + 1).padStart(2, "0"));
+    const daysInMonth = 30;
+    const labels = Array.from({ length: daysInMonth }, (_, idx) => rangeStart.plus({ days: idx }).toFormat("dd/LL"));
     const countBoxes = new Array(daysInMonth).fill(0);
     const countPieces = new Array(daysInMonth).fill(0);
     rows.forEach((scan) => {
       const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
       if (!dt.isValid) return;
-      const dayIdx = Math.max(0, Math.min(daysInMonth - 1, Number(dt.day || 1) - 1));
+      const dayIdx = Math.max(0, Math.min(daysInMonth - 1, Math.floor(dt.startOf("day").diff(rangeStart.startOf("day"), "days").days)));
       countBoxes[dayIdx] += Number(scan?.boxes || 0);
       countPieces[dayIdx] += Number(scan?.pieces || 0);
     });
@@ -297,22 +312,20 @@ export default function Painel({
   ativosPorMaquina,
   paradas,
   tick,
-  onStatusChange,
-  setStartModal,
-  setFinalizando,
-  lastFinalizadoPorMaquina,
   onScanned, // opcional: callback do pai para re-fetch geral
-  authUser,
-  machinePriorities = {},
   machineIds = MAQUINAS,
   tenantMachines = [],
   clientId = null,
-  readOnly = false,
 }) {
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
   const [itemTechByCode, setItemTechByCode] = useState({});
   const [periodFilter, setPeriodFilter] = useState("today");
+  const [machineFilter, setMachineFilter] = useState("__ALL__");
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  const [sensorRuntimeByMachine, setSensorRuntimeByMachine] = useState({});
+  const [barTooltip, setBarTooltip] = useState(null);
+  const [selectedMachineId, setSelectedMachineId] = useState(null);
   const [periodData, setPeriodData] = useState({
     producedTotal: 0,
     producedBoxes: 0,
@@ -337,11 +350,41 @@ export default function Painel({
     ongoingOrders: [],
     periodLabel: "Hoje",
   });
-  const [trendHoverIndex, setTrendHoverIndex] = useState(null);
-  const [donutHoverMachine, setDonutHoverMachine] = useState(null);
-  const [stopReasonHover, setStopReasonHover] = useState(null);
   const [periodRefreshNonce, setPeriodRefreshNonce] = useState(0);
-  const source = localAtivos || {};
+  const source = useMemo(() => localAtivos || {}, [localAtivos]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setLiveNowMs(Date.now()), 100);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const machineGroupOptions = useMemo(() => {
+    const groups = new Map();
+    (tenantMachines || []).forEach((machine) => {
+      const code = String(machine?.machine_code || "").trim().toUpperCase();
+      if (!code) return;
+      const type = String(machine?.apontamento_tipo || "manual").trim().toLowerCase();
+      if (!groups.has(type)) groups.set(type, []);
+      groups.get(type).push(code);
+    });
+    return Array.from(groups.entries()).map(([type, machines]) => ({
+      id: `group:${type}`,
+      type,
+      label: type === "sensor" ? "Grupo Sensor" : type === "bipagem" ? "Grupo Bipagem" : "Grupo Manual",
+      machines,
+    }));
+  }, [tenantMachines]);
+
+  const filteredMachineIds = useMemo(() => {
+    if (machineFilter === "__ALL__") return machineIds;
+    if (machineFilter.startsWith("group:")) {
+      const group = machineGroupOptions.find((item) => item.id === machineFilter);
+      if (!group) return machineIds;
+      const allowed = new Set(group.machines.map((machine) => String(machine).toUpperCase()));
+      return machineIds.filter((machine) => allowed.has(String(machine).toUpperCase()));
+    }
+    return machineIds.filter((machine) => String(machine).toUpperCase() === String(machineFilter).toUpperCase());
+  }, [machineFilter, machineIds, machineGroupOptions]);
 
   const machineTypeById = useMemo(() => {
     const map = {};
@@ -352,6 +395,22 @@ export default function Painel({
     });
     return map;
   }, [tenantMachines]);
+
+  const machineMetaById = useMemo(() => {
+    const mapped = {};
+    (tenantMachines || []).forEach((machine) => {
+      const code = String(machine?.machine_code || "").trim().toUpperCase();
+      if (!code) return;
+      mapped[code] = {
+        ...machine,
+        ...(sensorRuntimeByMachine[code] || {}),
+      };
+    });
+    Object.entries(sensorRuntimeByMachine).forEach(([code, runtime]) => {
+      if (!mapped[code]) mapped[code] = runtime;
+    });
+    return mapped;
+  }, [tenantMachines, sensorRuntimeByMachine]);
 
   // Sincroniza props -> localAtivos, mas preservando scanned_count vindo do realtime (merge)
   useEffect(() => {
@@ -410,13 +469,13 @@ export default function Painel({
 
   const activeItemCodes = useMemo(() => {
     const codes = new Set();
-    machineIds.forEach((m) => {
+    filteredMachineIds.forEach((m) => {
       const ativa = (localAtivos?.[m] || [])[0];
       const code = extractItemCodeFromOrderProduct(ativa?.product);
       if (code) codes.add(code);
     });
     return Array.from(codes);
-  }, [localAtivos, machineIds]);
+  }, [localAtivos, filteredMachineIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -429,7 +488,7 @@ export default function Painel({
 
       let query = supabase
         .from("items")
-        .select("code, cycle_seconds, cavities")
+        .select("code, description, color, cycle_seconds, cavities, padrao, embalagem, part_weight_g, unit_value, resin, unidade, cliente")
         .in("code", activeItemCodes);
 
       if (clientId) query = query.eq("company_id", clientId);
@@ -447,8 +506,17 @@ export default function Painel({
         const code = String(item?.code || "").trim();
         if (!code) return;
         mapped[code] = {
+          description: item?.description || "",
+          color: item?.color || "",
           cycleSeconds: Number(item?.cycle_seconds || 0),
           cavities: Number(item?.cavities || 0),
+          standard: Number(item?.padrao || 0),
+          packaging: item?.embalagem || "",
+          partWeightG: Number(item?.part_weight_g || 0),
+          unitValue: Number(item?.unit_value || 0),
+          resin: item?.resin || "",
+          unit: item?.unidade || "",
+          customer: item?.cliente || "",
         };
       });
       setItemTechByCode(mapped);
@@ -504,6 +572,14 @@ export default function Painel({
         scrapQuery = scrapQuery.eq("company_id", clientId);
       }
 
+      if (filteredMachineIds.length > 0 && filteredMachineIds.length < machineIds.length) {
+        scansQuery = scansQuery.in("machine_id", filteredMachineIds);
+        entriesQuery = entriesQuery.in("machine_id", filteredMachineIds);
+        stopsQuery = stopsQuery.in("machine_id", filteredMachineIds);
+        lowEffQuery = lowEffQuery.in("machine_id", filteredMachineIds);
+        scrapQuery = scrapQuery.in("machine_id", filteredMachineIds);
+      }
+
       const [scansRes, entriesRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([
         scansQuery,
         entriesQuery,
@@ -526,7 +602,7 @@ export default function Painel({
       const producedBoxes = producedBoxesFromScans;
       const producedTotal = producedBoxes;
 
-      const machineOutputMap = Object.fromEntries(machineIds.map((m) => [m, { boxes: 0, pieces: 0 }]));
+      const machineOutputMap = Object.fromEntries(filteredMachineIds.map((m) => [m, { boxes: 0, pieces: 0 }]));
       scans.forEach((scan) => {
         const machine = String(scan?.machine_id || "").toUpperCase();
         if (!machineOutputMap[machine]) machineOutputMap[machine] = { boxes: 0, pieces: 0 };
@@ -549,7 +625,7 @@ export default function Painel({
       const scrapPctBase = producedPieces + scrapPieces;
       const scrapPct = scrapPctBase > 0 ? (scrapPieces / scrapPctBase) * 100 : 0;
 
-      const activeOrders = machineIds
+      const activeOrders = filteredMachineIds
         .map((machine) => {
           const ativa = (source[machine] || [])[0] || null;
           if (!ativa) return null;
@@ -696,7 +772,7 @@ export default function Painel({
         periodStart: period.start,
         periodEnd: period.end,
         source,
-        machineIds,
+        machineIds: filteredMachineIds,
         itemTechByCode,
       });
       const trendGoal = dynamicGoal.goalBoxes;
@@ -733,7 +809,7 @@ export default function Painel({
     });
 
     return () => { cancelled = true; };
-  }, [periodFilter, clientId, machineIds, machineTypeById, source, paradas, itemTechByCode, periodRefreshNonce]);
+  }, [periodFilter, clientId, machineIds, filteredMachineIds, machineTypeById, source, paradas, itemTechByCode, periodRefreshNonce]);
 
   // util helper para testar se um item corresponde a um order_id / code
   function matchesOrder(item, orderIdOrCode) {
@@ -901,6 +977,40 @@ export default function Painel({
           const row = payload?.new;
           if (!row) return;
           if (clientId && String(row.company_id || "") !== String(clientId)) return;
+          const machine = String(row.machine_id || "").trim().toUpperCase();
+          const pulseAt = row.created_at || new Date().toISOString();
+          if (machine) {
+            const baseMeta = machineMetaById[machine] || {};
+            setSensorRuntimeByMachine((prev) => {
+              const current = prev[machine] || baseMeta || {};
+              const previousPulseAt = current.sensor_last_pulse_at || baseMeta.sensor_last_pulse_at || null;
+              const previousPulseMs = previousPulseAt ? DateTime.fromISO(String(previousPulseAt)).toMillis() : NaN;
+              const pulseMs = DateTime.fromISO(String(pulseAt)).toMillis();
+              const previousCycle = Number.isFinite(previousPulseMs) && Number.isFinite(pulseMs) && pulseMs > previousPulseMs
+                ? (pulseMs - previousPulseMs) / 1000
+                : Number(current.sensor_last_cycle_seconds || baseMeta.sensor_last_cycle_seconds || 0);
+              const cycleCount = Number(current.sensor_cycle_count || baseMeta.sensor_cycle_count || 0) + 1;
+              const avgBefore = Number(current.sensor_avg_cycle_seconds || baseMeta.sensor_avg_cycle_seconds || 0);
+              const avgCycle = previousCycle > 0
+                ? (avgBefore > 0 && cycleCount > 1
+                    ? ((avgBefore * (cycleCount - 1)) + previousCycle) / cycleCount
+                    : previousCycle)
+                : avgBefore;
+
+              return {
+                ...prev,
+                [machine]: {
+                  ...current,
+                  machine_code: machine,
+                  sensor_last_pulse_at: pulseAt,
+                  sensor_last_cycle_seconds: previousCycle,
+                  sensor_avg_cycle_seconds: avgCycle,
+                  sensor_cycle_count: cycleCount,
+                  sensor_status: "recebendo_pulsos",
+                },
+              };
+            });
+          }
           setPeriodRefreshNonce((prev) => prev + 1);
         }
       )
@@ -911,6 +1021,17 @@ export default function Painel({
           const row = payload?.new;
           if (!row) return;
           if (clientId && String(row.company_id || "") !== String(clientId)) return;
+          const machine = String(row.machine_code || row.machine_id || "").trim().toUpperCase();
+          if (machine) {
+            setSensorRuntimeByMachine((prev) => ({
+              ...prev,
+              [machine]: {
+                ...(prev[machine] || {}),
+                ...row,
+                machine_code: machine,
+              },
+            }));
+          }
           setPeriodRefreshNonce((prev) => prev + 1);
         }
       )
@@ -923,102 +1044,10 @@ export default function Painel({
         console.warn("Falha ao remover canal realtime:", err);
       }
     };
-  }, [clientId, onScanned]);
-
-  // Estado para armazenar o started_at do log aberto de baixa eficiência por máquina
-  const [lowEffStartedAt, setLowEffStartedAt] = useState({});
-
-  function priorityTone(value) {
-    if (value == null || Number.isNaN(Number(value))) return "priority-chip-gray";
-    const n = Number(value);
-    if (n >= 5) return "priority-chip-green";
-    if (n >= 3) return "priority-chip-yellow";
-    if (n >= 1) return "priority-chip-red";
-    return "priority-chip-gray";
-  }
-
-  // Efeito para buscar o log aberto de baixa eficiência para cada máquina ativa
-  useEffect(() => {
-    async function fetchLowEffLogs() {
-      const result = {};
-      for (const m of machineIds) {
-        const lista = (localAtivos && localAtivos[m]) || [];
-        const ativa = lista[0] || null;
-        if (ativa && ativa.status === "BAIXA_EFICIENCIA") {
-          // Busca log aberto para essa ordem/máquina
-          let query = supabase
-            .from("low_efficiency_logs")
-            .select("started_at")
-            .is("ended_at", null)
-            .eq("machine_id", m);
-          if (ativa.id) query = query.eq("order_id", ativa.id);
-          const { data, error } = await query;
-          if (!error && data && data.length > 0) {
-            result[m] = data[0].started_at;
-          }
-        }
-      }
-      setLowEffStartedAt(result);
-    }
-    fetchLowEffLogs();
-    // Executa sempre que localAtivos ou status mudam
-  }, [localAtivos, tick, machineIds]);
-  
-  async function insertLowEfficiencyLog({ order_id = null, machine_id, started_by = null, notes = null }) {
-    try {
-      const payload = {
-        order_id: order_id || null,
-        machine_id,
-        started_at: new Date().toISOString(),
-        started_by,
-        notes,
-      };
-      const { data, error } = await supabase.from("low_efficiency_logs").insert(payload).select();
-      if (error) {
-        console.error("Erro inserindo low_efficiency_logs:", error);
-        return { error };
-      }
-      return { data };
-    } catch (err) {
-      console.error("Exception insertLowEfficiencyLog:", err);
-      return { error: err };
-    }
-  }
-
-  async function endLowEfficiencyLog({ order_id = null, machine_id, ended_by = null, notes = null }) {
-    try {
-      const updates = {
-        ended_at: new Date().toISOString(),
-        ended_by,
-        notes,
-      };
-
-      // Se order_id estiver disponível, preferimos usá-lo para encontrar o log aberto.
-      // Caso contrário, usamos machine_id e ended_at IS NULL.
-      let query = supabase.from("low_efficiency_logs").update(updates).is("ended_at", null);
-
-      if (order_id) {
-        query = query.eq("order_id", order_id);
-      } else {
-        query = query.eq("machine_id", machine_id);
-      }
-
-      // Executa update
-      const { data, error } = await query.select();
-      if (error) {
-        console.error("Erro ao encerrar low_efficiency_logs:", error);
-        return { error };
-      }
-      return { data };
-    } catch (err) {
-      console.error("Exception endLowEfficiencyLog:", err);
-      return { error: err };
-    }
-  }
+  }, [clientId, onScanned, machineMetaById]);
 
   const overview = useMemo(() => {
-    const machineCount = machineIds.length || 1;
-    const nowMs = Date.now();
+    const nowMs = Date.now() + (Number(tick || 0) * 0);
 
     // Eficiência dinâmica: compara produção real atual com meta acumulada até o horário atual,
     // partindo do started_at e usando ciclo/cavidades do item.
@@ -1027,7 +1056,7 @@ export default function Painel({
     let dynamicMetaBoxes = 0;
     let dynamicMetaPieces = 0;
 
-    for (const machine of machineIds) {
+    for (const machine of filteredMachineIds) {
       const ativa = (source[machine] || [])[0] || null;
       if (!ativa) continue;
 
@@ -1093,67 +1122,13 @@ export default function Painel({
       trendLabels: periodData.trendLabels || [],
       periodLabel: periodData.periodLabel || "Hoje",
     };
-  }, [machineIds, periodData, source, itemTechByCode, machineTypeById, tick]);
+  }, [filteredMachineIds, periodData, source, itemTechByCode, machineTypeById, tick]);
 
-  const lineChartWidth = 560;
-  const lineChartHeight = 220;
-  const lineRealValues = overview.trendRealPieces.length ? overview.trendRealPieces : overview.trendReal;
-  const lineGoalValues = overview.trendGoalPieces.length ? overview.trendGoalPieces : overview.trendGoal;
-  const lineMax = Math.max(1, ...lineGoalValues, ...lineRealValues);
-  const realPath = buildLinePath(lineRealValues, lineChartWidth, lineChartHeight, lineMax);
-  const goalPath = buildLinePath(lineGoalValues, lineChartWidth, lineChartHeight, lineMax);
-  const trendLen = Math.max(1, overview.trendLabels.length);
-  const trendStep = trendLen > 1 ? lineChartWidth / (trendLen - 1) : lineChartWidth;
-
-  function clampTrendIndex(idx) {
-    return Math.max(0, Math.min(overview.trendLabels.length - 1, idx));
+  function getBucketDelta(values, index) {
+    const current = Number(values?.[index] || 0);
+    const previous = index > 0 ? Number(values?.[index - 1] || 0) : 0;
+    return Math.max(0, current - previous);
   }
-
-  function handleTrendMove(evt) {
-    const rect = evt.currentTarget.getBoundingClientRect();
-    if (!rect.width || overview.trendLabels.length === 0) return;
-    const x = evt.clientX - rect.left;
-    const ratio = x / rect.width;
-    const idx = clampTrendIndex(Math.round(ratio * (overview.trendLabels.length - 1)));
-    setTrendHoverIndex(idx);
-  }
-
-  const effectiveTrendIndex = trendHoverIndex == null ? null : clampTrendIndex(trendHoverIndex);
-  const trendTooltip = effectiveTrendIndex == null ? null : {
-    idx: effectiveTrendIndex,
-    label: overview.trendLabels[effectiveTrendIndex],
-    real: Number(overview.trendReal[effectiveTrendIndex] || 0),
-    goal: Number(overview.trendGoal[effectiveTrendIndex] || 0),
-    realPieces: Number(overview.trendRealPieces[effectiveTrendIndex] || 0),
-    goalPieces: Number(overview.trendGoalPieces[effectiveTrendIndex] || 0),
-    x: trendStep * effectiveTrendIndex,
-    realY: lineChartHeight - ((Number(lineRealValues[effectiveTrendIndex] || 0) / lineMax) * lineChartHeight),
-    goalY: lineChartHeight - ((Number(lineGoalValues[effectiveTrendIndex] || 0) / lineMax) * lineChartHeight),
-  };
-
-  const donutTotal = Math.max(1, overview.machineOutput.reduce((acc, item) => acc + item.value, 0));
-  const donutColors = ["#19d3ff", "#5b7cff", "#5effa8", "#be6dff", "#f9bf4f", "#2ee8d6", "#ff7d7d"];
-  const donutGradient = overview.machineOutput
-    .filter((item) => item.value > 0)
-    .reduce(
-      (acc, item, idx) => {
-        const part = (item.value / donutTotal) * 100;
-        const from = acc.cursor;
-        const to = Math.min(100, from + part);
-        acc.stops.push(`${donutColors[idx % donutColors.length]} ${from.toFixed(2)}% ${to.toFixed(2)}%`);
-        acc.cursor = to;
-        return acc;
-      },
-      { cursor: 0, stops: [] }
-    ).stops;
-
-  const donutBackground = donutGradient.length
-    ? `conic-gradient(${donutGradient.join(", ")})`
-    : "conic-gradient(#24324d 0% 100%)";
-  const activeDonutItem = overview.machineOutput.find((item) => item.machine === donutHoverMachine)
-    || overview.machineOutput.find((item) => Number(item.value || 0) > 0)
-    || overview.machineOutput[0]
-    || null;
 
   const ongoingOrders = useMemo(() => {
     if (Array.isArray(periodData.ongoingOrders) && periodData.ongoingOrders.length > 0) {
@@ -1176,7 +1151,7 @@ export default function Painel({
         })
         .filter((row) => isOrderOngoingStatus(row?.status));
     }
-    return machineIds
+    return filteredMachineIds
       .map((machine) => {
         const ativa = (source[machine] || [])[0] || null;
         if (!ativa) return null;
@@ -1207,27 +1182,7 @@ export default function Painel({
         };
       })
       .filter((row) => row && isOrderOngoingStatus(row.status));
-  }, [machineIds, machineTypeById, source, periodData.ongoingOrders]);
-
-  function getStatusBadge(status) {
-    const normalized = String(status || "").toUpperCase();
-    if (normalized === "PRODUZINDO") return "status-badge producing";
-    if (normalized === "PARADA") return "status-badge stopped";
-    if (normalized === "BAIXA_EFICIENCIA") return "status-badge low-efficiency";
-    if (normalized === "FINALIZADA") return "status-badge finished";
-    if (normalized === "AGUARDANDO") return "status-badge waiting";
-    return "status-badge default";
-  }
-
-  function getStatusLabel(status) {
-    const normalized = String(status || "").toUpperCase();
-    if (normalized === "PRODUZINDO") return "Produzindo";
-    if (normalized === "PARADA") return "Parada";
-    if (normalized === "BAIXA_EFICIENCIA") return "Baixa Eficiência";
-    if (normalized === "FINALIZADA") return "Finalizada";
-    if (normalized === "AGUARDANDO") return "Aguardando";
-    return status || "-";
-  }
+  }, [filteredMachineIds, machineTypeById, source, periodData.ongoingOrders]);
 
   function getApontamentoLabel(tipo) {
     const normalized = String(tipo || "manual").toLowerCase();
@@ -1236,299 +1191,483 @@ export default function Painel({
     return "Manual";
   }
 
+  const openStopsByMachine = useMemo(() => {
+    const mapped = {};
+    (Array.isArray(paradas) ? paradas : []).forEach((stop) => {
+      if (stop?.resumed_at) return;
+      const machine = String(stop?.machine_id || "").trim().toUpperCase();
+      if (!machine) return;
+      mapped[machine] = stop;
+    });
+    return mapped;
+  }, [paradas]);
+
+  const currentShift = getShiftWindowAt();
+
+  function getMachineTone(status, reason) {
+    const normalizedStatus = String(status || "").toUpperCase();
+    const normalizedReason = String(reason || "").toUpperCase();
+    if (normalizedStatus === "PARADA" && normalizedReason.includes("SET")) return "setup";
+    if (normalizedStatus === "PARADA" && normalizedReason.includes("MANUT")) return "maintenance";
+    if (normalizedStatus === "PARADA") return "stopped";
+    if (normalizedStatus === "AGUARDANDO") return "standby";
+    if (normalizedStatus === "SETUP") return "setup";
+    if (normalizedStatus === "MANUTENCAO" || normalizedStatus === "MANUTENÇÃO") return "maintenance";
+    if (normalizedStatus === "PRODUZINDO" || normalizedStatus === "BAIXA_EFICIENCIA") return "producing";
+    return "standby";
+  }
+
+  const machineCards = useMemo(() => {
+    const activeOrderMap = new Map((ongoingOrders || []).map((row) => [String(row.machine || "").toUpperCase(), row]));
+
+    return filteredMachineIds.map((machineId) => {
+      const machine = String(machineId || "").toUpperCase();
+      const displayIndex = machineIds.findIndex((item) => String(item).toUpperCase() === machine);
+      const ativa = (source[machine] || [])[0] || null;
+      const activeOrder = activeOrderMap.get(machine) || null;
+      const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
+      const itemTech = itemCode ? itemTechByCode[itemCode] : null;
+      const machineMeta = machineMetaById[machine] || {};
+      const currentStop = openStopsByMachine[machine] || null;
+      const reason = currentStop?.reason || ativa?.reason || "";
+      const status = ativa?.status || (ativa ? "AGUARDANDO" : "STANDBY");
+      const tone = ativa ? getMachineTone(status, reason) : "standby";
+      const statusLabel = tone === "producing"
+        ? "Produzindo"
+        : tone === "stopped"
+          ? formatMaybe(reason, "Parada")
+          : tone === "setup"
+            ? formatMaybe(reason, "Setup")
+            : tone === "maintenance"
+              ? formatMaybe(reason, "Manutenção")
+              : "Standby";
+
+      const plannedPieces = Number(activeOrder?.plannedPieces || getOrderPlannedPieces(ativa) || 0);
+      const piecesPerBox = parsePiecesPerBox(ativa?.standard);
+      const producedPieces = Number(activeOrder?.producedPieces || 0);
+      const producedBoxes = piecesPerBox > 0 ? Math.floor(producedPieces / piecesPerBox) : Number(activeOrder?.producedBoxes || ativa?.scanned_count || 0);
+      const plannedBoxes = Number(ativa?.boxes || activeOrder?.plannedBoxes || 0);
+      const progress = plannedPieces > 0 ? Math.min(100, Math.round((producedPieces / plannedPieces) * 100)) : 0;
+      const remainingPieces = Math.max(0, plannedPieces - producedPieces);
+
+      const startedAt = ativa?.restarted_at || ativa?.started_at || null;
+      const startedMs = startedAt ? DateTime.fromISO(String(startedAt)).toMillis() : NaN;
+      const elapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, (liveNowMs - startedMs) / 1000) : 0;
+      const cycleStandard = Number(itemTech?.cycleSeconds || 0);
+      const cavities = Number(activeOrder?.cavitiesUsed || itemTech?.cavities || 0);
+      const lastPulseAt = machineMeta?.sensor_last_pulse_at || null;
+      const lastPulseMs = lastPulseAt ? DateTime.fromISO(String(lastPulseAt)).toMillis() : NaN;
+      const currentCycle = tone === "producing" && Number.isFinite(lastPulseMs)
+        ? Math.max(0, (liveNowMs - lastPulseMs) / 1000)
+        : 0;
+      const previousCycle = Number(machineMeta?.sensor_last_cycle_seconds || 0);
+      const avgCycle = Number(machineMeta?.sensor_avg_cycle_seconds || 0);
+      const calculatedCycle = producedPieces > 0 && cavities > 0 && elapsedSeconds > 0
+        ? (elapsedSeconds * cavities) / producedPieces
+        : 0;
+      const realCycle = currentCycle > 0 ? currentCycle : previousCycle || avgCycle || calculatedCycle;
+      const cycleEfficiency = realCycle > 0 && cycleStandard > 0 ? (cycleStandard / realCycle) * 100 : 0;
+      const theoreticalPieces = cycleStandard > 0 && cavities > 0 && elapsedSeconds > 0
+        ? (elapsedSeconds / cycleStandard) * cavities
+        : 0;
+      const oee = theoreticalPieces > 0 ? Math.min(140, (producedPieces / theoreticalPieces) * 100) : 0;
+      const etaSeconds = cycleStandard > 0 && cavities > 0 && remainingPieces > 0
+        ? (remainingPieces / (3600 / cycleStandard * cavities)) * 3600
+        : 0;
+
+      const stopSeconds = tone === "stopped" || tone === "maintenance"
+        ? getElapsedSeconds(currentStop?.started_at || ativa?.interrupted_at)
+        : 0;
+      const setupSeconds = tone === "setup" ? getElapsedSeconds(currentStop?.started_at || ativa?.interrupted_at) : 0;
+      const producingSeconds = tone === "producing" ? elapsedSeconds : 0;
+
+      return {
+        id: machine,
+        displayName: `PET-${String((displayIndex >= 0 ? displayIndex : 0) + 1).padStart(2, "0")}`,
+        machineLabel: machine,
+        tone,
+        statusLabel,
+        statusNote: status === "BAIXA_EFICIENCIA" ? "Baixa eficiência" : reason,
+        orderNumber: ativa?.code || ativa?.op_code || activeOrder?.order || "-",
+        productCode: itemCode || "-",
+        productDescription: itemTech?.description || ativa?.product || "-",
+        customer: ativa?.customer || itemTech?.customer || "-",
+        plannedPieces,
+        producedPieces,
+        remainingPieces,
+        plannedBoxes,
+        producedBoxes,
+        remainingBoxes: Math.max(0, plannedBoxes - producedBoxes),
+        progress,
+        oee,
+        cycleStandard,
+        realCycle,
+        currentCycle,
+        previousCycle,
+        avgCycle,
+        isCycleLate: cycleStandard > 0 && currentCycle > cycleStandard,
+        cycleEfficiency,
+        partWeightG: Number(itemTech?.partWeightG || 0),
+        channelWeightG: 0,
+        cavities,
+        mold: formatMaybe(ativa?.mold || ativa?.molde),
+        operator: formatMaybe(ativa?.started_by || ativa?.restarted_by),
+        shift: currentShift?.shiftLabel || currentShift?.label || "Turno atual",
+        packagingType: itemTech?.packaging || ativa?.standard || "-",
+        piecesPerBox,
+        piecesPerPack: Number(itemTech?.standard || 0),
+        palletization: "-",
+        etaSeconds,
+        metaPiecesNow: Math.round(theoreticalPieces || 0),
+        producingSeconds,
+        stopSeconds,
+        setupSeconds,
+        pointingMode: getApontamentoLabel(activeOrder?.apontamentoTipo || machineTypeById[machine]),
+      };
+    });
+  }, [filteredMachineIds, machineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs]);
+
+  const liveKpis = useMemo(() => {
+    const productiveCards = machineCards.filter((card) => card.plannedPieces > 0 || card.producedPieces > 0);
+    const avgOee = productiveCards.length
+      ? productiveCards.reduce((acc, card) => acc + Number(card.oee || 0), 0) / productiveCards.length
+      : Number(overview.efficiency || 0);
+    const activeMachines = machineCards.filter((card) => card.tone === "producing").length;
+    const stopMinutes = Math.round(Number(overview.openStopSeconds || 0) / 60);
+    return {
+      avgOee,
+      production: Number(overview.producedPieces || 0),
+      activeMachines,
+      totalMachines: machineCards.length,
+      stopMinutes,
+    };
+  }, [machineCards, overview]);
+
+  const productionBuckets = useMemo(() => {
+    const realValues = overview.trendRealPieces || [];
+    const goalValues = overview.trendGoalPieces || [];
+    const labels = overview.trendLabels || [];
+    const rawBuckets = labels.map((label, index) => {
+      const production = getBucketDelta(realValues, index);
+      const goal = getBucketDelta(goalValues, index);
+      const efficiency = goal > 0 ? (production / goal) * 100 : 0;
+      const previousLabel = labels[index - 1];
+      const displayLabel = periodFilter === "today" && previousLabel
+        ? `${previousLabel} às ${label}`
+        : label;
+      return {
+        id: `${label}-${index}`,
+        label: displayLabel,
+        production,
+        goal,
+        efficiency,
+      };
+    });
+    const buckets = periodFilter === "today" ? rawBuckets.slice(1) : rawBuckets;
+    const maxValue = Math.max(1, ...buckets.map((bucket) => Math.max(bucket.production, bucket.goal)));
+    return buckets.map((bucket) => ({
+      ...bucket,
+      height: Math.max(12, Math.round((bucket.production / maxValue) * 100)),
+      goalHeight: Math.max(8, Math.round((bucket.goal / maxValue) * 100)),
+    }));
+  }, [overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, periodFilter]);
+
+  const topStopReasons = useMemo(() => (overview.stopReasons || []).slice(0, 5), [overview.stopReasons]);
+
+  function updateBarTooltip(event, bucket) {
+    const margin = 14;
+    const tooltipWidth = 220;
+    const tooltipHeight = 132;
+    const clientX = event.clientX || event.touches?.[0]?.clientX || 0;
+    const clientY = event.clientY || event.touches?.[0]?.clientY || 0;
+    const left = Math.min(Math.max(margin, clientX + 14), window.innerWidth - tooltipWidth - margin);
+    const top = Math.min(Math.max(margin, clientY + 14), window.innerHeight - tooltipHeight - margin);
+    setBarTooltip({ ...bucket, left, top });
+  }
+
+  const selectedMachine = useMemo(
+    () => machineCards.find((machine) => machine.id === selectedMachineId) || null,
+    [machineCards, selectedMachineId]
+  );
+
+  useEffect(() => {
+    if (!selectedMachineId) return;
+    if (!machineCards.some((machine) => machine.id === selectedMachineId)) {
+      setSelectedMachineId(machineCards[0]?.id || null);
+    }
+  }, [machineCards, selectedMachineId]);
+
+  useEffect(() => {
+    if (!selectedMachineId) return;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setSelectedMachineId(null);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedMachineId]);
+
   return (
-    <div className="board-wrapper">
-      <section className="dashboard-overview">
-        <div className="kpi-grid">
-          <article className="kpi-card kpi-card-produced">
-            <p className="kpi-label">Produção no Período</p>
-            <strong className="kpi-value">{formatCompactNumber(overview.producedPieces)} peças</strong>
-            <span className="kpi-meta">{formatCompactNumber(overview.producedBoxes)} caixas</span>
-          </article>
-          <article className="kpi-card kpi-card-scrap">
-            <p className="kpi-label">Refugo</p>
-            <strong className="kpi-value">{overview.scrapPct.toFixed(1)}%</strong>
-            <span className={`kpi-trend ${overview.scrapPct <= 5 ? 'up' : 'down'}`}>
-              {formatCompactNumber(overview.scrapPieces)} peças refugadas
-            </span>
-          </article>
-          <article className="kpi-card kpi-card-efficiency">
-            <p className="kpi-label">Eficiência</p>
-            <strong className="kpi-value">{overview.efficiency.toFixed(1)}%</strong>
-            <span className={`kpi-trend ${overview.efficiency >= 80 ? 'up' : 'down'}`}>
-              {overview.efficiency >= 80 ? 'Dentro da meta' : 'Abaixo da meta'}
-            </span>
-            <span className="kpi-meta">
-              Meta agora: {formatCompactNumber(Math.round(overview.metaNowBoxes || 0))} cx • {formatCompactNumber(Math.round(overview.metaNowPieces || 0))} pç
-            </span>
-          </article>
-          <article className="kpi-card kpi-card-stops">
-            <p className="kpi-label">Paradas</p>
-            <strong className="kpi-value">{overview.openStopCount}</strong>
-            <span className="kpi-meta">
-              {overview.openStopCount > 0 ? `${formatHHMMSS(overview.openStopSeconds)} em aberto` : 'Nenhuma parada aberta'}
-            </span>
-          </article>
+    <div className="argos-monitor">
+      <section className="monitor-top-panel">
+        <div className="monitor-brand-row">
+          <img src="/Argos sem fundo.png" alt="ARGOS" />
+          <strong>Visão Geral</strong>
         </div>
+        <div className="monitor-control-row">
+          <select
+            className="monitor-filter-select"
+            value={machineFilter}
+            onChange={(event) => setMachineFilter(event.target.value)}
+            aria-label="Filtrar máquina do dashboard"
+          >
+            <option value="__ALL__">Todas as máquinas</option>
+            {machineGroupOptions.map((group) => (
+              <option value={group.id} key={group.id}>{group.label}</option>
+            ))}
+            {machineIds.map((machine, index) => (
+              <option value={machine} key={machine}>INJ-{String(index + 1).padStart(2, "0")} • {machine}</option>
+            ))}
+          </select>
+          <span className="monitor-icon-pill" aria-label="Notificações">○</span>
+          <span className="monitor-icon-pill pulse" aria-label="Atualização automática">⌁</span>
+          <span className="monitor-live-pill"><i /> ao vivo</span>
+          <select
+            className="monitor-period-select"
+            value={periodFilter}
+            onChange={(event) => setPeriodFilter(event.target.value)}
+            aria-label="Filtrar período do dashboard"
+          >
+            <option value="today">Hoje</option>
+            <option value="yesterday">Ontem</option>
+            <option value="week">Últimos 7 dias</option>
+            <option value="month">Últimos 30 dias</option>
+          </select>
+        </div>
+      </section>
 
-        <div className="dashboard-charts-grid">
-          <article className="overview-chart-card">
-            <header>
-              <h3>Produção por Período</h3>
-              <div className="chart-filter-row">
-                <span>Real x Meta</span>
-                <select
-                  className="chart-filter-select"
-                  value={periodFilter}
-                  onChange={(e) => setPeriodFilter(e.target.value)}
-                  aria-label="Filtrar periodo do dashboard"
+      <section className="monitor-kpi-grid" aria-label="Indicadores principais">
+        <article className="monitor-kpi-card">
+          <span>OEE MÉDIO</span>
+          <strong>{formatPercent(liveKpis.avgOee)}</strong>
+          <small className={liveKpis.avgOee >= 80 ? "positive" : "negative"}>Meta 80% • {overview.periodLabel}</small>
+        </article>
+        <article className="monitor-kpi-card">
+          <span>PRODUÇÃO</span>
+          <strong>{formatCompactNumber(liveKpis.production)}</strong>
+          <small className="positive">{overview.periodLabel} • dados reais</small>
+        </article>
+        <article className="monitor-kpi-card is-emphasis">
+          <span>MÁQUINAS ATIVAS</span>
+          <strong>{liveKpis.activeMachines} / {liveKpis.totalMachines}</strong>
+          <small className="positive">{formatPercent((liveKpis.activeMachines / Math.max(1, liveKpis.totalMachines)) * 100)} ativas</small>
+        </article>
+        <article className="monitor-kpi-card">
+          <span>PARADAS (MIN)</span>
+          <strong>{formatCompactNumber(liveKpis.stopMinutes)}</strong>
+          <small className={liveKpis.stopMinutes > 0 ? "negative" : "positive"}>{liveKpis.stopMinutes > 0 ? `${overview.openStopCount} parada(s) abertas` : "Sem parada aberta"}</small>
+        </article>
+      </section>
+
+      <section className="machine-status-panel">
+        <header className="monitor-section-header">
+          <h3>Status das Máquinas</h3>
+          <span>ao vivo</span>
+        </header>
+        <div className="machine-card-grid">
+          {machineCards.map((machine) => (
+            <article
+              className={`machine-monitor-card tone-${machine.tone}`}
+              key={machine.id}
+              tabIndex={0}
+              role="button"
+              aria-label={`Abrir detalhes da máquina ${machine.displayName}`}
+              onClick={() => setSelectedMachineId(machine.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setSelectedMachineId(machine.id);
+                }
+              }}
+            >
+              <div className="machine-card-main">
+                <div className="machine-card-head">
+                  <strong>{machine.displayName}</strong>
+                  <span>{machine.statusLabel}</span>
+                </div>
+                <div className="machine-card-metrics">
+                  <p>OEE {formatPercent(machine.oee)}</p>
+                  <p className={machine.isCycleLate ? "cycle-late" : ""}>Ciclo {formatSeconds(machine.realCycle)}</p>
+                  <p>{formatCompactNumber(machine.producedPieces)} / {formatCompactNumber(machine.plannedPieces)} peças</p>
+                </div>
+                <div className="machine-progress-track" aria-label={`Progresso da OP ${machine.progress}%`}>
+                  <div style={{ width: `${machine.progress}%` }} />
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {selectedMachine && (
+        <div
+          className="machine-detail-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Detalhes da máquina ${selectedMachine.displayName}`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedMachineId(null);
+          }}
+        >
+          <div className={`machine-detail-modal tone-${selectedMachine.tone}`} onMouseDown={(event) => event.stopPropagation()}>
+            <div className="machine-detail-modal-top">
+              <select
+                className="machine-modal-select"
+                value={selectedMachine.id}
+                onChange={(event) => setSelectedMachineId(event.target.value)}
+                aria-label="Selecionar outra máquina"
+              >
+                {machineCards.map((machine) => (
+                  <option value={machine.id} key={machine.id}>{machine.displayName} • {machine.statusLabel}</option>
+                ))}
+              </select>
+              <button type="button" className="machine-modal-close" onClick={() => setSelectedMachineId(null)} aria-label="Fechar detalhes da máquina">×</button>
+            </div>
+
+            <div className="machine-detail-popover">
+              <div className="popover-topline">
+                <div>
+                  <span>{selectedMachine.displayName} • {selectedMachine.machineLabel}</span>
+                  <strong>{selectedMachine.orderNumber}</strong>
+                </div>
+                <b>{selectedMachine.progress}%</b>
+              </div>
+
+              <div className="popover-progress">
+                <div style={{ width: `${selectedMachine.progress}%` }} />
+              </div>
+
+              <div className="popover-grid two-cols">
+                <div><span>Código</span><strong>{selectedMachine.productCode}</strong></div>
+                <div><span>Cliente</span><strong>{selectedMachine.customer}</strong></div>
+                <div className="wide"><span>Descrição</span><strong>{selectedMachine.productDescription}</strong></div>
+                <div><span>Programada</span><strong>{formatCompactNumber(selectedMachine.plannedPieces)} pç</strong></div>
+                <div><span>Produzida</span><strong>{formatCompactNumber(selectedMachine.producedPieces)} pç</strong></div>
+                <div><span>Restante</span><strong>{formatCompactNumber(selectedMachine.remainingPieces)} pç</strong></div>
+                <div><span>Término estimado</span><strong>{selectedMachine.etaSeconds > 0 ? formatDurationShort(selectedMachine.etaSeconds) : "-"}</strong></div>
+              </div>
+
+              <div className="popover-block-title">Processo</div>
+              <div className="popover-grid three-cols">
+                <div><span>Ciclo padrão</span><strong>{formatSeconds(selectedMachine.cycleStandard)}</strong></div>
+                <div className={selectedMachine.isCycleLate ? "metric-alert" : ""}><span>Ciclo real</span><strong>{formatSeconds(selectedMachine.realCycle)}</strong></div>
+                <div><span>Ciclo anterior</span><strong>{formatSeconds(selectedMachine.previousCycle)}</strong></div>
+                <div><span>Média ciclo</span><strong>{formatSeconds(selectedMachine.avgCycle)}</strong></div>
+                <div><span>Eficiência ciclo</span><strong>{formatPercent(selectedMachine.cycleEfficiency)}</strong></div>
+                <div><span>Peso peça</span><strong>{selectedMachine.partWeightG > 0 ? `${formatDecimal(selectedMachine.partWeightG, 2)}g` : "-"}</strong></div>
+                <div><span>Peso canal</span><strong>{selectedMachine.channelWeightG > 0 ? `${formatDecimal(selectedMachine.channelWeightG, 2)}g` : "-"}</strong></div>
+                <div><span>Cavidades</span><strong>{selectedMachine.cavities || "-"}</strong></div>
+                <div><span>Molde</span><strong>{selectedMachine.mold}</strong></div>
+                <div><span>Máquina</span><strong>{selectedMachine.machineLabel}</strong></div>
+                <div><span>Operador</span><strong>{selectedMachine.operator}</strong></div>
+                <div><span>Turno</span><strong>{selectedMachine.shift}</strong></div>
+                <div><span>Apontamento</span><strong>{selectedMachine.pointingMode}</strong></div>
+              </div>
+
+              <div className="popover-block-title">Embalagem</div>
+              <div className="popover-grid three-cols">
+                <div><span>Tipo</span><strong>{selectedMachine.packagingType}</strong></div>
+                <div><span>Peças/caixa</span><strong>{selectedMachine.piecesPerBox || "-"}</strong></div>
+                <div><span>Peças/pacote</span><strong>{selectedMachine.piecesPerPack || "-"}</strong></div>
+                <div><span>Caixas produzidas</span><strong>{formatCompactNumber(selectedMachine.producedBoxes)}</strong></div>
+                <div><span>Caixas restantes</span><strong>{formatCompactNumber(selectedMachine.remainingBoxes)}</strong></div>
+                <div><span>Paletização</span><strong>{selectedMachine.palletization}</strong></div>
+              </div>
+
+              <div className="popover-time-grid">
+                <div><span>Meta x realizado</span><strong>{formatCompactNumber(selectedMachine.metaPiecesNow)} / {formatCompactNumber(selectedMachine.producedPieces)}</strong></div>
+                <div><span>Produzindo</span><strong>{formatDurationShort(selectedMachine.producingSeconds)}</strong></div>
+                <div><span>Parada</span><strong>{formatDurationShort(selectedMachine.stopSeconds)}</strong></div>
+                <div><span>Setup</span><strong>{formatDurationShort(selectedMachine.setupSeconds)}</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <section className="monitor-charts-row">
+        <article className="monitor-chart-card bar-chart-card">
+          <header className="monitor-section-header">
+            <h3>Produção por Hora</h3>
+            <span>{overview.periodLabel}</span>
+          </header>
+          <div className="production-chart-meta">
+            <span><i className="legend-real" />Produção</span>
+            <span><i className="legend-goal" />Meta</span>
+            <strong>{formatCompactNumber(productionBuckets.reduce((acc, bar) => acc + bar.production, 0))} peças</strong>
+          </div>
+          <div className="production-chart-frame">
+            <div className="production-chart-grid" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div
+              className="premium-bars"
+              aria-label="Produção por período"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, productionBuckets.length)}, minmax(0, 1fr))` }}
+            >
+              {productionBuckets.map((bar, index) => (
+                <button
+                  type="button"
+                  className="premium-bar-wrap"
+                  key={bar.id}
+                  onPointerMove={(event) => updateBarTooltip(event, bar)}
+                  onPointerEnter={(event) => updateBarTooltip(event, bar)}
+                  onPointerLeave={() => setBarTooltip(null)}
+                  onFocus={(event) => updateBarTooltip(event, bar)}
+                  onBlur={() => setBarTooltip(null)}
+                  aria-label={`${bar.label}: ${formatCompactNumber(bar.production)} peças`}
                 >
-                  <option value="today">Hoje</option>
-                  <option value="yesterday">Ontem</option>
-                  <option value="week">Esta semana</option>
-                  <option value="month">Este mes</option>
-                </select>
-              </div>
-            </header>
-            <div className="line-chart-wrap" role="img" aria-label="Grafico de linha de producao por periodo">
-              <svg
-                viewBox={`0 0 ${lineChartWidth} ${lineChartHeight}`}
-                preserveAspectRatio="none"
-                className="line-chart-svg"
-                onMouseMove={handleTrendMove}
-                onMouseDown={handleTrendMove}
-                onMouseLeave={() => setTrendHoverIndex(null)}
-              >
-                {overview.trendLabels.map((_, idx) => {
-                  const divisor = Math.max(1, overview.trendLabels.length - 1);
-                  const x = (lineChartWidth / divisor) * idx;
-                  return (
-                    <line
-                      key={`grid-${idx}`}
-                      x1={x}
-                      y1="0"
-                      x2={x}
-                      y2={lineChartHeight}
-                      className="line-grid"
-                    />
-                  );
-                })}
-                <path d={goalPath} className="line-goal" />
-                <path d={realPath} className="line-real" />
-                {trendTooltip && (
-                  <>
-                    <line
-                      x1={trendTooltip.x}
-                      y1="0"
-                      x2={trendTooltip.x}
-                      y2={lineChartHeight}
-                      className="line-hover-guide"
-                    />
-                    <circle cx={trendTooltip.x} cy={trendTooltip.realY} r="5" className="line-point-real" />
-                    <circle cx={trendTooltip.x} cy={trendTooltip.goalY} r="5" className="line-point-goal" />
-                  </>
-                )}
-              </svg>
-              {trendTooltip && (
-                <div className="chart-tooltip line-tooltip">
-                  <strong>{trendTooltip.label}</strong>
-                  <span>Produzido: {formatCompactNumber(trendTooltip.realPieces)} peças</span>
-                  <span>Meta: {formatCompactNumber(trendTooltip.goalPieces)} peças</span>
-                  <span>Caixas: {formatCompactNumber(trendTooltip.real)} / {formatCompactNumber(trendTooltip.goal)}</span>
-                </div>
-              )}
-              <div className="line-chart-legend">
-                <span><i className="dot dot-real" />Produção real</span>
-                <span><i className="dot dot-goal" />Meta</span>
-              </div>
-              <div className="shift-summary-grid" aria-label="Resumo de producao por turno">
-                {(overview.shiftOutput || []).map((shift) => (
-                  <div key={shift.key} className={`shift-summary-item ${shift.active ? "is-active" : ""}`}>
-                    <div>
-                      <strong>{shift.label}</strong>
-                      <span>{shift.active ? "Turno atual" : "Periodo"}</span>
-                    </div>
-                    <div className="shift-summary-values">
-                      <b>{formatCompactNumber(shift.pieces || 0)} pç</b>
-                      <span>{formatCompactNumber(shift.boxes || 0)} cx • {formatCompactNumber(shift.pulses || 0)} pulsos</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div
-                className="line-chart-labels"
-                style={{ gridTemplateColumns: `repeat(${Math.max(1, overview.trendLabels.length)}, minmax(0, 1fr))` }}
-              >
-                {overview.trendLabels.map((label) => (
-                  <span key={label}>{label}</span>
-                ))}
-              </div>
-            </div>
-          </article>
-
-          <article className="overview-chart-card donut-card">
-            <header>
-              <h3>Produção por Máquina</h3>
-              <span>Distribuição do volume atual</span>
-            </header>
-            <div className="donut-wrap">
-              <div className="donut-chart" style={{ background: donutBackground }}>
-                <div className="donut-center">
-                  <small>{activeDonutItem ? activeDonutItem.machine : "TOTAL"}</small>
-                  <strong>{formatCompactNumber(activeDonutItem ? activeDonutItem.value : donutTotal)}</strong>
-                  <span className="donut-center-sub">
-                    {activeDonutItem
-                      ? `${formatCompactNumber(activeDonutItem.pieces || 0)} pecas`
-                      : `${formatCompactNumber(donutTotal)} pecas`}
-                  </span>
-                </div>
-              </div>
-              <ul className="donut-legend">
-                {overview.machineOutput.map((item, idx) => (
-                  <li
-                    key={item.machine}
-                    className={donutHoverMachine === item.machine ? "is-active" : ""}
-                    onMouseEnter={() => setDonutHoverMachine(item.machine)}
-                    onMouseLeave={() => setDonutHoverMachine(null)}
-                    onFocus={() => setDonutHoverMachine(item.machine)}
-                    onBlur={() => setDonutHoverMachine(null)}
-                    tabIndex={0}
-                  >
-                    <i style={{ background: donutColors[idx % donutColors.length] }} />
-                    <span>{item.machine}</span>
-                    <strong>{formatCompactNumber(item.value)}</strong>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            {activeDonutItem && (
-              <div className="chart-tooltip donut-tooltip">
-                <strong>{activeDonutItem.machine}</strong>
-                <span>{formatCompactNumber(activeDonutItem.boxes || 0)} caixas</span>
-                <span>{formatCompactNumber(activeDonutItem.pieces || 0)} pecas</span>
-              </div>
-            )}
-          </article>
-        </div>
-
-        <section className="orders-layout">
-          <div className="orders-table-card">
-            <header>
-              <div>
-                <h3>Ordens em Andamento</h3>
-                <span>Resumo de desempenho {overview.periodLabel.toLowerCase()}</span>
-              </div>
-              <span className="orders-meta">{ongoingOrders.length} ordens no periodo</span>
-            </header>
-
-            <div className="orders-table-responsive">
-              <table className="orders-table">
-                <thead>
-                  <tr>
-                    <th>Ordem</th>
-                    <th>Produto</th>
-                    <th>Máquina</th>
-                    <th>Qtd Apontada</th>
-                    <th>Progresso</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ongoingOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan="7" className="orders-empty">
-                        Nenhuma ordem em andamento no momento.
-                      </td>
-                    </tr>
-                  ) : (
-                    ongoingOrders.map((order) => (
-                      <tr key={`${order.machine}-${order.order}`}>
-                        <td>{order.order}</td>
-                        <td>{order.product}</td>
-                        <td>{order.machine}</td>
-                        <td>{order.producedPieces.toLocaleString('pt-BR')} / {order.plannedPieces.toLocaleString('pt-BR')} pç</td>
-                        <td className="progress-cell">
-                          <div className="progress-bar" aria-label={`Progresso ${order.progress}%`}>
-                            <div className="progress-bar-fill" style={{ width: `${order.progress}%` }} />
-                          </div>
-                          <span className="progress-label">{order.progress}%</span>
-                        </td>
-                        <td>
-                          <span className={getStatusBadge(order.status)}>
-                            {getStatusLabel(order.status)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="orders-mobile-list" aria-label="Lista simplificada de ordens em andamento">
-              {ongoingOrders.length === 0 ? (
-                <div className="orders-empty">Nenhuma ordem em andamento no momento.</div>
-              ) : (
-                ongoingOrders.map((order) => (
-                  <article className="orders-mobile-item" key={`mobile-${order.machine}-${order.order}`}>
-                    <div className="orders-mobile-head">
-                      <strong>{order.machine} • {order.order}</strong>
-                      <span className={getStatusBadge(order.status)}>{getStatusLabel(order.status)}</span>
-                    </div>
-                    <p className="orders-mobile-product">{order.product}</p>
-                    <div className="orders-mobile-qty">
-                      <span>Qtd Apontada: {order.producedPieces.toLocaleString('pt-BR')} / {order.plannedPieces.toLocaleString('pt-BR')} pç</span>
-                    </div>
-                    <div className="progress-bar" aria-label={`Progresso ${order.progress}%`}>
-                      <div className="progress-bar-fill" style={{ width: `${order.progress}%` }} />
-                    </div>
-                    <span className="progress-label">{order.progress}% concluído</span>
-                  </article>
-                ))
-              )}
+                  <span className="bar-goal" style={{ height: `${bar.goalHeight}%` }} />
+                  <span className="bar-real" style={{ height: `${bar.height}%` }} />
+                  <small>{index % Math.ceil(Math.max(1, productionBuckets.length) / 6) === 0 ? bar.label.split(" ")[0] : ""}</small>
+                </button>
+              ))}
             </div>
           </div>
-
-          <div className="stop-reason-card">
-            <header>
-              <div>
-                <h3>Paradas por Motivo</h3>
-                <span>Distribuição de paradas</span>
-              </div>
-            </header>
-            <div className="stop-reason-list">
-              {overview.stopReasons.length === 0 ? (
-                <div className="orders-empty">Nenhuma parada registrada.</div>
-              ) : (
-                overview.stopReasons.map((item) => (
-                  <div
-                    key={item.reason}
-                    className={`stop-reason-item ${stopReasonHover === item.reason ? "is-active" : ""}`}
-                    onMouseEnter={() => setStopReasonHover(item.reason)}
-                    onMouseLeave={() => setStopReasonHover(null)}
-                  >
-                    <div className="stop-reason-label">
-                      <strong>{item.reason}</strong>
-                      <span>{item.hours.toFixed(2)}h</span>
-                    </div>
-                    <div className="stop-reason-bar">
-                      <div className="stop-reason-bar-fill" style={{ width: `${item.percent}%` }} />
-                    </div>
-                    <div className="stop-reason-meta">{item.percent}% • {item.count} ocorrência(s)</div>
-                    {stopReasonHover === item.reason && (
-                      <div className="chart-tooltip stop-tooltip">
-                        <strong>{item.reason}</strong>
-                        <span>Tempo total: {item.hours.toFixed(2)}h</span>
-                        <span>Ocorrências: {item.count}</span>
-                        <span>Participação: {item.percent}%</span>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
+          {barTooltip && (
+            <div className="bar-floating-tooltip" style={{ left: barTooltip.left, top: barTooltip.top }}>
+              <strong>{barTooltip.label}</strong>
+              <span>Produção: {formatCompactNumber(barTooltip.production)} peças</span>
+              <span>Meta: {formatCompactNumber(barTooltip.goal)} peças</span>
+              <span>Eficiência: {formatPercent(barTooltip.efficiency, 0)}</span>
             </div>
+          )}
+        </article>
+
+        <article className="monitor-chart-card top-stops-card">
+          <header className="monitor-section-header">
+            <h3>Top 5 Paradas</h3>
+            <span>tempo acumulado</span>
+          </header>
+          <div className="top-stops-list">
+            {topStopReasons.length === 0 ? (
+              <div className="top-stops-empty">Nenhuma parada registrada no período.</div>
+            ) : topStopReasons.map((stop, index) => (
+              <div className="top-stop-row" key={stop.reason}>
+                <div className="top-stop-rank">{index + 1}</div>
+                <div className="top-stop-main">
+                  <div className="top-stop-head">
+                    <strong>{stop.reason}</strong>
+                    <span>{formatDurationShort(Number(stop.totalMs || 0) / 1000)}</span>
+                  </div>
+                  <div className="top-stop-bar"><div style={{ width: `${stop.percent}%` }} /></div>
+                  <small>{stop.percent}% de participação • {stop.count} ocorrência(s)</small>
+                </div>
+              </div>
+            ))}
           </div>
-        </section>
+        </article>
       </section>
     </div>
   );
