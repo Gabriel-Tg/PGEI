@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
@@ -8,7 +7,7 @@ import crypto from 'crypto';
 
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   
   if (!url || !key) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
@@ -39,13 +38,13 @@ function normalizeEsp32Id(value: unknown): string {
   return normalizeString(value).toLowerCase();
 }
 
-function getRequestIp(req: NextRequest): string {
+function getRequestIp(req: Request): string {
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0].trim();
   return req.headers.get('x-real-ip') || 'unknown';
 }
 
-function readSensorToken(req: NextRequest): string {
+function readSensorToken(req: Request): string {
   const headerToken = req.headers.get('x-sensor-token') || '';
   if (headerToken) return headerToken;
   
@@ -55,6 +54,13 @@ function readSensorToken(req: NextRequest): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 // ================================================================================
@@ -118,7 +124,7 @@ async function resolveAuthorizedMachine(
 // POST /api/sensor/heartbeat
 // ================================================================================
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     console.log('💓 Heartbeat recebido');
 
@@ -126,7 +132,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json();
     } catch (e) {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
     }
 
     console.log('📨 Heartbeat body:', body);
@@ -135,20 +141,14 @@ export async function POST(request: NextRequest) {
     const token = headerToken || body.token || '';
 
     if (!token) {
-      return NextResponse.json(
-        { error: 'Missing sensor token' },
-        { status: 401 }
-      );
+      return jsonResponse({ error: 'Missing sensor token' }, 401);
     }
 
     const machineCode = normalizeMachineCode(body.machine_id);
     const esp32Id = normalizeEsp32Id(body.esp32_id);
 
     if (!machineCode || !esp32Id) {
-      return NextResponse.json(
-        { error: 'machine_id and esp32_id are required' },
-        { status: 400 }
-      );
+      return jsonResponse({ error: 'machine_id and esp32_id are required' }, 400);
     }
 
     // Conectar Supabase
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
     try {
       supabase = getSupabaseAdmin();
     } catch (err: any) {
-      return NextResponse.json({ error: err.message }, { status: 500 });
+      return jsonResponse({ error: err.message }, 500);
     }
 
     // Validar máquina
@@ -168,10 +168,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!machine) {
-      return NextResponse.json(
-        { error: 'Invalid machine/token pairing' },
-        { status: 403 }
-      );
+      return jsonResponse({ error: 'Invalid machine/token pairing' }, 403);
     }
 
     const companyId = machine.company_id;
@@ -180,10 +177,7 @@ export async function POST(request: NextRequest) {
     // Rate limiting
     const rateKey = `${companyId}:${machineCode}:${esp32Id}:${sourceIp}`;
     if (!canAcceptHeartbeatRate(rateKey)) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded' },
-        { status: 429 }
-      );
+      return jsonResponse({ error: 'Rate limit exceeded' }, 429);
     }
 
     // Atualizar status
@@ -199,24 +193,24 @@ export async function POST(request: NextRequest) {
       console.error('Erro ao atualizar heartbeat:', updateError);
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       machine_id: machineCode,
       status: 'online'
-    }, { status: 200 });
+    }, 200);
 
   } catch (error: any) {
     console.error('❌ Erro heartbeat:', error);
-    return NextResponse.json(
+    return jsonResponse(
       { error: error.message || 'Internal server error' },
-      { status: 500 }
+      500
     );
   }
 }
 
 export async function GET() {
-  return NextResponse.json(
+  return jsonResponse(
     { error: 'Method not allowed' },
-    { status: 405 }
+    405
   );
 }

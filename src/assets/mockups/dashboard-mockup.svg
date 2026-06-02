@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" width="1200" height="700">
+  <defs>
+    <linearGradient id="g1" x1="0" x2="1">
+      <stop offset="0" stop-color="#052033" />
+      <stop offset="1" stop-color="#021626" />
+    </linearGradient>
+    <linearGradient id="g2" x1="0" x2="1">
+      <stop offset="0" stop-color="#0ea5ff" />
+      <stop offset="1" stop-color="#60a5fa" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="700" rx="18" fill="url(#g1)" />
+  <!-- header -->
+  <rect x="40" y="34" width="1120" height="72" rx="10" fill="#07192b" />
+  <circle cx="90" cy="70" r="18" fill="#0ea5ff" opacity="0.9" />
+  <text x="120" y="78" fill="#bfe8ff" font-size="20" font-family="Inter, Arial">ARGOS • Painel de Produção</text>
+
+  <!-- left column cards -->
+  <rect x="40" y="120" width="360" height="120" rx="10" fill="#07182a" />
+  <rect x="40" y="260" width="360" height="110" rx="10" fill="#07182a" />
+  <rect x="40" y="390" width="360" height="270" rx="10" fill="#07182a" />
+
+  <!-- right main chart -->
+  <rect x="420" y="120" width="740" height="540" rx="10" fill="#051229" />
+  <!-- chart grid -->
+  <g stroke="#0b2b44" stroke-width="1">
+    <line x1="460" y1="160" x2="1080" y2="160" />
+    <line x1="460" y1="220" x2="1080" y2="220" />
+    <line x1="460" y1="280" x2="1080" y2="280" />
+    <line x1="460" y1="340" x2="1080" y2="340" />
+    <line x1="460" y1="400" x2="1080" y2="400" />
+    <line x1="460" y1="460" x2="1080" y2="460" />
+  </g>
+  <!-- sparkline -->
+  <polyline points="480,440 540,380 600,360 660,310 720,330 780,300 840,320 900,260 960,280 1020,240" fill="none" stroke="url(#g2)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- small widgets -->
+  <rect x="60" y="130" width="112" height="72" rx="8" fill="#052033" />
+  <rect x="184" y="130" width="112" height="72" rx="8" fill="#052033" />
+  <rect x="308" y="130" width="92" height="72" rx="8" fill="#052033" />
+  <text x="80" y="170" fill="#9bd2ff" font-size="20" font-family="Inter">OEE</text>
+  <text x="192" y="170" fill="#9bd2ff" font-size="20" font-family="Inter">Produção</text>
+
+  <!-- footer legend -->
+  <text x="440" y="620" fill="#6daedb" font-size="14" font-family="Inter">Máquinas ativas: 12 • Paradas: 2 • Turno: Tarde</text>
+
+</svg>

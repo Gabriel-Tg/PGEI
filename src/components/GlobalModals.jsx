@@ -176,9 +176,14 @@ export default function GlobalModals({
           <div className="grid">
             <div><div className="label">Operador *</div><input className="input" value={stopModal.operador} onChange={e=>setStopModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
             <div className="grid2">
-              <div><div className="label">Data *</div><input type="date" className="input" value={safeDate(stopModal.data)} onChange={e=>setStopModal(v=>({...v, data:e.target.value}))}/></div>
-              <div><div className="label">Hora *</div><input type="time" className="input" value={safeTime(stopModal.hora)} onChange={e=>setStopModal(v=>({...v, hora:e.target.value}))}/></div>
+              <div><div className="label">Data *</div><input type="date" className="input" value={safeDate(stopModal.data)} onChange={e=>setStopModal(v=>({...v, data:e.target.value}))} disabled={stopModal.autoStop}/></div>
+              <div><div className="label">Hora *</div><input type="time" className="input" value={safeTime(stopModal.hora)} onChange={e=>setStopModal(v=>({...v, hora:e.target.value}))} disabled={stopModal.autoStop}/></div>
             </div>
+            {stopModal.autoStop && (
+              <div className="pet01-sensor-warning" style={{ marginBottom: 12 }}>
+                Data e hora foram preenchidas automaticamente pelo sensor e não podem ser alteradas.
+              </div>
+            )}
             <div>
               <div className="label">Motivo da Parada *</div>
               <select className="select" value={stopModal.motivo} onChange={e=>setStopModal(v=>({...v, motivo:e.target.value}))}>

@@ -5,7 +5,7 @@
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   gap: 18px;
-  min-height: calc(100vh - 40px);
+  min-height: auto;
   transition: grid-template-columns 0.28s ease, gap 0.28s ease;
 }
 
@@ -53,7 +53,7 @@
 .dashboard-sidebar {
   position: sticky;
   top: 20px;
-  height: calc(100vh - 40px);
+  max-height: none;
   display: flex;
   flex-direction: column;
   gap: 16px;

@@ -112,7 +112,7 @@ export default function AdminPanel() {
         supabase.from('companies').select('id, name, slug, subdomain, active, is_demo, created_at').order('created_at', { ascending: false }),
         supabase
           .from('machines')
-          .select('id, company_id, machine_code, machine_name, route_slug, sector, active, apontamento_tipo, esp32_id, sensor_token_last4, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, created_at')
+          .select('id, company_id, machine_code, machine_name, route_slug, sector, active, apontamento_tipo, esp32_id, sensor_token_last4, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_auto_stopped, sensor_auto_stop_at, created_at')
           .order('created_at', { ascending: false }),
       ])
 
@@ -283,6 +283,25 @@ export default function AdminPanel() {
       return
     }
     await loadData()
+  }
+
+  async function handleToggleSensorReception(machine) {
+    if (!machine?.id) return
+    const currentStopped = Boolean(machine.sensor_auto_stopped)
+    const payload = {
+      sensor_auto_stopped: !currentStopped,
+      sensor_auto_stop_at: currentStopped ? null : new Date().toISOString(),
+    }
+
+    const { error } = await supabase.from('machines').update(payload).eq('id', machine.id)
+    if (error) {
+      alert(error.message || 'Falha ao alterar recepção do sensor.')
+      return
+    }
+
+    setMachines((prev) => prev.map((item) => (
+      item.id === machine.id ? { ...item, ...payload } : item
+    )))
   }
 
   async function handleCreateClient(event) {
@@ -526,6 +545,7 @@ export default function AdminPanel() {
           onEditMachine={openEditMachineModal}
           onDeleteMachine={handleDeleteMachine}
           onChangeApontamentoType={handleMachineApontamentoTypeChange}
+          onToggleSensorReception={handleToggleSensorReception}
         />
       )
     }

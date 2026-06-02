@@ -72,7 +72,8 @@
 }
 
 .sensor-table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .sensor-table {
@@ -184,8 +185,8 @@
 .sensor-history {
   display: grid;
   gap: 8px;
-  max-height: 560px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .sensor-event-row {

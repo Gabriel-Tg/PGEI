@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1"><stop offset="0" stop-color="#031322"/><stop offset="1" stop-color="#021224"/></linearGradient>
+  </defs>
+  <rect width="800" height="450" rx="14" fill="#000" />
+  <rect x="14" y="14" width="772" height="422" rx="10" fill="url(#bg)" />
+
+  <!-- TV header small -->
+  <rect x="30" y="32" width="320" height="36" rx="6" fill="#06182a" />
+  <text x="44" y="56" fill="#98d8ff" font-family="Inter" font-size="14">Painel de Gestão • Mural de Produção</text>
+
+  <!-- tiles -->
+  <rect x="30" y="90" width="220" height="120" rx="8" fill="#071e30" />
+  <rect x="266" y="90" width="220" height="120" rx="8" fill="#071e30" />
+  <rect x="502" y="90" width="260" height="220" rx="8" fill="#071e30" />
+
+  <!-- big uptime indicator -->
+  <circle cx="170" cy="170" r="36" fill="#0ea5ff" opacity="0.15" />
+  <text x="148" y="178" fill="#9be6ff" font-size="18" font-family="Inter">OEE 78%</text>
+
+  <!-- footer -->
+  <text x="36" y="420" fill="#6daedb" font-size="13" font-family="Inter">Atualizado: 00:02:18 • Próxima atualização automática em 00:00:42</text>
+</svg>

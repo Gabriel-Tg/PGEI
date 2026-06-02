@@ -41,6 +41,14 @@ export default function App() {
   const adminHosts = new Set(['painel.localhost', 'painel.techargos.com.br'])
   const isAdminHost = adminHosts.has(hostname)
 
+  const labels = hostname.split('.')
+  const subdomain = labels[0] || ''
+  const normalizedSubdomain = normalizeTenantKey(subdomain)
+  const isProdTenantDomain = hostname.endsWith('.techargos.com.br') && labels.length >= 3
+  const isLocalTenantDomain = hostname.endsWith('.localhost') && labels.length >= 2
+  const isTenantDomain = (isProdTenantDomain || isLocalTenantDomain) && subdomain && !['www', 'painel'].includes(subdomain)
+  const tenantSubdomainKey = isTenantDomain ? normalizedSubdomain : null
+
   function normalizeTenantKey(value) {
     return String(value || '')
       .trim()
@@ -68,9 +76,10 @@ export default function App() {
       const labels = hostname.split('.')
       const subdomain = labels[0] || ''
       const normalizedSubdomain = normalizeTenantKey(subdomain)
-      const isProdTenantDomain = hostname.endsWith('.techargos.com.br') && labels.length >= 4
+      const isProdTenantDomain = hostname.endsWith('.techargos.com.br') && labels.length >= 3
       const isLocalTenantDomain = hostname.endsWith('.localhost') && labels.length >= 2
       const isTenantDomain = (isProdTenantDomain || isLocalTenantDomain) && subdomain && !['www', 'painel'].includes(subdomain)
+      const resolvedTenantSubdomain = isTenantDomain ? normalizedSubdomain : null
 
       if (!isTenantDomain) {
         if (!cancelled) {
@@ -94,7 +103,9 @@ export default function App() {
           const { data } = await supabase
             .from('companies')
             .select('id, name, slug, subdomain, is_demo, active')
-            .or(`subdomain.ilike.${normalizedSubdomain},slug.ilike.${normalizedSubdomain}`)
+            .or(
+              `subdomain.ilike.${normalizedSubdomain},subdomain.ilike.${hostname},slug.ilike.${normalizedSubdomain},slug.ilike.${hostname}`
+            )
             .eq('active', true)
             .maybeSingle()
 
@@ -121,13 +132,13 @@ export default function App() {
   }
 
   if (tenantCompany) {
-    return <TenantApp tenantCompany={tenantCompany} />
+    return <TenantApp tenantCompany={tenantCompany} tenantSubdomainKey={tenantSubdomainKey} />
   }
 
   return <SiteApp />
 }
 
-function TenantApp({ tenantCompany = null }){
+function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   const [tab, setTab] = useState('login')
   const [tabDirection, setTabDirection] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
@@ -479,7 +490,17 @@ function TenantApp({ tenantCompany = null }){
     return String(value || '')
       .trim()
       .toLowerCase()
-      .replace(/^\/+/, '')
+      .replace(/^\/+|\/+$/g, '')
+  }
+
+  function getMachineRouteSlugs(machine) {
+    const primarySlug = normalizeRouteSlug(machine?.route_slug) || normalizeRouteSlug(getDefaultRouteSlug(machine?.machine_code))
+    const slugs = new Set([
+      primarySlug,
+      primarySlug.replace(/-0(\d+)$/, '-$1'),
+      primarySlug.replace(/-/g, ''),
+    ])
+    return Array.from(slugs).filter(Boolean)
   }
 
   useEffect(() => {
@@ -496,7 +517,7 @@ function TenantApp({ tenantCompany = null }){
       setMachinesLoading(true)
       const { data, error } = await supabase
         .from('machines')
-        .select('id, company_id, machine_code, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at')
+        .select('id, company_id, machine_code, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count')
         .eq('company_id', tenantCompanyId)
         .eq('active', true)
         .order('machine_code', { ascending: true })
@@ -786,8 +807,8 @@ function TenantApp({ tenantCompany = null }){
         <Login
           onAuthenticated={handleLoginSuccess}
           showAdminShortcut={false}
-          tenantSubdomain={tenantCompany?.subdomain || null}
-          useUsernameLogin={!!tenantCompany?.subdomain}
+          tenantSubdomain={tenantSubdomainKey || tenantCompany?.subdomain || null}
+          useUsernameLogin={!!tenantSubdomainKey || !!tenantCompany?.subdomain}
         />
       </div>
     )
@@ -798,8 +819,8 @@ function TenantApp({ tenantCompany = null }){
       <div className="app">
         {renderBrandBar('Acesso Admin')}
         <Login
-          tenantSubdomain={tenantCompany?.subdomain || null}
-          useUsernameLogin={!!tenantCompany?.subdomain}
+          tenantSubdomain={tenantSubdomainKey || tenantCompany?.subdomain || null}
+          useUsernameLogin={!!tenantSubdomainKey || !!tenantCompany?.subdomain}
         />
       </div>
     )
@@ -831,8 +852,8 @@ function TenantApp({ tenantCompany = null }){
 
   const resolvedMachine = isMachineRoute
     ? tenantMachines.find((m) => {
-        const slug = normalizeRouteSlug(m.route_slug) || normalizeRouteSlug(getDefaultRouteSlug(m.machine_code))
-        return slug === normalizeRouteSlug(machineSlug)
+        const normalizedMachineSlug = normalizeRouteSlug(machineSlug)
+        return getMachineRouteSlugs(m).includes(normalizedMachineSlug)
       })
     : null
 
@@ -934,8 +955,8 @@ function TenantApp({ tenantCompany = null }){
       return (
         <Login
           onAuthenticated={handleLoginSuccess}
-          tenantSubdomain={tenantCompany?.subdomain || null}
-          useUsernameLogin={!!tenantCompany?.subdomain}
+          tenantSubdomain={tenantSubdomainKey || tenantCompany?.subdomain || null}
+          useUsernameLogin={!!tenantSubdomainKey || !!tenantCompany?.subdomain}
           authenticatedTitle={authUser && tenantAccessChecked && !hasAccess ? 'Acesso negado' : 'Acesso liberado'}
           authenticatedDescription={authUser && tenantAccessChecked && !hasAccess
             ? 'Este usuário não possui acesso para este cliente.'

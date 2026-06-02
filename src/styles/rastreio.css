@@ -194,7 +194,7 @@
 }
 
 .rastreio-summary-table-wrap {
-  overflow: auto;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--card-2);

@@ -649,7 +649,7 @@ export default function useOrders(clientId = null){
     if (res.data) patchOrderLocal(res.data.id, res.data)
   }
 
-  const onStatusChange = async (order, targetStatus) => {
+  const onStatusChange = async (order, targetStatus, options = {}) => {
     const atual = order.status
     if (jaIniciou(order) && targetStatus === 'AGUARDANDO') {
       return { action: 'alert', message: 'Após iniciar a produção, não é permitido voltar para "Aguardando".' }
@@ -698,6 +698,9 @@ export default function useOrders(clientId = null){
     }
 
     if (targetStatus === 'PARADA' && atual !== 'PARADA') {
+      if (options.autoStop) {
+        await setStatus(order, 'PARADA')
+      }
       const now=new Date()
       return { action: 'openStopModal', payload: { order, operador:'', motivo: MOTIVOS_PARADA[0], obs:'', data: now.toISOString().slice(0,10), hora: now.toTimeString().slice(0,5) } }
     }

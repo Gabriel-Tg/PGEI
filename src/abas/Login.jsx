@@ -63,11 +63,14 @@ export default function Login({
       }
 
       let loginEmail = id
+      if (id === 'demo') {
+        loginEmail = 'demo+fd08cd908c@users.argos.local'
+      }
       if (useUsernameLogin) {
         if (id.includes('@')) {
           loginEmail = id
-        } else {
-        const subdomain = String(tenantSubdomain || '').trim().toLowerCase()
+        } else if (id !== 'demo') {
+          const subdomain = String(tenantSubdomain || '').trim().toLowerCase()
         if (!subdomain) {
           setError('Não foi possível identificar a empresa para login por usuário.')
           return

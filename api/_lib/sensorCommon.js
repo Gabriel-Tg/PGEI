@@ -7,7 +7,7 @@ function getEnv(name, fallback = '') {
 
 export function getSupabaseAdmin() {
   const url = getEnv('SUPABASE_URL', getEnv('VITE_SUPABASE_URL'))
-  const key = getEnv('SUPABASE_SERVICE_ROLE_KEY')
+  const key = getEnv('SUPABASE_SERVICE_ROLE_KEY', getEnv('VITE_SUPABASE_SERVICE_ROLE_KEY'))
   if (!url || !key) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment.')
   }
@@ -76,7 +76,7 @@ export async function resolveAuthorizedMachine({ supabase, machineCode, esp32Id,
   const tokenHash = sha256(token)
   let query = supabase
     .from('machines')
-    .select('id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at')
+    .select('id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count')
     .eq('machine_code', machineCode)
     .eq('active', true)
 

@@ -1,6 +1,6 @@
 .tv-wrapper {
   min-height: 100vh;
-  height: 100vh;
+  height: auto;
   width: 100%;
   padding: 8px;
   display: grid;

@@ -1,0 +1,471 @@
+/* ============================================================================
+   MACHINE CARD COMPONENT - Dashboard Gerencial de Máquinas
+   ============================================================================ */
+
+.machine-card {
+  border: 1px solid rgba(63, 133, 205, 0.35);
+  border-radius: 16px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(6, 18, 36, 0.92), rgba(3, 11, 24, 0.96));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  --icon-color: #9ca3af;
+}
+
+/* Status-specific styling */
+.machine-card.status-producing {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, rgba(5, 25, 15, 0.92), rgba(3, 20, 12, 0.96));
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.15), inset 0 1px 0 rgba(16, 185, 129, 0.2);
+}
+
+.machine-card.status-producing:hover {
+  border-color: rgba(16, 185, 129, 0.7);
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.25), inset 0 1px 0 rgba(16, 185, 129, 0.3);
+  transform: translateY(-2px);
+}
+
+.machine-card.status-low-efficiency {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: linear-gradient(135deg, rgba(30, 25, 5, 0.92), rgba(25, 20, 3, 0.96));
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.15), inset 0 1px 0 rgba(245, 158, 11, 0.2);
+}
+
+.machine-card.status-low-efficiency:hover {
+  border-color: rgba(245, 158, 11, 0.7);
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.25), inset 0 1px 0 rgba(245, 158, 11, 0.3);
+  transform: translateY(-2px);
+}
+
+.machine-card.status-stopped {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: linear-gradient(135deg, rgba(30, 10, 10, 0.92), rgba(25, 8, 8, 0.96));
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.15), inset 0 1px 0 rgba(239, 68, 68, 0.2);
+}
+
+.machine-card.status-stopped:hover {
+  border-color: rgba(239, 68, 68, 0.7);
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(239, 68, 68, 0.3);
+  transform: translateY(-2px);
+}
+
+.machine-card.status-offline {
+  border-color: rgba(156, 163, 175, 0.35);
+  background: linear-gradient(135deg, rgba(15, 18, 23, 0.92), rgba(12, 14, 18, 0.96));
+  box-shadow: 0 0 20px rgba(156, 163, 175, 0.08), inset 0 1px 0 rgba(156, 163, 175, 0.1);
+}
+
+.machine-card.status-offline:hover {
+  border-color: rgba(156, 163, 175, 0.45);
+  box-shadow: 0 0 25px rgba(156, 163, 175, 0.12), inset 0 1px 0 rgba(156, 163, 175, 0.15);
+  transform: translateY(-2px);
+}
+
+/* Status Badge */
+.machine-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+}
+
+.machine-status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d9ecff;
+  backdrop-filter: blur(8px);
+}
+
+.machine-card.status-producing .machine-status {
+  background: rgba(16, 185, 129, 0.2);
+  color: #86efac;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.machine-card.status-low-efficiency .machine-status {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.machine-card.status-stopped .machine-status {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.machine-card.status-offline .machine-status {
+  background: rgba(156, 163, 175, 0.15);
+  color: #d1d5db;
+  border-color: rgba(156, 163, 175, 0.3);
+}
+
+/* Icon Container */
+.machine-icon-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+  padding: 12px;
+  margin: 0 -4px;
+}
+
+.machine-status-indicator {
+  width: 80px;
+  height: 80px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+.machine-card.status-producing .machine-status-indicator {
+  animation: status-pulse-active 1.5s ease-in-out infinite;
+}
+
+.machine-icon-text {
+  font-size: 32px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 2px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes status-pulse-active {
+  0%, 100% {
+    opacity: 0.9;
+    transform: scale(1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Machine Info Section */
+.machine-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #d9ecff;
+  font-size: 13px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.2s ease;
+}
+
+.info-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.info-row .label {
+  color: #93bad9;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.info-row .value {
+  color: #f1f8ff;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Machine ID - Prominent */
+.info-row.machine-id {
+  background: rgba(255, 255, 255, 0.06);
+  border-left: 3px solid rgba(63, 133, 205, 0.5);
+  padding-left: 10px;
+}
+
+.info-row.machine-id .value {
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+
+/* OEE - Main Highlight */
+.info-row.oee {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  border: 1px solid rgba(63, 133, 205, 0.3);
+  font-size: 14px;
+}
+
+.info-row.oee .label {
+  font-weight: 600;
+  color: #b3d9ff;
+}
+
+.info-row.oee .value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* OEE Colors based on efficiency */
+.info-row.oee.high {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.info-row.oee.high .value {
+  color: #86efac;
+}
+
+.info-row.oee.medium {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.info-row.oee.medium .value {
+  color: #fcd34d;
+}
+
+.info-row.oee.low {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.info-row.oee.low .value {
+  color: #fca5a5;
+}
+
+/* Efficiency Bar */
+.efficiency-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.efficiency-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+.efficiency-bar .bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease, background-color 0.3s ease;
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.efficiency-bar.medium .bar-fill {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.efficiency-bar.low .bar-fill {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.efficiency-label {
+  font-size: 11px;
+  color: #8fb5d6;
+  text-align: right;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ============================================================================
+   MACHINES GRID - Responsive Layout
+   ============================================================================ */
+
+.machines-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+/* Desktop: 4 columns */
+@media (min-width: 1440px) {
+  .machines-grid-container {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Large screens: 3 columns */
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .machines-grid-container {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Tablet: 2 columns */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .machines-grid-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile: 1 column */
+@media (max-width: 767px) {
+  .machines-grid-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================================
+   MACHINES DASHBOARD HEADER
+   ============================================================================ */
+
+.machines-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.machines-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(6, 18, 36, 0.92), rgba(3, 11, 24, 0.96));
+  border: 1px solid rgba(63, 133, 205, 0.35);
+  border-radius: 16px;
+  padding: 16px;
+  flex-wrap: wrap;
+}
+
+.machines-header h2 {
+  margin: 0;
+  color: #eff8ff;
+  font-size: 22px;
+}
+
+.machines-header p {
+  margin: 0;
+  color: #8fb5d6;
+  font-size: 13px;
+}
+
+.machines-clock {
+  font-size: 12px;
+  color: #8fb5d6;
+  white-space: nowrap;
+}
+
+.machines-header-content {
+  flex: 1;
+}
+
+.machines-header-content h2,
+.machines-header-content p {
+  margin: 0;
+}
+
+.machines-header-content p {
+  margin-top: 4px;
+}
+
+/* ============================================================================
+   MACHINES SUMMARY KPIs
+   ============================================================================ */
+
+.machines-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.machines-kpi {
+  border: 1px solid rgba(59, 124, 194, 0.33);
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(170deg, rgba(4, 17, 33, 0.96), rgba(8, 27, 48, 0.9));
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.machines-kpi:hover {
+  border-color: rgba(63, 133, 205, 0.5);
+  background: linear-gradient(170deg, rgba(6, 22, 42, 0.98), rgba(10, 32, 56, 0.94));
+  transform: translateY(-1px);
+}
+
+.machines-kpi strong {
+  display: block;
+  font-size: 24px;
+  color: #f1f8ff;
+  margin-bottom: 4px;
+}
+
+.machines-kpi span {
+  font-size: 12px;
+  color: #93bad9;
+}
+
+.machines-kpi.status-producing strong {
+  color: #86efac;
+}
+
+.machines-kpi.status-low-efficiency strong {
+  color: #fcd34d;
+}
+
+.machines-kpi.status-stopped strong {
+  color: #fca5a5;
+}
+
+.machines-kpi.status-offline strong {
+  color: #d1d5db;
+}
+
+/* ============================================================================
+   Empty State
+   ============================================================================ */
+
+.machines-empty {
+  grid-column: 1 / -1;
+  border: 1px dashed rgba(91, 147, 206, 0.5);
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  color: #9dbdd8;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.machines-empty p {
+  margin: 0;
+  font-size: 14px;
+}

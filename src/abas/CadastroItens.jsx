@@ -45,7 +45,6 @@ const INSUMO_TECH_DEFAULTS = {
   unit_value: 0,
   resin: '-',
 }
-const PRODUCT_IMAGES_BUCKET = import.meta.env.VITE_SUPABASE_PRODUCT_IMAGES_BUCKET || 'product-images'
 
 // Cabeçalhos de CSV
 const REQUIRED_HEADERS = ['code', 'description']
@@ -341,8 +340,6 @@ export default function CadastroItens({ canManage = false, clientId = null, comp
     embalagem: '',
   })
   const [formErr, setFormErr] = useState(null)
-  const [imageFile, setImageFile] = useState(null)
-  const [removeProductImage, setRemoveProductImage] = useState(false)
 
   const resetForm = () => {
     setForm({
@@ -361,31 +358,10 @@ export default function CadastroItens({ canManage = false, clientId = null, comp
       padrao: '',
       embalagem: '',
     })
-    setImageFile(null)
-    setRemoveProductImage(false)
     setFormErr(null)
   }
 
-  const uploadProductImage = async (itemCode, file) => {
-    const normalizedCode = cleanText(itemCode)
-    if (!normalizedCode) throw new Error('Código do item inválido para upload da imagem.')
-    if (!(file instanceof File)) throw new Error('Arquivo de imagem inválido.')
 
-    const safeCode = sanitizeCodeForPath(normalizedCode)
-    const ext = getFileExtension(file.name)
-    const filePath = `${safeCode}.${ext}`
-
-    const { error: uploadError } = await supabase.storage
-      .from(PRODUCT_IMAGES_BUCKET)
-      .upload(filePath, file, { upsert: true, contentType: file.type || undefined })
-
-    if (uploadError) throw uploadError
-
-    const { data } = supabase.storage.from(PRODUCT_IMAGES_BUCKET).getPublicUrl(filePath)
-    const publicUrl = String(data?.publicUrl || '').trim()
-    if (!publicUrl) throw new Error('Não foi possível obter a URL pública da imagem.')
-    return `${publicUrl}?v=${Date.now()}`
-  }
 
   const startEdit = (item) => {
     const code = cleanText(item.code)
@@ -407,8 +383,6 @@ export default function CadastroItens({ canManage = false, clientId = null, comp
       cliente: cleanText(item.cliente),
       estoque_minimo: String(item.estoque_minimo ?? ''),
     })
-    setImageFile(null)
-    setRemoveProductImage(false)
     setFormErr(null)
     setOpen(true)
   }
@@ -452,15 +426,6 @@ export default function CadastroItens({ canManage = false, clientId = null, comp
     const err = validate()
     if (err) { setFormErr(err); return }
     const code = cleanText(form.code)
-    let uploadedImageUrl = null
-    if (form.itemType === 'insumo' && imageFile) {
-      try {
-        uploadedImageUrl = await uploadProductImage(code, imageFile)
-      } catch (imgErr) {
-        setFormErr(`Não foi possível anexar a imagem: ${imgErr?.message || 'erro desconhecido'}`)
-        return
-      }
-    }
 
     const payloadBase = {
       code,
@@ -481,8 +446,6 @@ export default function CadastroItens({ canManage = false, clientId = null, comp
           part_weight_g: toPosFloat(form.part_weight_g) ?? INSUMO_TECH_DEFAULTS.part_weight_g,
           unit_value: toNonNegFloat(form.unit_value) ?? INSUMO_TECH_DEFAULTS.unit_value,
           resin: cleanText(form.resin) || INSUMO_TECH_DEFAULTS.resin,
-          ...(removeProductImage ? { image_url: null } : {}),
-          ...(uploadedImageUrl ? { image_url: uploadedImageUrl } : {}),
         }
       : {
           ...payloadBase,
@@ -908,56 +871,7 @@ export default function CadastroItens({ canManage = false, clientId = null, comp
                     <Field label="Estoque mínimo*" name="estoque_minimo" value={form.estoque_minimo} onChange={onChange} inputMode="decimal" placeholder="Ex.: 100" />
                   </div>
 
-                  <div style={grid2}>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                      <span style={{ fontSize: 12, opacity: 0.9 }}>Anexar imagem</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null
-                          setImageFile(file)
-                          if (file) {
-                            setRemoveProductImage(false)
-                          }
-                        }}
-                        style={input}
-                      />
-                    </label>
-                  </div>
 
-                  {imageFile && (
-                    <div style={{ fontSize: 12, opacity: 0.85 }}>
-                      {`Imagem selecionada: ${imageFile.name}`}
-                    </div>
-                  )}
-
-                  {!imageFile && !removeProductImage && editing?.image_url && (
-                    <div style={{ fontSize: 12, opacity: 0.85 }}>
-                      Imagem atual vinculada para este insumo.
-                    </div>
-                  )}
-
-                  {removeProductImage && (
-                    <div style={{ fontSize: 12, opacity: 0.85 }}>
-                      A imagem atual será removida ao salvar.
-                    </div>
-                  )}
-
-                  {editing?.id && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRemoveProductImage(true)
-                          setImageFile(null)
-                        }}
-                        style={btnGhost}
-                      >
-                        Remover imagem vinculada
-                      </button>
-                    </div>
-                  )}
                 </>
               ) : (
                 <>

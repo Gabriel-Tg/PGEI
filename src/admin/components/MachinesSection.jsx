@@ -11,7 +11,7 @@ function apontamentoLabel(tipo) {
   return 'Manual'
 }
 
-export default function MachinesSection({ machines, onEditMachine, onDeleteMachine, onChangeApontamentoType }) {
+export default function MachinesSection({ machines, onEditMachine, onDeleteMachine, onChangeApontamentoType, onToggleSensorReception }) {
   return (
     <section className="admin-section-card">
       <div className="admin-section-head">
@@ -29,6 +29,7 @@ export default function MachinesSection({ machines, onEditMachine, onDeleteMachi
               <th>Rota</th>
               <th>Status</th>
               <th>Apontamento</th>
+              <th>Recepção</th>
               <th>Troca Rápida</th>
               <th>Acoes</th>
             </tr>
@@ -49,6 +50,11 @@ export default function MachinesSection({ machines, onEditMachine, onDeleteMachi
                   </span>
                 </td>
                 <td>
+                  <span className={`badge ${machine.sensor_auto_stopped ? 'inactive' : 'active'}`}>
+                    {machine.sensor_auto_stopped ? 'Desligada' : 'Ligada'}
+                  </span>
+                </td>
+                <td>
                   <select
                     className="admin-quick-select"
                     value={String(machine.apontamento_tipo || 'manual')}
@@ -63,6 +69,13 @@ export default function MachinesSection({ machines, onEditMachine, onDeleteMachi
                   <div className="admin-action-row">
                     <button type="button" className="btn-secondary" onClick={() => onEditMachine(machine)}>
                       Editar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => onToggleSensorReception?.(machine)}
+                    >
+                      {machine.sensor_auto_stopped ? 'Ativar recepção' : 'Desativar recepção'}
                     </button>
                     <button type="button" className="btn-secondary" onClick={() => onDeleteMachine(machine.id)}>
                       Excluir

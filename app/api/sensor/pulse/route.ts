@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
@@ -8,7 +7,7 @@ import crypto from 'crypto';
 
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   
   if (!url || !key) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
@@ -46,13 +45,13 @@ function parsePositiveInt(value: unknown, fallback = 0): number {
   return int > 0 ? int : fallback;
 }
 
-function getRequestIp(req: NextRequest): string {
+function getRequestIp(req: Request): string {
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0].trim();
   return req.headers.get('x-real-ip') || 'unknown';
 }
 
-function readSensorToken(req: NextRequest): string {
+function readSensorToken(req: Request): string {
   const headerToken = req.headers.get('x-sensor-token') || '';
   if (headerToken) return headerToken;
   
@@ -68,6 +67,13 @@ function parseProductCode(product: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 // ================================================================================
@@ -106,7 +112,7 @@ async function resolveAuthorizedMachine(
     const { data, error } = await supabase
       .from('machines')
       .select(
-        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash'
+        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count'
       )
       .eq('machine_code', machineCode)
       .eq('active', true)
@@ -131,7 +137,7 @@ async function resolveAuthorizedMachine(
 // POST /api/sensor/pulse
 // ================================================================================
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     console.log('📥 Requisição recebida em /api/sensor/pulse');
     console.log('Method:', request.method);
@@ -143,7 +149,7 @@ export async function POST(request: NextRequest) {
       body = await request.json();
     } catch (e) {
       console.error('Erro ao parsear JSON:', e);
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
     }
 
     console.log('📨 Body recebido:', body);
@@ -155,10 +161,7 @@ export async function POST(request: NextRequest) {
 
     if (!token) {
       console.warn('⚠️ Token não fornecido');
-      return NextResponse.json(
-        { error: 'Missing sensor token' },
-        { status: 401 }
-      );
+      return jsonResponse({ error: 'Missing sensor token' }, 401);
     }
 
     const machineCode = normalizeMachineCode(body.machine_id);
@@ -171,10 +174,7 @@ export async function POST(request: NextRequest) {
         esp32Id,
         pulseCount
       });
-      return NextResponse.json(
-        { error: 'machine_id, esp32_id and pulse_count are required' },
-        { status: 400 }
-      );
+      return jsonResponse({ error: 'machine_id, esp32_id and pulse_count are required' }, 400);
     }
 
     console.log('✓ Validação básica OK:', { machineCode, esp32Id, pulseCount });
@@ -185,9 +185,9 @@ export async function POST(request: NextRequest) {
       supabase = getSupabaseAdmin();
     } catch (err: any) {
       console.error('❌ Erro Supabase:', err.message);
-      return NextResponse.json(
+      return jsonResponse(
         { error: err.message },
-        { status: 500 }
+        500
       );
     }
 
@@ -201,9 +201,9 @@ export async function POST(request: NextRequest) {
 
     if (!machine) {
       console.warn('❌ Máquina/token inválido:', { machineCode, esp32Id });
-      return NextResponse.json(
+      return jsonResponse(
         { error: 'Invalid machine/token pairing' },
-        { status: 403 }
+        403
       );
     }
 
@@ -215,9 +215,9 @@ export async function POST(request: NextRequest) {
     const rateKey = `${companyId}:${machineCode}:${esp32Id}:${sourceIp || 'noip'}`;
     if (!canAcceptRate(rateKey)) {
       console.warn('⚠️ Rate limit excedido:', rateKey);
-      return NextResponse.json(
+      return jsonResponse(
         { error: 'Rate limit exceeded' },
-        { status: 429 }
+        429
       );
     }
 
@@ -234,9 +234,9 @@ export async function POST(request: NextRequest) {
 
     if (orderError) {
       console.error('Erro ao buscar O.P.:', orderError);
-      return NextResponse.json(
+      return jsonResponse(
         { error: 'Unable to find active order' },
-        { status: 500 }
+        500
       );
     }
 
@@ -262,11 +262,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const producedQuantity = activeOrder ? pulseCount * cavitiesUsed : 0;
+    const ignoreCountLeft = Number(machine.sensor_ignore_pulse_count || 0)
+    const operationMode = String(machine.sensor_operation_mode || 'automatic')
+    const isSemiAutomaticIgnore = operationMode === 'semi_automatic' && ignoreCountLeft > 0
+    const ignoreReason = isSemiAutomaticIgnore
+      ? 'SEMI_AUTOMATIC'
+      : (!activeOrder ? 'NO_ACTIVE_ORDER' : null)
+    const isIgnoredEvent = isSemiAutomaticIgnore || !activeOrder
+    const producedQuantity = isIgnoredEvent ? 0 : (activeOrder ? pulseCount * cavitiesUsed : 0)
     console.log('📊 Produção calculada:', {
       pulseCount,
       cavitiesUsed,
-      total: producedQuantity
+      total: producedQuantity,
+      isIgnoredEvent,
+      ignoreReason,
     });
 
     // Salvar evento
@@ -283,8 +292,8 @@ export async function POST(request: NextRequest) {
       source_ip: sourceIp,
       created_by: 'esp32_sensor',
       event_uid: eventId,
-      is_ignored: !activeOrder,
-      ignore_reason: activeOrder ? null : 'NO_ACTIVE_ORDER'
+      is_ignored: isIgnoredEvent,
+      ignore_reason: ignoreReason,
     };
 
     const { data: eventRows, error: eventError } = await supabase
@@ -296,14 +305,14 @@ export async function POST(request: NextRequest) {
       console.error('Erro ao salvar evento:', eventError);
       if (String(eventError.code) === '23505') {
         // Duplicado
-        return NextResponse.json(
+        return jsonResponse(
           { ok: true, duplicate: true, machine_id: machineCode },
-          { status: 200 }
+          200
         );
       }
-      return NextResponse.json(
+      return jsonResponse(
         { error: eventError.message || 'Unable to save event' },
-        { status: 500 }
+        500
       );
     }
 
@@ -333,12 +342,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Atualizar status da máquina
+    const machinePayload: any = {
+      sensor_status: isSemiAutomaticIgnore ? 'online' : 'recebendo_pulsos'
+    }
+
+    if (isSemiAutomaticIgnore) {
+      machinePayload.sensor_ignore_pulse_count = Math.max(ignoreCountLeft - 1, 0)
+      machinePayload.sensor_last_heartbeat_at = nowIso()
+    } else {
+      machinePayload.sensor_last_pulse_at = nowIso()
+    }
+
     const { error: machineError } = await supabase
       .from('machines')
-      .update({
-        sensor_last_pulse_at: nowIso(),
-        sensor_status: 'recebendo_pulsos'
-      })
+      .update(machinePayload)
       .eq('id', machine.id);
 
     if (machineError) {
@@ -354,18 +371,21 @@ export async function POST(request: NextRequest) {
       pulse_count: pulseCount,
       cavities_used: cavitiesUsed,
       produced_quantity: producedQuantity,
-      ignored: !activeOrder,
+      ignored: isIgnoredEvent,
+      ignore_reason: ignoreReason,
+      remaining_ignored_cycles: isSemiAutomaticIgnore ? Math.max(ignoreCountLeft - 1, 0) : 0,
+      sensor_operation_mode: operationMode,
       event_id: event?.id
     };
 
     console.log('✅ Response:', response);
-    return NextResponse.json(response, { status: 200 });
+    return jsonResponse(response, 200);
 
   } catch (error: any) {
     console.error('❌ Erro não capturado:', error);
-    return NextResponse.json(
+    return jsonResponse(
       { error: error.message || 'Internal server error' },
-      { status: 500 }
+      500
     );
   }
 }
@@ -375,8 +395,8 @@ export async function POST(request: NextRequest) {
 // ================================================================================
 
 export async function GET() {
-  return NextResponse.json(
+  return jsonResponse(
     { error: 'Method not allowed. Use POST' },
-    { status: 405 }
+    405
   );
 }

@@ -202,11 +202,18 @@ export default async function handler(req, res) {
     }
   }
 
-  const producedQuantity = activeOrder ? pulseCount * cavitiesUsed : 0
+  const ignoreCountLeft = Number(machine.sensor_ignore_pulse_count || 0)
+  const operationMode = String(machine.sensor_operation_mode || 'automatic')
+  const isSemiAutomaticIgnore = operationMode === 'semi_automatic' && ignoreCountLeft > 0
+  const ignoreReason = isSemiAutomaticIgnore
+    ? 'SEMI_AUTOMATIC'
+    : (!activeOrder ? 'NO_ACTIVE_ORDER' : null)
+  const isIgnoredEvent = isSemiAutomaticIgnore || !activeOrder
+  const producedQuantity = isIgnoredEvent ? 0 : (activeOrder ? pulseCount * cavitiesUsed : 0)
 
   const nowMs = Date.now()
   const previousPulseMs = machine.sensor_last_pulse_at ? new Date(machine.sensor_last_pulse_at).getTime() : 0
-  const cycleRealSeconds = previousPulseMs > 0 && nowMs > previousPulseMs
+  const cycleRealSeconds = !isIgnoredEvent && previousPulseMs > 0 && nowMs > previousPulseMs
     ? roundCycle((nowMs - previousPulseMs) / 1000 / Math.max(1, pulseCount))
     : null
 
@@ -233,8 +240,8 @@ export default async function handler(req, res) {
     source_ip: sourceIp || null,
     created_by: 'esp32',
     event_uid: eventUid || null,
-    is_ignored: !activeOrder,
-    ignore_reason: activeOrder ? null : 'NO_ACTIVE_ORDER',
+    is_ignored: isIgnoredEvent,
+    ignore_reason: ignoreReason,
     request_payload: {
       pulse_count: pulseCount,
       esp32_id: esp32Id,
@@ -242,6 +249,7 @@ export default async function handler(req, res) {
       received_at: nowIso(),
       cycle_real_seconds: cycleRealSeconds,
       cycle_avg_seconds: nextAvgCycle,
+      sensor_operation_mode: operationMode,
     },
   }
 
@@ -267,7 +275,7 @@ export default async function handler(req, res) {
 
   const event = (eventRows || [])[0]
 
-  if (cycleRealSeconds) {
+  if (!isIgnoredEvent && cycleRealSeconds) {
     const { error: cycleHistoryError } = await supabase
       .from('machine_cycle_history')
       .insert({
@@ -290,7 +298,7 @@ export default async function handler(req, res) {
     }
   }
 
-  if (activeOrder && producedQuantity > 0) {
+  if (!isIgnoredEvent && activeOrder && producedQuantity > 0) {
     const { error: entryError } = await supabase
       .from('injection_production_entries')
       .insert({
@@ -312,21 +320,31 @@ export default async function handler(req, res) {
     }
   }
 
-  const lastPulseMs = nowMs
+  const lastPulseMs = isSemiAutomaticIgnore ? (machine.sensor_last_pulse_at ? new Date(machine.sensor_last_pulse_at).getTime() : 0) : nowMs
   const lastHeartbeatMs = machine.sensor_last_heartbeat_at ? new Date(machine.sensor_last_heartbeat_at).getTime() : 0
   const sensorStatus = computeSensorStatus(lastPulseMs, lastHeartbeatMs)
 
+  const machineUpdate = {
+    sensor_status: sensorStatus,
+    sensor_auto_stopped: isAutoStopped,
+    sensor_auto_stop_at: isAutoStopped ? nowIso() : null,
+  }
+
+  if (!isSemiAutomaticIgnore) {
+    machineUpdate.sensor_last_pulse_at = nowIso()
+    machineUpdate.sensor_last_cycle_seconds = cycleRealSeconds
+    machineUpdate.sensor_avg_cycle_seconds = nextAvgCycle
+    machineUpdate.sensor_cycle_count = nextCycleCount
+  }
+
+  if (isSemiAutomaticIgnore) {
+    machineUpdate.sensor_ignore_pulse_count = Math.max(ignoreCountLeft - 1, 0)
+    machineUpdate.sensor_last_heartbeat_at = nowIso()
+  }
+
   const { error: machineUpdateError } = await supabase
     .from('machines')
-    .update({
-      sensor_last_pulse_at: nowIso(),
-      sensor_status: sensorStatus,
-      sensor_last_cycle_seconds: cycleRealSeconds,
-      sensor_avg_cycle_seconds: nextAvgCycle,
-      sensor_cycle_count: nextCycleCount,
-      sensor_auto_stopped: isAutoStopped,
-      sensor_auto_stop_at: isAutoStopped ? nowIso() : null,
-    })
+    .update(machineUpdate)
     .eq('id', machine.id)
 
   if (machineUpdateError) {
@@ -346,8 +364,10 @@ export default async function handler(req, res) {
     cycle_real_seconds: cycleRealSeconds,
     cycle_avg_seconds: nextAvgCycle,
     ciclo_cadastrado_seconds: cicloCadastrado > 0 ? Math.trunc(cicloCadastrado) : null,
-    ignored: !activeOrder,
-    ignore_reason: activeOrder ? null : 'NO_ACTIVE_ORDER',
+    ignored: isIgnoredEvent,
+    ignore_reason: ignoreReason,
+    remaining_ignored_cycles: isSemiAutomaticIgnore ? Math.max(ignoreCountLeft - 1, 0) : 0,
+    sensor_operation_mode: operationMode,
     sensor_status: sensorStatus,
     event_id: event?.id || null,
   })

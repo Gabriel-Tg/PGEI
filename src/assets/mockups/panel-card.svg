@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 260" width="420" height="260">
+  <rect width="420" height="260" rx="10" fill="#071826" />
+  <rect x="16" y="16" width="120" height="70" rx="8" fill="#052033" />
+  <rect x="148" y="16" width="256" height="70" rx="8" fill="#052033" />
+  <rect x="16" y="96" width="388" height="140" rx="8" fill="#041526" />
+  <polyline points="32,220 80,180 128,190 176,160 224,170 272,140 320,150 368,120" stroke="#60a5fa" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <text x="22" y="56" fill="#9bd2ff" font-size="14" font-family="Inter">Máquina P1</text>
+</svg>
