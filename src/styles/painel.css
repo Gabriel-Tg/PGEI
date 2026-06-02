@@ -692,8 +692,11 @@
 }
 
 .production-chart-meta .legend-goal {
-  border: 1px dashed rgba(128, 174, 255, 0.84);
-  background: rgba(92, 139, 255, 0.26);
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: #ffcf75;
+  box-shadow: 0 0 10px rgba(255, 207, 117, 0.42);
 }
 
 .production-chart-meta strong {
@@ -725,60 +728,88 @@
   border-top: 1px solid rgba(121, 163, 220, 0.1);
 }
 
-.premium-bars {
+.production-chart-plot {
+  --bucket-count: 1;
   position: relative;
   z-index: 1;
   display: grid;
+  grid-template-columns: repeat(var(--bucket-count), minmax(0, 1fr));
   align-items: end;
   gap: clamp(4px, 0.8vw, 10px);
   height: 146px;
   padding-top: 8px;
   border-bottom: 1px solid rgba(121, 163, 220, 0.22);
+  cursor: crosshair;
+  touch-action: none;
 }
 
-.premium-bar-wrap {
+.goal-line-chart {
+  position: absolute;
+  inset: 8px 0 22px;
+  z-index: 4;
+  width: 100%;
+  height: calc(100% - 30px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.goal-line-chart polyline {
+  fill: none;
+  stroke: #ffcf75;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 7px rgba(255, 207, 117, 0.48));
+}
+
+.production-bar-slot {
+  --bar-height: 0%;
   position: relative;
+  z-index: 3;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   height: 100%;
   min-width: 0;
   padding: 0 0 22px;
-  border: 0;
-  border-radius: 6px 6px 0 0;
-  background: transparent;
-  cursor: crosshair;
-  outline: none;
+  pointer-events: none;
 }
 
-.premium-bar-wrap:focus-visible {
-  box-shadow: 0 0 0 3px rgba(52, 211, 255, 0.22);
-}
-
-.premium-bar-wrap .bar-real,
-.premium-bar-wrap .bar-goal {
+.production-bar-slot::before {
+  content: "";
   position: absolute;
-  bottom: 22px;
+  inset: 4px -3px 18px;
+  border-radius: 8px 8px 0 0;
+  background: rgba(93, 153, 228, 0.04);
+  opacity: 1;
+}
+
+.production-bar-real {
+  position: absolute;
+  bottom: 0;
   display: block;
-  min-height: 8px;
-  border-radius: 5px 5px 0 0;
+  width: clamp(9px, 54%, 18px);
+  height: var(--bar-height);
+  min-height: 6px;
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, #66e2ff 0%, #2f9cff 58%, #1e62d0 100%);
+  box-shadow: 0 10px 18px rgba(38, 124, 255, 0.22), 0 0 18px rgba(52, 211, 255, 0.24);
+  animation: barRise 0.55s ease both;
   transition: height 0.28s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 
-.premium-bar-wrap .bar-goal {
-  width: min(100%, 18px);
-  background: rgba(92, 139, 255, 0.28);
-  border: 1px dashed rgba(128, 174, 255, 0.44);
+.production-bar-real::after {
+  content: "";
+  position: absolute;
+  inset: 1px 2px auto;
+  height: 36%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.32), transparent);
+  opacity: 0.72;
 }
 
-.premium-bar-wrap .bar-real {
-  width: min(72%, 12px);
-  background: linear-gradient(180deg, #34d3ff, #267cff);
-  box-shadow: 0 0 18px rgba(38, 124, 255, 0.34);
-  animation: barRise 0.55s ease both;
-}
-
-.premium-bar-wrap small {
+.production-bar-slot small {
   position: absolute;
   left: 50%;
   bottom: 0;
@@ -790,12 +821,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.premium-bar-wrap:hover .bar-real,
-.premium-bar-wrap:focus .bar-real {
-  transform: scaleX(1.12);
-  box-shadow: 0 0 24px rgba(52, 211, 255, 0.55);
 }
 
 .bar-floating-tooltip {
@@ -985,7 +1010,7 @@
     flex: 1;
   }
 
-  .premium-bars {
+  .production-chart-plot {
     gap: 6px;
   }
 }

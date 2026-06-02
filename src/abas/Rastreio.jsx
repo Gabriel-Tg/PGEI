@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import RastreioResumoPeriodo from './RastreioResumoPeriodo'
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
 import '../styles/rastreio.css'
@@ -24,7 +23,6 @@ const extractItemCodeFromOrderProduct = (product) => {
 }
 
 export default function Rastreio({ externalSearchRequest = null }) {
-  const [activeView, setActiveView] = useState('trace')
   const [osCode, setOsCode] = useState('')
   const [order, setOrder] = useState(null)
   const [scans, setScans] = useState([])
@@ -240,7 +238,6 @@ export default function Rastreio({ externalSearchRequest = null }) {
   useEffect(() => {
     const nextCode = String(externalSearchRequest?.code || '').trim()
     if (!nextCode) return
-    setActiveView('trace')
     setOsCode(nextCode)
     loadTraceByCode(nextCode)
   }, [externalSearchRequest, loadTraceByCode])
@@ -292,27 +289,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
 
   return (
     <div className="rastreio-page">
-      <div className="rastreio-view-nav" role="tablist" aria-label="Navegação do rastreio">
-        <button
-          type="button"
-          className={`rastreio-view-btn ${activeView === 'trace' ? 'active' : ''}`}
-          onClick={() => setActiveView('trace')}
-        >
-          Rastreio
-        </button>
-        <button
-          type="button"
-          className={`rastreio-view-btn ${activeView === 'summary' ? 'active' : ''}`}
-          onClick={() => setActiveView('summary')}
-        >
-          Resumo do Período
-        </button>
-      </div>
-
-      {activeView === 'summary' ? (
-        <RastreioResumoPeriodo />
-      ) : (
-        <>
+      <>
           <div className="rastreio-header">
             <div>
               <h2 style={{ margin: 0 }}>Rastreio de O.S</h2>
@@ -592,8 +569,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
           ) : (
             <div className="empty-state">Pesquise a O.S para ver paradas, bipagens, produção manual e refugos em um só painel.</div>
           )}
-        </>
-      )}
+      </>
     </div>
   )
 }

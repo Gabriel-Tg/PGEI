@@ -81,6 +81,16 @@ body {
   overflow-y: visible;
 }
 
+@media (min-width: 1081px) {
+  body {
+    font-size: 17px;
+  }
+
+  .app {
+    padding: 24px 28px;
+  }
+}
+
 img,
 svg,
 canvas,

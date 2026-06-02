@@ -217,13 +217,8 @@
     min-width: 640px;
   }
 
-  .estoque-table,
-  .rastreio-summary-table {
+  .estoque-table {
     min-width: 600px;
-  }
-
-  .rastreio-summary-table.compact {
-    min-width: 560px;
   }
 
   .apontamento-controls,

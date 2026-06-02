@@ -14,7 +14,7 @@
   --argos-yellow: #f4bc31;
   --argos-radius: 8px;
   --argos-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
-  --argos-container: min(1220px, calc(100% - 48px));
+  --argos-container: min(1380px, calc(100% - 28px));
 }
 
 * {
@@ -47,6 +47,12 @@ html body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+@media (min-width: 1181px) {
+  .site-shell {
+    font-size: 17px;
+  }
+}
+
 .site-nav-wrap {
   position: fixed;
   inset: 0 0 auto;
@@ -59,7 +65,7 @@ html body {
 
 .site-nav {
   width: var(--argos-container);
-  min-height: 68px;
+  min-height: 74px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -76,7 +82,7 @@ html body {
 }
 
 .site-brand img {
-  width: 128px;
+  width: 142px;
   height: auto;
   display: block;
   filter: drop-shadow(0 8px 24px rgba(40, 142, 255, 0.18));
@@ -99,7 +105,7 @@ html body {
 .site-nav-link {
   color: rgba(240, 247, 255, 0.82);
   text-decoration: none;
-  font-size: 0.76rem;
+  font-size: 0.82rem;
   font-weight: 700;
   transition: color 0.2s ease, transform 0.2s ease;
   white-space: nowrap;
@@ -118,8 +124,8 @@ html body {
   color: #fff;
   text-decoration: none;
   font-weight: 800;
-  font-size: 0.76rem;
-  padding: 12px 18px;
+  font-size: 0.82rem;
+  padding: 13px 20px;
   border-radius: var(--argos-radius);
   background: linear-gradient(135deg, #5b5ff5 0%, #178dff 100%);
   box-shadow: 0 16px 38px rgba(31, 112, 255, 0.36);
@@ -153,8 +159,8 @@ html body {
 
 .argos-hero {
   position: relative;
-  min-height: 640px;
-  padding: 94px 0 46px;
+  min-height: 700px;
+  padding: 108px 0 54px;
   background:
     linear-gradient(180deg, rgba(3, 10, 23, 0.9) 0%, rgba(5, 14, 29, 0.78) 64%, rgba(7, 18, 33, 0.98) 100%),
     radial-gradient(circle at 72% 22%, rgba(43, 109, 245, 0.28), transparent 34%),
@@ -188,7 +194,7 @@ html body {
 
 .hero-layout {
   display: grid;
-  grid-template-columns: minmax(340px, 0.82fr) minmax(520px, 1.18fr);
+  grid-template-columns: minmax(380px, 0.82fr) minmax(620px, 1.18fr);
   align-items: center;
   gap: clamp(26px, 3.4vw, 64px);
 }
@@ -211,10 +217,10 @@ html body {
 }
 
 .hero-copy h1 {
-  max-width: 620px;
+  max-width: 690px;
   margin: 0;
   color: #fff;
-  font-size: clamp(2.65rem, 4.8vw, 4.65rem);
+  font-size: clamp(3rem, 5vw, 5.35rem);
   line-height: 0.98;
   letter-spacing: 0;
   font-weight: 850;
@@ -229,10 +235,10 @@ html body {
 }
 
 .hero-text {
-  max-width: 600px;
+  max-width: 660px;
   margin: 20px 0 0;
   color: rgba(226, 236, 249, 0.86);
-  font-size: 1.08rem;
+  font-size: 1.18rem;
   line-height: 1.72;
 }
 
@@ -240,7 +246,7 @@ html body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  max-width: 590px;
+  max-width: 650px;
   margin: 26px 0 0;
 }
 
@@ -268,7 +274,7 @@ html body {
 }
 
 .hero-proof span {
-  font-size: 0.94rem;
+  font-size: 1rem;
   line-height: 1.12;
   font-weight: 800;
 }
@@ -288,12 +294,12 @@ html body {
   align-items: center;
   justify-content: center;
   gap: 11px;
-  min-height: 52px;
-  padding: 0 24px;
+  min-height: 56px;
+  padding: 0 28px;
   border-radius: var(--argos-radius);
   text-decoration: none;
   font-weight: 850;
-  font-size: 0.93rem;
+  font-size: 1rem;
   letter-spacing: 0;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
@@ -350,9 +356,9 @@ html body {
 }
 
 .hero-dashboard-frame {
-  width: min(700px, 100%);
-  min-height: 456px;
-  padding: 16px;
+  width: min(780px, 100%);
+  min-height: 500px;
+  padding: 18px;
   justify-self: end;
   transform-style: preserve-3d;
 }
@@ -567,7 +573,7 @@ html body {
 }
 
 .problem-section {
-  padding: 38px 0 28px;
+  padding: 46px 0 36px;
   background: linear-gradient(180deg, #f6f9fe 0%, #edf3fb 100%);
   color: #101828;
 }
@@ -577,7 +583,7 @@ html body {
   margin: 0 0 28px;
   text-align: center;
   color: #111827;
-  font-size: clamp(1.55rem, 3vw, 2.05rem);
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
   letter-spacing: 0;
 }
 
@@ -593,8 +599,8 @@ html body {
 }
 
 .problem-card {
-  min-height: 150px;
-  padding: 16px 18px;
+  min-height: 168px;
+  padding: 20px 22px;
   text-align: center;
   border-right: 1px solid rgba(19, 31, 56, 0.12);
 }
@@ -617,7 +623,7 @@ html body {
 .benefit-card h3 {
   margin: 0;
   color: inherit;
-  font-size: 0.96rem;
+  font-size: 1.04rem;
   letter-spacing: 0;
 }
 
@@ -626,12 +632,12 @@ html body {
   margin: 10px auto 0;
   max-width: 210px;
   color: #4b5b70;
-  font-size: 0.78rem;
+  font-size: 0.86rem;
   line-height: 1.52;
 }
 
 .benefits-section {
-  padding: 34px 0 40px;
+  padding: 44px 0 50px;
   background:
     radial-gradient(circle at 50% 0%, rgba(35, 118, 255, 0.2), transparent 42%),
     linear-gradient(180deg, #050d1b 0%, #020814 100%);
@@ -641,18 +647,18 @@ html body {
   margin: 0 0 26px;
   text-align: center;
   color: #fff;
-  font-size: clamp(1.55rem, 2.7vw, 2rem);
+  font-size: clamp(1.8rem, 2.7vw, 2.35rem);
 }
 
 .benefits-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  gap: 18px;
 }
 
 .benefit-card {
-  min-height: 165px;
-  padding: 22px 18px;
+  min-height: 184px;
+  padding: 26px 22px;
   text-align: center;
   border: 1px solid rgba(88, 124, 178, 0.18);
   border-radius: var(--argos-radius);
@@ -688,7 +694,7 @@ html body {
 
 .industrial-section {
   position: relative;
-  padding: 72px 0;
+  padding: 84px 0;
   background:
     linear-gradient(90deg, rgba(3, 10, 23, 0.96) 0%, rgba(3, 10, 23, 0.82) 44%, rgba(3, 10, 23, 0.64) 100%),
     url('/Diagnostico.png');
@@ -722,19 +728,19 @@ html body {
 }
 
 .industrial-copy h2 {
-  max-width: 410px;
+  max-width: 470px;
   margin: 0;
   color: #fff;
-  font-size: clamp(2rem, 4.5vw, 3.3rem);
+  font-size: clamp(2.35rem, 4.5vw, 3.8rem);
   line-height: 1.02;
 }
 
 .industrial-copy p {
-  max-width: 430px;
+  max-width: 500px;
   margin: 22px 0 0;
   color: rgba(229, 239, 255, 0.85);
   line-height: 1.68;
-  font-size: 1rem;
+  font-size: 1.12rem;
 }
 
 .feature-list {
@@ -942,14 +948,14 @@ html body {
   align-items: center;
   justify-content: space-between;
   gap: 32px;
-  min-height: 136px;
-  padding: 24px 40px;
+  min-height: 154px;
+  padding: 30px 48px;
 }
 
 .final-cta-card h2 {
   margin: 0;
   color: #fff;
-  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  font-size: clamp(2rem, 3vw, 2.9rem);
 }
 
 .final-cta-card p {

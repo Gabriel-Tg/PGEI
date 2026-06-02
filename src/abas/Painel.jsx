@@ -1368,9 +1368,24 @@ export default function Painel({
     return buckets.map((bucket) => ({
       ...bucket,
       height: Math.max(12, Math.round((bucket.production / maxValue) * 100)),
-      goalHeight: Math.max(8, Math.round((bucket.goal / maxValue) * 100)),
+      goalHeight: Math.max(0, Math.round((bucket.goal / maxValue) * 100)),
     }));
   }, [overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, periodFilter]);
+
+  const goalLinePoints = useMemo(() => {
+    if (!productionBuckets.length) return "";
+    if (productionBuckets.length === 1) {
+      const y = 100 - Number(productionBuckets[0]?.goalHeight || 0);
+      return `0,${y} 100,${y}`;
+    }
+    return productionBuckets
+      .map((bucket, index) => {
+        const x = (index / (productionBuckets.length - 1)) * 100;
+        const y = 100 - Number(bucket?.goalHeight || 0);
+        return `${x},${y}`;
+      })
+      .join(" ");
+  }, [productionBuckets]);
 
   const topStopReasons = useMemo(() => (overview.stopReasons || []).slice(0, 5), [overview.stopReasons]);
 
@@ -1383,6 +1398,18 @@ export default function Painel({
     const left = Math.min(Math.max(margin, clientX + 14), window.innerWidth - tooltipWidth - margin);
     const top = Math.min(Math.max(margin, clientY + 14), window.innerHeight - tooltipHeight - margin);
     setBarTooltip({ ...bucket, left, top });
+  }
+
+  function handleProductionChartPointer(event) {
+    if (!productionBuckets.length) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
+    const relativeX = Math.min(Math.max(0, clientX - rect.left), rect.width);
+    const bucketIndex = Math.min(
+      productionBuckets.length - 1,
+      Math.max(0, Math.floor((relativeX / Math.max(1, rect.width)) * productionBuckets.length))
+    );
+    updateBarTooltip(event, productionBuckets[bucketIndex]);
   }
 
   const selectedMachine = useMemo(
@@ -1612,26 +1639,35 @@ export default function Painel({
               <span />
             </div>
             <div
-              className="premium-bars"
+              className="production-chart-plot"
+              role="img"
               aria-label="Produção por período"
-              style={{ gridTemplateColumns: `repeat(${Math.max(1, productionBuckets.length)}, minmax(0, 1fr))` }}
+              style={{ "--bucket-count": Math.max(1, productionBuckets.length) }}
+              onMouseEnter={handleProductionChartPointer}
+              onMouseMove={handleProductionChartPointer}
+              onMouseLeave={() => setBarTooltip(null)}
+              onPointerEnter={handleProductionChartPointer}
+              onPointerMove={handleProductionChartPointer}
+              onPointerLeave={() => setBarTooltip(null)}
+              onTouchMove={handleProductionChartPointer}
             >
+              {goalLinePoints && (
+                <svg className="goal-line-chart" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  <polyline points={goalLinePoints} />
+                </svg>
+              )}
               {productionBuckets.map((bar, index) => (
-                <button
-                  type="button"
-                  className="premium-bar-wrap"
+                <div
+                  className="production-bar-slot"
                   key={bar.id}
-                  onPointerMove={(event) => updateBarTooltip(event, bar)}
-                  onPointerEnter={(event) => updateBarTooltip(event, bar)}
-                  onPointerLeave={() => setBarTooltip(null)}
-                  onFocus={(event) => updateBarTooltip(event, bar)}
-                  onBlur={() => setBarTooltip(null)}
-                  aria-label={`${bar.label}: ${formatCompactNumber(bar.production)} peças`}
+                  style={{
+                    "--bar-height": `${bar.height}%`,
+                  }}
+                  aria-hidden="true"
                 >
-                  <span className="bar-goal" style={{ height: `${bar.goalHeight}%` }} />
-                  <span className="bar-real" style={{ height: `${bar.height}%` }} />
+                  <span className="production-bar-real" />
                   <small>{index % Math.ceil(Math.max(1, productionBuckets.length) / 6) === 0 ? bar.label.split(" ")[0] : ""}</small>
-                </button>
+                </div>
               ))}
             </div>
           </div>

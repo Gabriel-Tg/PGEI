@@ -11,7 +11,6 @@ import NovaOrdem from './abas/NovaOrdem'
 import Rastreio from './abas/Rastreio'
 import Estoque from './abas/Estoque'
 import PainelTV from './abas/PainelTV'
-import Sensores from './abas/Sensores'
 import Tablets from './pages/Tablets'
 import Ficha from './pages/Ficha'
 import Prioridade from './pages/Prioridade'
@@ -19,7 +18,6 @@ import useOrders from './hooks/useOrders'
 import useAuthAdmin from './hooks/useAuthAdmin'
 import GlobalModals from './components/GlobalModals'
 import TabTransition, { getTabDirection } from './components/TabTransition'
-import Apontamento from './abas/Apontamento'
 import Usuarios from './abas/Usuarios'
 import { DateTime } from 'luxon'
 import SiteApp from './site/SiteApp'
@@ -192,7 +190,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantCompanyId)
   const canViewDashboard = !!authUser && !!permissions?.canViewDashboard
   const canUseProduction = !!permissions?.canRegisterProduction
-  const canMakeApontamentos = !!permissions?.canMakeApontamentos
   const canApproveOperational = !!permissions?.canApproveOperational
   const hasGestaoAccess = !!authUser && !!permissions?.canAccessGestao
   const canCreateOrder = !!permissions?.canCreateOrder
@@ -203,7 +200,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   const canManageUsers = !!permissions?.canManageUsers
   const canViewTvPanel = !!permissions?.canViewTvPanel
   const canManageOperational = !!permissions?.canManageOperational
-  const canViewSensors = !!authUser && !!permissions?.canViewDashboard
   const canAccessList = canUseProduction || canApproveOperational || canManageOperational
   const isTvOnly = !!permissions?.isTv
   const mustChangePassword = !!authUser?.user_metadata?.must_change_password
@@ -211,33 +207,29 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   const tabNavOrder = useMemo(() => {
     const ids = []
     if (canViewDashboard) ids.push('painel')
-    if (canViewSensors) ids.push('sensores')
     if (canAccessList) ids.push('lista')
-    if (canMakeApontamentos) ids.push('apontamento')
     if (canCreateOrder) ids.push('nova')
     if (canViewRastreio) ids.push('rastreio')
     if (hasGestaoAccess) ids.push('estoque')
     if (canManageUsers) ids.push('usuarios')
     if (canManageCatalog) ids.push('admin-itens')
     return ids
-  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, canViewSensors])
+  }, [canAccessList, canCreateOrder, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
 
   const tabItems = useMemo(() => {
     const items = []
     if (canViewDashboard) items.push({ id: 'painel', label: 'Dashboard', icon: 'dashboard' })
-    if (canViewSensors) items.push({ id: 'sensores', label: 'Sensores', icon: 'monitoring' })
     if (canAccessList) items.push({ id: 'lista', label: 'Painel', icon: 'production' })
-    if (canMakeApontamentos) items.push({ id: 'apontamento', label: 'Apontamento', icon: 'apontamento' })
     if (canCreateOrder) items.push({ id: 'nova', label: 'Ordens', icon: 'orders' })
     if (canViewRastreio) items.push({ id: 'rastreio', label: 'Rastreio', icon: 'tracking' })
     if (hasGestaoAccess) items.push({ id: 'estoque', label: 'Estoque', icon: 'inventory' })
     if (canManageUsers) items.push({ id: 'usuarios', label: 'Configurações', icon: 'settings' })
     if (canManageCatalog) items.push({ id: 'admin-itens', label: 'Cadastro Itens', icon: 'catalog' })
     return items
-  }, [canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, canViewSensors])
+  }, [canAccessList, canCreateOrder, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
 
   const mobileTabItems = useMemo(() => {
-    const preferredOrder = ['painel', 'lista', 'apontamento', 'nova', 'usuarios']
+    const preferredOrder = ['painel', 'lista', 'nova', 'usuarios']
     const byId = new Map(tabItems.map((item) => [item.id, item]))
     const preferred = preferredOrder
       .map((id) => byId.get(id))
@@ -248,8 +240,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
 
   const currentTabLabel = useMemo(() => {
     if (tab === 'admin-itens') return 'Cadastro de Itens'
-    if (tab === 'apontamento') return 'Apontamento'
-    if (tab === 'sensores') return 'Monitoramento Industrial'
     const current = tabItems.find((item) => item.id === tab)
     return current?.label || 'Painel'
   }, [tab, tabItems])
@@ -299,14 +289,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
             <path d="M7 20V13h3v7" />
           </svg>
         )
-      case 'apontamento':
-        return (
-          <svg {...commonProps}>
-            <path d="M4 20h16" />
-            <path d="M7 17.5 16.5 8" />
-            <path d="M17.5 6.5 15.5 8.5 13.5 6.5 15.5 4.5 17.5 6.5Z" />
-          </svg>
-        )
       case 'orders':
         return (
           <svg {...commonProps}>
@@ -320,15 +302,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
           <svg {...commonProps}>
             <circle cx="11" cy="11" r="6" />
             <path d="M16 16l4 4" />
-          </svg>
-        )
-      case 'monitoring':
-        return (
-          <svg {...commonProps}>
-            <rect x="3" y="4" width="18" height="14" rx="2" />
-            <path d="M7 14h2" />
-            <path d="M11 12h2" />
-            <path d="M15 10h2" />
           </svg>
         )
       case 'management':
@@ -649,10 +622,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
       const ctrl = e.ctrlKey || e.metaKey
       if (!ctrl) return
       const key = String(e.key).toLowerCase()
-      if (key === 'l') {
-        e.preventDefault()
-        goToTab('apontamento')
-      } else if (key === 'i') {
+      if (key === 'i') {
         e.preventDefault()
         goToTab('admin-itens')
       }
@@ -711,17 +681,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
       return
     }
 
-    if (!canViewSensors && tab === 'sensores') {
-      setTabInstant('painel')
-      return
-    }
-
     if (!canAccessList && tab === 'lista') {
-      setTabInstant('painel')
-      return
-    }
-
-    if (!canMakeApontamentos && tab === 'apontamento') {
       setTabInstant('painel')
       return
     }
@@ -749,7 +709,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
     if (!canManageCatalog && tab === 'admin-itens') {
       setTabInstant('painel')
     }
-  }, [authChecked, authUser, tab, hasAccess, mustChangePassword, canAccessList, canCreateOrder, canMakeApontamentos, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, goToTab, setTabInstant, canViewSensors])
+  }, [authChecked, authUser, tab, hasAccess, mustChangePassword, canAccessList, canCreateOrder, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess, goToTab, setTabInstant])
 
   async function handleSignOut() {
     try {
@@ -1006,21 +966,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
       )
     }
 
-    if (tab === 'sensores' && tenantAccessChecked && hasAccess && canViewSensors) {
-      if (!tenantMachinesReady) {
-        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-      }
-      return (
-        <Sensores
-          clientId={tenantCompanyId}
-          machineIds={machineIds}
-          tenantMachines={tenantMachines}
-          ativosPorMaquina={ativosPorMaquina}
-          itemTechByCode={itemTechByCode}
-        />
-      )
-    }
-
     if (tab === 'lista' && tenantAccessChecked && hasAccess && canAccessList) {
       if (!tenantMachinesReady) {
         return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
@@ -1061,13 +1006,6 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
 
     if (tab === 'rastreio' && canViewRastreio) {
       return <Rastreio clientId={tenantCompanyId} />
-    }
-
-    if (tab === 'apontamento' && tenantAccessChecked && hasAccess && canMakeApontamentos) {
-      if (!tenantMachinesReady) {
-        return <div style={{ padding: 16 }}><small>Carregando maquinas do cliente...</small></div>
-      }
-      return <Apontamento isAdmin={isAdmin} clientId={tenantCompanyId} machineIds={machineIds} />
     }
 
 if (tab === 'estoque' && hasGestaoAccess) {
