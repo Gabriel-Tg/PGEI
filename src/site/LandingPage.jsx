@@ -362,20 +362,6 @@ export default function LandingPage() {
       </SectionMotion>
 
       <SectionMotion className="social-proof" id="casos">
-        <div className="argos-container">
-          <motion.h2 variants={fadeUp}>Empresas que já transformaram sua produção com o ARGOS</motion.h2>
-          <motion.div className="logo-strip" variants={stagger}>
-            {companies.map((company, index) => (
-              <motion.div className="company-logo" variants={fadeUp} key={company}>
-                <div className="logo-mark">{company.slice(0, 1)}</div>
-                <div>
-                  <strong>{company}</strong>
-                  <span>{index % 2 === 0 ? 'Indústria de Plásticos' : 'Soluções em Produção'}</span>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
       </SectionMotion>
 
       <SectionMotion className="final-cta-section" id="contato">
