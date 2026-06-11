@@ -1,6 +1,6 @@
 // src/pages/Painel.jsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MAQUINAS, STATUS } from "../domain/constants";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
@@ -324,6 +324,7 @@ export default function Painel({
   const [machineFilter, setMachineFilter] = useState("__ALL__");
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [sensorRuntimeByMachine, setSensorRuntimeByMachine] = useState({});
+  const machineMetaByIdRef = useRef({});
   const [barTooltip, setBarTooltip] = useState(null);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
   const [periodData, setPeriodData] = useState({
@@ -411,6 +412,10 @@ export default function Painel({
     });
     return mapped;
   }, [tenantMachines, sensorRuntimeByMachine]);
+
+  useEffect(() => {
+    machineMetaByIdRef.current = machineMetaById;
+  }, [machineMetaById]);
 
   // Sincroniza props -> localAtivos, mas preservando scanned_count vindo do realtime (merge)
   useEffect(() => {
@@ -525,6 +530,122 @@ export default function Painel({
     loadItemTech();
     return () => { cancelled = true; };
   }, [activeItemCodes, clientId]);
+
+  useEffect(() => {
+    const getActiveSensorOrders = () => filteredMachineIds
+      .map((machineId) => {
+        const machine = String(machineId || "").trim().toUpperCase();
+        const apontamentoTipo = String(machineTypeById[machine] || "manual").toLowerCase();
+        const ativa = (source[machine] || [])[0] || null;
+        const orderId = ativa?.id ? String(ativa.id) : "";
+        if (apontamentoTipo !== "sensor" || !machine || !orderId) return null;
+        return { machine, orderId };
+      })
+      .filter(Boolean);
+
+    let cancelled = false;
+
+    async function syncSensorLiveState() {
+      const activeSensorOrders = getActiveSensorOrders();
+      if (!activeSensorOrders.length) return;
+
+      const sensorMachines = [...new Set(activeSensorOrders.map((item) => item.machine))];
+      const activeOrderIds = [...new Set(activeSensorOrders.map((item) => item.orderId))];
+
+      let machinesQuery = supabase
+        .from("machines")
+        .select("machine_code, machine_name, sensor_status, sensor_last_pulse_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_last_heartbeat_at, sensor_auto_stopped, sensor_auto_stop_at")
+        .in("machine_code", sensorMachines);
+
+      let entriesQuery = supabase
+        .from("injection_production_entries")
+        .select("order_id, good_qty, pulse_count, cavities_used")
+        .in("order_id", activeOrderIds);
+
+      if (clientId) {
+        machinesQuery = machinesQuery.eq("company_id", clientId);
+        entriesQuery = entriesQuery.eq("company_id", clientId);
+      }
+
+      const [machinesRes, entriesRes] = await Promise.all([machinesQuery, entriesQuery]);
+      if (cancelled) return;
+
+      if (!machinesRes?.error) {
+        setSensorRuntimeByMachine((prev) => {
+          const next = { ...prev };
+          (machinesRes?.data || []).forEach((row) => {
+            const machine = String(row?.machine_code || "").trim().toUpperCase();
+            if (!machine) return;
+            next[machine] = {
+              ...(next[machine] || {}),
+              ...row,
+              machine_code: machine,
+            };
+          });
+          return next;
+        });
+      } else {
+        console.warn("Falha ao sincronizar runtime dos sensores:", machinesRes.error);
+      }
+
+      if (!entriesRes?.error) {
+        const totalsByOrder = {};
+        (entriesRes?.data || []).forEach((row) => {
+          const orderId = String(row?.order_id || "");
+          if (!orderId) return;
+          if (!totalsByOrder[orderId]) totalsByOrder[orderId] = { pieces: 0, pulses: 0, cavities: 0 };
+          totalsByOrder[orderId].pieces += Number(row?.good_qty || 0);
+          totalsByOrder[orderId].pulses += Number(row?.pulse_count || 0);
+          const cavities = Number(row?.cavities_used || 0);
+          if (cavities > 0) totalsByOrder[orderId].cavities = cavities;
+        });
+
+        setLocalAtivos((prev) => {
+          if (!prev) return prev;
+          let changed = false;
+          const next = { ...prev };
+
+          activeSensorOrders.forEach(({ machine, orderId }) => {
+            const totals = totalsByOrder[orderId];
+            if (!totals || !Array.isArray(next[machine])) return;
+
+            next[machine] = next[machine].map((item) => {
+              if (!matchesOrder(item, orderId)) return item;
+              const currentPieces = Number(item?.sensor_produced_pieces || 0);
+              const currentPulses = Number(item?.sensor_pulse_count || 0);
+              const currentCavities = Number(item?.sensor_cavities_used || 0);
+              if (
+                currentPieces === totals.pieces &&
+                currentPulses === totals.pulses &&
+                currentCavities === totals.cavities
+              ) {
+                return item;
+              }
+              changed = true;
+              return {
+                ...item,
+                sensor_produced_pieces: totals.pieces,
+                sensor_pulse_count: totals.pulses,
+                sensor_cavities_used: totals.cavities || currentCavities,
+              };
+            });
+          });
+
+          return changed ? next : prev;
+        });
+      } else {
+        console.warn("Falha ao sincronizar produção dos sensores:", entriesRes.error);
+      }
+    }
+
+    syncSensorLiveState();
+    const interval = window.setInterval(syncSensorLiveState, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [clientId, filteredMachineIds, machineTypeById, source]);
 
   useEffect(() => {
     let cancelled = false;
@@ -928,6 +1049,7 @@ export default function Painel({
           if (clientId && String(row.company_id || "") !== String(clientId)) return;
 
           const orderId = String(row.order_id || "");
+          const machine = String(row.machine_id || "").trim().toUpperCase();
           const goodQty = Number(row.good_qty || 0);
           const pulseCount = Number(row.pulse_count || 0);
           const cavitiesUsed = Number(row.cavities_used || 0);
@@ -959,6 +1081,44 @@ export default function Painel({
             return found ? copy : prev;
           });
 
+          if (machine) {
+            const pulseAt = row.created_at || new Date().toISOString();
+            const sensorEventId = row.sensor_event_id ? String(row.sensor_event_id) : null;
+            setSensorRuntimeByMachine((prev) => {
+              const baseMeta = machineMetaByIdRef.current[machine] || {};
+              const current = prev[machine] || baseMeta || {};
+              if (sensorEventId && String(current.sensor_last_event_id || "") === sensorEventId) return prev;
+
+              const previousPulseAt = current.sensor_last_pulse_at || baseMeta.sensor_last_pulse_at || null;
+              const previousPulseMs = previousPulseAt ? DateTime.fromISO(String(previousPulseAt)).toMillis() : NaN;
+              const pulseMs = DateTime.fromISO(String(pulseAt)).toMillis();
+              const previousCycle = Number.isFinite(previousPulseMs) && Number.isFinite(pulseMs) && pulseMs > previousPulseMs
+                ? (pulseMs - previousPulseMs) / 1000
+                : Number(current.sensor_last_cycle_seconds || baseMeta.sensor_last_cycle_seconds || 0);
+              const cycleCount = Number(current.sensor_cycle_count || baseMeta.sensor_cycle_count || 0) + 1;
+              const avgBefore = Number(current.sensor_avg_cycle_seconds || baseMeta.sensor_avg_cycle_seconds || 0);
+              const avgCycle = previousCycle > 0
+                ? (avgBefore > 0 && cycleCount > 1
+                    ? ((avgBefore * (cycleCount - 1)) + previousCycle) / cycleCount
+                    : previousCycle)
+                : avgBefore;
+
+              return {
+                ...prev,
+                [machine]: {
+                  ...current,
+                  machine_code: machine,
+                  sensor_last_event_id: sensorEventId || current.sensor_last_event_id || null,
+                  sensor_last_pulse_at: pulseAt,
+                  sensor_last_cycle_seconds: previousCycle,
+                  sensor_avg_cycle_seconds: avgCycle,
+                  sensor_cycle_count: cycleCount,
+                  sensor_status: "recebendo_pulsos",
+                },
+              };
+            });
+          }
+
           setPeriodRefreshNonce((prev) => prev + 1);
 
           if (typeof onScanned === "function") {
@@ -979,10 +1139,13 @@ export default function Painel({
           if (clientId && String(row.company_id || "") !== String(clientId)) return;
           const machine = String(row.machine_id || "").trim().toUpperCase();
           const pulseAt = row.created_at || new Date().toISOString();
+          const sensorEventId = row.id ? String(row.id) : null;
           if (machine) {
-            const baseMeta = machineMetaById[machine] || {};
             setSensorRuntimeByMachine((prev) => {
+              const baseMeta = machineMetaByIdRef.current[machine] || {};
               const current = prev[machine] || baseMeta || {};
+              if (sensorEventId && String(current.sensor_last_event_id || "") === sensorEventId) return prev;
+
               const previousPulseAt = current.sensor_last_pulse_at || baseMeta.sensor_last_pulse_at || null;
               const previousPulseMs = previousPulseAt ? DateTime.fromISO(String(previousPulseAt)).toMillis() : NaN;
               const pulseMs = DateTime.fromISO(String(pulseAt)).toMillis();
@@ -1002,6 +1165,7 @@ export default function Painel({
                 [machine]: {
                   ...current,
                   machine_code: machine,
+                  sensor_last_event_id: sensorEventId || current.sensor_last_event_id || null,
                   sensor_last_pulse_at: pulseAt,
                   sensor_last_cycle_seconds: previousCycle,
                   sensor_avg_cycle_seconds: avgCycle,
@@ -1044,7 +1208,7 @@ export default function Painel({
         console.warn("Falha ao remover canal realtime:", err);
       }
     };
-  }, [clientId, onScanned, machineMetaById]);
+  }, [clientId, onScanned]);
 
   const overview = useMemo(() => {
     const nowMs = Date.now() + (Number(tick || 0) * 0);

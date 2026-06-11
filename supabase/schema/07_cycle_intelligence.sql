@@ -12,7 +12,8 @@ alter table public.machines
   add column if not exists sensor_avg_cycle_seconds numeric,
   add column if not exists sensor_cycle_count bigint not null default 0,
   add column if not exists sensor_auto_stopped boolean not null default false,
-  add column if not exists sensor_auto_stop_at timestamptz;
+  add column if not exists sensor_auto_stop_at timestamptz,
+  add column if not exists ciclo_cadastrado_seconds integer;
 
 -- 2) Histórico de ciclo
 create table if not exists public.machine_cycle_history (

@@ -17,7 +17,7 @@
 // CONFIGURAÇÕES
 // ================================================================================
 
-#define FIRMWARE_VERSION "2.0.0"
+#define FIRMWARE_VERSION "2.2.0"
 
 const char* WIFI_SSID     = "Unifique 2930";
 const char* WIFI_PASSWORD = "Savanti077";
@@ -38,9 +38,12 @@ const char* OTA_PASSWORD = "otasavanti";
 
 #define SENSOR_PIN 32
 #define BAUD_RATE 115200
-#define PRODUCTION_LOCK_MS 3000 // Debounce industrial
+#define SENSOR_ACTIVE_LEVEL HIGH
+#define SENSOR_INACTIVE_LEVEL LOW
+#define DEBUG_SENSOR_TRANSITIONS 1
 
 #define EVENT_QUEUE_SIZE 500
+#define TRANSITION_QUEUE_SIZE 80
 
 // ================================================================================
 // ESTRUTURAS E FILA CIRCULAR
@@ -49,10 +52,23 @@ const char* OTA_PASSWORD = "otasavanti";
 struct PulseEvent {
   uint64_t timestamp;
 };
+struct SensorTransition {
+  uint64_t timestamp;
+  uint32_t millisAt;
+  uint8_t level;
+  bool cycleActiveAfter;
+  bool eventQueued;
+  bool eventQueueFull;
+};
 PulseEvent eventQueue[EVENT_QUEUE_SIZE];
 volatile uint16_t queueHead = 0;
 volatile uint16_t queueTail = 0;
 volatile uint16_t queueCount = 0;
+volatile bool cycleActive = false;
+SensorTransition transitionQueue[TRANSITION_QUEUE_SIZE];
+volatile uint16_t transitionHead = 0;
+volatile uint16_t transitionTail = 0;
+volatile uint16_t transitionCount = 0;
 
 // ================================================================================
 // PROTÓTIPOS
@@ -66,14 +82,18 @@ bool isTimeValid();
 bool enqueueEvent(uint64_t ts);
 bool enqueueEventFromIsr(uint64_t ts);
 bool dequeueEvent(PulseEvent &evt);
-void handleSensorPulse();
+bool enqueueTransitionFromIsr(uint64_t ts, uint32_t millisAt, int level, bool cycleActiveAfter, bool eventQueued, bool eventQueueFull);
+bool dequeueTransition(SensorTransition &transition);
+void handleSensorChange();
 void processEvents();
+void processSensorTransitionLogs();
 void sendHeartbeat();
 void logQueueState();
 long getUnixTimeSafe();
 int eventsInQueue();
 bool isQueueFull();
 bool isQueueEmpty();
+const char* sensorLevelName(uint8_t level);
 
 // ================================================================================
 // TIME/NTP
@@ -148,15 +168,21 @@ void setup() {
   delay(1000);
 
   Serial.println("\n=========================================");
-  Serial.println(" ARGOS ESP32 PRODUCAO - VERSAO 2.0.0");
+  Serial.println(" ARGOS ESP32 PRODUCAO - VERSAO 2.2.0");
   Serial.println("=========================================");
 
-  pinMode(SENSOR_PIN, INPUT_PULLUP);
+  pinMode(SENSOR_PIN, INPUT_PULLDOWN);
+  cycleActive = digitalRead(SENSOR_PIN) == SENSOR_ACTIVE_LEVEL;
+  Serial.printf("[Sensor] Nivel inicial: %s | ativo=%s | contabiliza em %s -> %s\n",
+    sensorLevelName(digitalRead(SENSOR_PIN)),
+    sensorLevelName(SENSOR_ACTIVE_LEVEL),
+    sensorLevelName(SENSOR_ACTIVE_LEVEL),
+    sensorLevelName(SENSOR_INACTIVE_LEVEL));
 
   attachInterrupt(
     digitalPinToInterrupt(SENSOR_PIN),
-    handleSensorPulse,
-    FALLING
+    handleSensorChange,
+    CHANGE
   );
 
   connectWifi();
@@ -176,6 +202,8 @@ void loop() {
   static unsigned long lastLog = 0;
 
   ArduinoOTA.handle();
+
+  processSensorTransitionLogs();
 
   reconnectWifiIfNeeded();
 
@@ -201,17 +229,78 @@ void loop() {
 // INTERRUPÇÃO DO SENSOR
 // ================================================================================
 
-void IRAM_ATTR handleSensorPulse() {
-  static unsigned long lastISR = 0;
-  unsigned long now = millis();
-  if (now - lastISR < PRODUCTION_LOCK_MS) return;
-  lastISR = now;
-
+void IRAM_ATTR handleSensorChange() {
+  uint32_t ms = millis();
+  int sensorLevel = digitalRead(SENSOR_PIN);
   uint64_t t = (uint64_t)time(nullptr);
   if (!isTimeValid()) t = 0;
 
-  // Prepara dados na RAM de forma segura para o core principal processar:
-  enqueueEventFromIsr(t);
+  if (sensorLevel == SENSOR_ACTIVE_LEVEL) {
+    cycleActive = true;
+    enqueueTransitionFromIsr(t, ms, sensorLevel, cycleActive, false, false);
+    return;
+  }
+
+  if (sensorLevel != SENSOR_INACTIVE_LEVEL || !cycleActive) {
+    enqueueTransitionFromIsr(t, ms, sensorLevel, cycleActive, false, false);
+    return;
+  }
+
+  cycleActive = false;
+  bool eventQueued = enqueueEventFromIsr(t);
+  enqueueTransitionFromIsr(t, ms, sensorLevel, cycleActive, eventQueued, !eventQueued);
+}
+
+// ================================================================================
+// LOGS DE TRANSIÇÃO DO SENSOR
+// ================================================================================
+
+const char* sensorLevelName(uint8_t level) {
+  return level == HIGH ? "HIGH" : "LOW";
+}
+
+bool IRAM_ATTR enqueueTransitionFromIsr(uint64_t ts, uint32_t millisAt, int level, bool cycleActiveAfter, bool eventQueued, bool eventQueueFull) {
+  if (!DEBUG_SENSOR_TRANSITIONS) return true;
+  if (transitionCount >= TRANSITION_QUEUE_SIZE) return false;
+  transitionQueue[transitionHead].timestamp = ts;
+  transitionQueue[transitionHead].millisAt = millisAt;
+  transitionQueue[transitionHead].level = (uint8_t)level;
+  transitionQueue[transitionHead].cycleActiveAfter = cycleActiveAfter;
+  transitionQueue[transitionHead].eventQueued = eventQueued;
+  transitionQueue[transitionHead].eventQueueFull = eventQueueFull;
+  transitionHead = (transitionHead+1) % TRANSITION_QUEUE_SIZE;
+  transitionCount++;
+  return true;
+}
+
+bool dequeueTransition(SensorTransition &transition) {
+  if (transitionCount == 0) return false;
+  noInterrupts();
+  transition = transitionQueue[transitionTail];
+  transitionTail = (transitionTail+1) % TRANSITION_QUEUE_SIZE;
+  transitionCount--;
+  interrupts();
+  return true;
+}
+
+void processSensorTransitionLogs() {
+  if (!DEBUG_SENSOR_TRANSITIONS) return;
+
+  SensorTransition transition;
+  while (dequeueTransition(transition)) {
+    const bool isActive = transition.level == SENSOR_ACTIVE_LEVEL;
+    const bool isInactive = transition.level == SENSOR_INACTIVE_LEVEL;
+    Serial.printf(
+      "[Sensor] ms=%lu | nivel=%s (%s) | ciclo=%s | evento=%s | fila=%d | ts=%llu\n",
+      (unsigned long)transition.millisAt,
+      sensorLevelName(transition.level),
+      isActive ? "ATIVO" : (isInactive ? "INATIVO" : "DESCONHECIDO"),
+      transition.cycleActiveAfter ? "ABERTO" : "FECHADO",
+      transition.eventQueued ? "ENFILEIRADO" : (transition.eventQueueFull ? "FILA_CHEIA" : "NAO"),
+      eventsInQueue(),
+      transition.timestamp
+    );
+  }
 }
 
 // ================================================================================
