@@ -5,7 +5,7 @@ import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import { mapOrder } from '../domain/entities'
 
-export default function useOrders(clientId = null){
+export default function useOrders(clientId = null, machineIds = MAQUINAS){
   const [orders, setOrders] = useState([])
   const [finalizedOrders, setFinalizedOrders] = useState([])
   const [stops, setStops] = useState([])
@@ -166,17 +166,38 @@ export default function useOrders(clientId = null){
 
   // expose derived data
   const activeByMachine = useMemo(()=>{
-    const map = Object.fromEntries(MAQUINAS.map(m=>[m,[]]))
-    orders.forEach(o=>{ if(!o.finalized) map[o.machine_id]?.push(o) })
-    for(const m of MAQUINAS) map[m]=[...map[m]].sort((a,b)=>(a.pos??999)-(b.pos??999))
+    const ids = Array.from(new Set([
+      ...(Array.isArray(machineIds) ? machineIds : []),
+      ...orders.map((o) => String(o?.machine_id || '').toUpperCase()).filter(Boolean),
+    ]))
+    const map = Object.fromEntries(ids.map(m=>[m,[]]))
+    orders.forEach(o=>{
+      if(o.finalized) return
+      const machineId = String(o.machine_id || '').toUpperCase()
+      if(!machineId) return
+      if(!map[machineId]) map[machineId] = []
+      map[machineId].push(o)
+    })
+    for(const m of Object.keys(map)) map[m]=[...map[m]].sort((a,b)=>(a.pos??999)-(b.pos??999))
     return map
-  },[orders])
+  },[machineIds, orders])
 
   const lastFinalizedByMachine = useMemo(()=>{
-    const map = Object.fromEntries(MAQUINAS.map(m=>[m,null]))
-    for(const o of finalizedOrders){ if(!o.machine_id||!o.finalized_at) continue; const prev = map[o.machine_id] ? new Date(map[o.machine_id]).getTime() : 0; const cur = new Date(o.finalized_at).getTime(); if(cur>prev) map[o.machine_id]=o.finalized_at }
+    const ids = Array.from(new Set([
+      ...(Array.isArray(machineIds) ? machineIds : []),
+      ...finalizedOrders.map((o) => String(o?.machine_id || '').toUpperCase()).filter(Boolean),
+    ]))
+    const map = Object.fromEntries(ids.map(m=>[m,null]))
+    for(const o of finalizedOrders){
+      const machineId = String(o.machine_id || '').toUpperCase()
+      if(!machineId||!o.finalized_at) continue
+      if(!(machineId in map)) map[machineId] = null
+      const prev = map[machineId] ? new Date(map[machineId]).getTime() : 0
+      const cur = new Date(o.finalized_at).getTime()
+      if(cur>prev) map[machineId]=o.finalized_at
+    }
     return map
-  },[finalizedOrders])
+  },[finalizedOrders, machineIds])
 
   const orderRecordGroups = useMemo(()=>{
     const byId = new Map(); const push = (o)=>{ if(!o) return; byId.set(o.id,{...o}) }
@@ -215,7 +236,7 @@ export default function useOrders(clientId = null){
     const res = await supabase.from('orders').insert([novo]).select('*').maybeSingle()
     if (res.error) { setOrders(prev => prev.filter(o => o.id !== tempId)); alert('Erro ao criar ordem: ' + res.error.message); return }
     if (res.data) setOrders(prev => prev.map(o => o.id === tempId ? res.data : o))
-    setForm({code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id:'P1'})
+    setForm({code:'', customer:'', product:'', color:'', qty:'', boxes:'', standard:'', due_date:'', notes:'', machine_id: form.machine_id})
     setTab('painel')
   }
 
@@ -684,6 +705,9 @@ export default function useOrders(clientId = null){
     }
 
     if (atual === 'BAIXA_EFICIENCIA' && targetStatus === 'PARADA') {
+      if (options.autoStop) {
+        await setStatus(order, 'PARADA')
+      }
       const now = new Date()
       return {
         action: 'openStopModal',

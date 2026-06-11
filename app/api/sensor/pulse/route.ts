@@ -69,6 +69,103 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function brDateParts(date = new Date()) {
+  const br = new Date(date.getTime() - (3 * 60 * 60 * 1000));
+  return {
+    year: br.getUTCFullYear(),
+    month: br.getUTCMonth(),
+    day: br.getUTCDate(),
+    weekday: br.getUTCDay(),
+  };
+}
+
+function brLocalToUtcIso(parts: ReturnType<typeof brDateParts>, hour: number, minute: number): string {
+  return new Date(Date.UTC(parts.year, parts.month, parts.day, hour + 3, minute, 0, 0)).toISOString();
+}
+
+function shiftWindowsForBrDate(parts: ReturnType<typeof brDateParts>) {
+  const weekday = parts.weekday;
+  const definitions = weekday >= 1 && weekday <= 5
+    ? [
+        { shiftKey: '1', startHour: 5, startMinute: 0, endHour: 13, endMinute: 30 },
+        { shiftKey: '2', startHour: 13, startMinute: 30, endHour: 22, endMinute: 0 },
+        { shiftKey: '3', startHour: 22, startMinute: 0, endHour: 5, endMinute: 0 },
+      ]
+    : weekday === 6
+      ? [
+          { shiftKey: '1', startHour: 5, startMinute: 0, endHour: 9, endMinute: 0 },
+          { shiftKey: '2', startHour: 9, startMinute: 0, endHour: 13, endMinute: 0 },
+        ]
+      : [
+          { shiftKey: '3', startHour: 23, startMinute: 0, endHour: 5, endMinute: 0 },
+        ];
+
+  return definitions.map((definition) => {
+    const start = brLocalToUtcIso(parts, definition.startHour, definition.startMinute);
+    let end = brLocalToUtcIso(parts, definition.endHour, definition.endMinute);
+    if (new Date(end).getTime() <= new Date(start).getTime()) {
+      end = new Date(new Date(end).getTime() + (24 * 60 * 60 * 1000)).toISOString();
+    }
+    return {
+      shiftKey: definition.shiftKey,
+      start,
+      end,
+      effectiveDate: `${parts.year}-${String(parts.month + 1).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`,
+    };
+  });
+}
+
+function getCurrentShiftWindow(date = new Date()) {
+  const today = brDateParts(date);
+  const yesterdayDate = new Date(Date.UTC(today.year, today.month, today.day + 1, 3, 0, 0, 0) - (48 * 60 * 60 * 1000));
+  const yesterday = brDateParts(yesterdayDate);
+  const nowMs = date.getTime();
+  return [
+    ...shiftWindowsForBrDate(yesterday),
+    ...shiftWindowsForBrDate(today),
+  ].find((window) => nowMs >= new Date(window.start).getTime() && nowMs < new Date(window.end).getTime()) || null;
+}
+
+async function findShiftOperator({ supabase, companyId, machineCode, shiftWindow }: {
+  supabase: any;
+  companyId: string;
+  machineCode: string;
+  shiftWindow: ReturnType<typeof getCurrentShiftWindow>;
+}): Promise<string | null> {
+  if (!shiftWindow?.shiftKey) return null;
+
+  const byEffectiveDate = await supabase
+    .from('shift_responsibles')
+    .select('operator, responsible, responsavel, created_at')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .eq('shift', String(shiftWindow.shiftKey))
+    .eq('effective_date', shiftWindow.effectiveDate)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!byEffectiveDate.error) {
+    const row = (byEffectiveDate.data || [])[0];
+    const name = String(row?.operator || row?.responsible || row?.responsavel || '').trim();
+    if (name) return name;
+  }
+
+  const byWindow = await supabase
+    .from('shift_responsibles')
+    .select('operator, responsible, responsavel, created_at')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .eq('shift', String(shiftWindow.shiftKey))
+    .gte('created_at', shiftWindow.start)
+    .lt('created_at', shiftWindow.end)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (byWindow.error) return null;
+  const row = (byWindow.data || [])[0];
+  return String(row?.operator || row?.responsible || row?.responsavel || '').trim() || null;
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -112,7 +209,7 @@ async function resolveAuthorizedMachine(
     const { data, error } = await supabase
       .from('machines')
       .select(
-        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count'
+        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds'
       )
       .eq('machine_code', machineCode)
       .eq('active', true)
@@ -224,11 +321,11 @@ export async function POST(request: Request) {
     // Buscar O.P. ativa
     const { data: activeOrders, error: orderError } = await supabase
       .from('orders')
-      .select('id, code, machine_id, product, status, finalized, qty, boxes')
+      .select('id, code, machine_id, product, status, finalized, qty, boxes, started_at, started_by')
       .eq('company_id', companyId)
       .eq('machine_id', machineCode)
       .eq('finalized', false)
-      .in('status', ['PRODUZINDO', 'BAIXA_EFICIENCIA'])
+      .in('status', ['AGUARDANDO', 'PRODUZINDO', 'BAIXA_EFICIENCIA'])
       .order('pos', { ascending: true })
       .limit(1);
 
@@ -240,7 +337,38 @@ export async function POST(request: Request) {
       );
     }
 
-    const activeOrder = (activeOrders || [])[0] || null;
+    let activeOrder = (activeOrders || [])[0] || null;
+    const shiftWindow = getCurrentShiftWindow(new Date());
+    const shiftOperator = await findShiftOperator({ supabase, companyId, machineCode, shiftWindow });
+    const receivedAt = nowIso();
+
+    if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'AGUARDANDO') {
+      const startPayload = {
+        status: 'PRODUZINDO',
+        started_at: receivedAt,
+        started_by: shiftOperator || null,
+        interrupted_at: null,
+        interrupted_by: null,
+      };
+      const { data: startedOrder, error: startError } = await supabase
+        .from('orders')
+        .update(startPayload)
+        .eq('id', activeOrder.id)
+        .select('id, code, machine_id, product, status, finalized, qty, boxes, started_at, started_by')
+        .maybeSingle();
+
+      if (startError) {
+        console.error('Erro ao iniciar O.P. automaticamente:', startError);
+        return jsonResponse({ error: startError.message || 'Unable to auto start order' }, 500);
+      }
+      activeOrder = startedOrder || { ...activeOrder, ...startPayload };
+    } else if (activeOrder && shiftOperator && !String(activeOrder.started_by || '').trim()) {
+      await supabase
+        .from('orders')
+        .update({ started_by: shiftOperator })
+        .eq('id', activeOrder.id);
+    }
+
     console.log('📦 O.P. ativa:', activeOrder?.code || 'nenhuma');
 
     // Buscar cavidades
@@ -329,7 +457,7 @@ export async function POST(request: Request) {
           machine_id: machineCode,
           good_qty: producedQuantity,
           product: activeOrder.product,
-          shift: null,
+          shift: shiftWindow?.shiftKey || null,
           source: 'sensor',
           pulse_count: pulseCount,
           cavities_used: cavitiesUsed,

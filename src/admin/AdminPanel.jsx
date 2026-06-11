@@ -193,6 +193,15 @@ export default function AdminPanel() {
       .replace(/^-+|-+$/g, '')
   }
 
+  function getDefaultMachineRouteSlug(machineCode) {
+    const code = String(machineCode || '').trim().toUpperCase()
+    const injectionMatch = code.match(/^I(\d+)$/)
+    if (injectionMatch) return `inj-${String(Number(injectionMatch[1])).padStart(2, '0')}`
+    const petMatch = code.match(/^P(\d+)$/)
+    if (petMatch) return `pet-${String(Number(petMatch[1])).padStart(2, '0')}`
+    return normalizeSlug(code)
+  }
+
   function normalizeSubdomainInput(value) {
     const raw = String(value || '').trim().toLowerCase()
     if (!raw) return ''
@@ -391,7 +400,7 @@ export default function AdminPanel() {
       company_id: machineForm.company_id,
       machine_code: String(machineForm.machine_code || '').trim().toUpperCase(),
       machine_name: String(machineForm.machine_name || '').trim() || null,
-      route_slug: normalizeSlug(machineForm.route_slug || machineForm.machine_code),
+      route_slug: normalizeSlug(machineForm.route_slug) || getDefaultMachineRouteSlug(machineForm.machine_code),
       sector: String(machineForm.sector || '').trim() || null,
       active: !!machineForm.active,
       apontamento_tipo: String(machineForm.apontamento_tipo || 'manual'),

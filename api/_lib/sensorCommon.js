@@ -76,7 +76,7 @@ export async function resolveAuthorizedMachine({ supabase, machineCode, esp32Id,
   const tokenHash = sha256(token)
   let query = supabase
     .from('machines')
-    .select('id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count')
+    .select('id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds')
     .eq('machine_code', machineCode)
     .eq('active', true)
 

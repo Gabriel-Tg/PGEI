@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { fmtDateTime, fmtDuracao } from '../lib/utils'
+import { getShiftWindowAt } from '../lib/shifts'
 import '../styles/rastreio.css'
 
 const formatPieces = (val) => {
@@ -17,6 +18,13 @@ const formatMs = (ms) => {
   return `${h}h ${String(m).padStart(2, '0')}min`
 }
 
+const formatTimeBr = (value) => {
+  if (!value) return 'N/A'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return 'N/A'
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
 const extractItemCodeFromOrderProduct = (product) => {
   if (!product) return ''
   return String(product).split('-')[0]?.trim() || ''
@@ -29,6 +37,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
   const [scraps, setScraps] = useState([])
   const [stops, setStops] = useState([])
   const [manualEntries, setManualEntries] = useState([])
+  const [operatorChanges, setOperatorChanges] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [isFinderOpen, setIsFinderOpen] = useState(false)
@@ -44,6 +53,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
     setScraps([])
     setStops([])
     setManualEntries([])
+    setOperatorChanges([])
   }
 
   const loadTraceByOrder = useCallback(async (ord) => {
@@ -58,7 +68,21 @@ export default function Rastreio({ externalSearchRequest = null }) {
     setOrder(ord)
 
     try {
-      const [scanRes, scrapRes, stopRes, manualRes] = await Promise.all([
+      const productionStart = ord.started_at || ord.created_at || null
+      const productionEnd = ord.finalized_at || new Date().toISOString()
+      const operatorStart = productionStart
+        ? new Date(new Date(productionStart).getTime() - (12 * 60 * 60 * 1000)).toISOString()
+        : null
+
+      const operatorQuery = supabase
+        .from('shift_responsibles')
+        .select('id, machine_id, shift, operator, responsible, responsavel, effective_date, created_at')
+        .eq('company_id', ord.company_id)
+        .eq('machine_id', ord.machine_id)
+        .lte('created_at', productionEnd)
+        .order('created_at', { ascending: true })
+
+      const [scanRes, scrapRes, stopRes, manualRes, operatorRes] = await Promise.all([
         supabase
           .from('production_scans')
           .select('*')
@@ -79,12 +103,14 @@ export default function Rastreio({ externalSearchRequest = null }) {
           .select('*')
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
+        operatorStart ? operatorQuery.gte('created_at', operatorStart) : operatorQuery,
       ])
 
       setScans(scanRes?.data || [])
       setScraps(scrapRes?.data || [])
       setStops(stopRes?.data || [])
       setManualEntries(manualRes?.data || [])
+      setOperatorChanges(operatorRes?.data || [])
     } catch (err) {
       console.warn('Falha ao rastrear O.S.', err)
       setError('Não foi possível carregar os dados agora. Tente novamente em instantes.')
@@ -265,6 +291,61 @@ export default function Rastreio({ externalSearchRequest = null }) {
 
   const timeline = useMemo(() => {
     const events = []
+    const productionStart = order?.started_at || order?.created_at || null
+    const productionEnd = order?.finalized_at || new Date().toISOString()
+    const productionStartMs = productionStart ? new Date(productionStart).getTime() : 0
+    const productionEndMs = productionEnd ? new Date(productionEnd).getTime() : Date.now()
+
+    const operatorEvents = (operatorChanges || [])
+      .map((row) => ({
+        ...row,
+        operatorName: String(row?.operator || row?.responsible || row?.responsavel || '').trim(),
+      }))
+      .filter((row) => row.operatorName && row.created_at)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+    if (order?.started_by && productionStart) {
+      const hasInitialOperator = operatorEvents.some((row) => {
+        const rowMs = new Date(row.created_at).getTime()
+        return row.operatorName === order.started_by && Math.abs(rowMs - productionStartMs) <= 5 * 60 * 1000
+      })
+      if (!hasInitialOperator) {
+        operatorEvents.unshift({
+          id: `order-start-${order.id}`,
+          machine_id: order.machine_id,
+          shift: null,
+          operatorName: order.started_by,
+          created_at: productionStart,
+        })
+      }
+    }
+
+    operatorEvents.forEach((row, index) => {
+      const startMs = Math.max(new Date(row.created_at).getTime(), productionStartMs || 0)
+      if (!Number.isFinite(startMs) || startMs <= 0) return
+
+      const next = operatorEvents[index + 1]
+      const nextMs = next?.created_at ? new Date(next.created_at).getTime() : null
+      const shiftWindow = getShiftWindowAt(row.created_at)
+      const shiftEndMs = shiftWindow?.end?.toMillis?.() || null
+      const endCandidates = [productionEndMs, nextMs, shiftEndMs].filter((value) => Number.isFinite(value) && value > startMs)
+      const endMs = Math.min(...endCandidates)
+      if (!Number.isFinite(endMs) || endMs <= startMs) return
+
+      events.push({
+        type: 'operator',
+        ts: new Date(startMs).toISOString(),
+        key: `operator-${row.id || index}-${startMs}`,
+        data: {
+          operator: row.operatorName,
+          machine_id: row.machine_id || order?.machine_id,
+          shift: row.shift || shiftWindow?.shiftKey || null,
+          started_at: new Date(startMs).toISOString(),
+          ended_at: new Date(endMs).toISOString(),
+        },
+      })
+    })
+
     stops.forEach((st) => {
       if (!st?.started_at) return
       events.push({ type: 'stop', ts: st.started_at, key: `stop-${st.id}`, data: st })
@@ -285,7 +366,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
     return events
       .filter((ev) => ev.ts)
       .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
-  }, [stops, scans, manualEntries, scraps])
+  }, [order, operatorChanges, stops, scans, manualEntries, scraps])
 
   return (
     <div className="rastreio-page">
@@ -497,6 +578,32 @@ export default function Rastreio({ externalSearchRequest = null }) {
                                 <div>
                                   <label>Código lido</label>
                                   <strong>{sc.code || sc.op_code || 'N/A'}</strong>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        }
+
+                        if (ev.type === 'operator') {
+                          const op = ev.data || {}
+                          return (
+                            <div className="trace-item" key={ev.key}>
+                              <div className="trace-head">
+                                <span className="trace-date">{fmtDateTime(ev.ts)}</span>
+                                <span className="badge badge-manual">Operador</span>
+                              </div>
+                              <div className="trace-info">
+                                <div>
+                                  <label>Operador</label>
+                                  <strong>{op.operator || 'N/A'}</strong>
+                                </div>
+                                <div>
+                                  <label>Período</label>
+                                  <strong>das {formatTimeBr(op.started_at)} às {formatTimeBr(op.ended_at)}</strong>
+                                </div>
+                                <div>
+                                  <label>Máquina / Turno</label>
+                                  <strong>{op.machine_id || 'N/A'} • {op.shift || 'N/A'}</strong>
                                 </div>
                               </div>
                             </div>

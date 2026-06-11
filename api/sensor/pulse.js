@@ -54,6 +54,104 @@ function roundCycle(value) {
   return Number(num.toFixed(3))
 }
 
+function getAutoStopAt(lastPulseMs, cicloCadastradoSeconds) {
+  const baseCycle = Number(cicloCadastradoSeconds || 0)
+  if (!(baseCycle > 0) || !lastPulseMs) return null
+  return new Date(lastPulseMs + (baseCycle * 4 * 1000)).toISOString()
+}
+
+function brDateParts(date = new Date()) {
+  const br = new Date(date.getTime() - (3 * 60 * 60 * 1000))
+  return {
+    year: br.getUTCFullYear(),
+    month: br.getUTCMonth(),
+    day: br.getUTCDate(),
+    weekday: br.getUTCDay(),
+  }
+}
+
+function brLocalToUtcIso(parts, hour, minute) {
+  return new Date(Date.UTC(parts.year, parts.month, parts.day, hour + 3, minute, 0, 0)).toISOString()
+}
+
+function shiftWindowsForBrDate(parts) {
+  const weekday = parts.weekday
+  const definitions = weekday >= 1 && weekday <= 5
+    ? [
+        { shiftKey: '1', startHour: 5, startMinute: 0, endHour: 13, endMinute: 30 },
+        { shiftKey: '2', startHour: 13, startMinute: 30, endHour: 22, endMinute: 0 },
+        { shiftKey: '3', startHour: 22, startMinute: 0, endHour: 5, endMinute: 0 },
+      ]
+    : weekday === 6
+      ? [
+          { shiftKey: '1', startHour: 5, startMinute: 0, endHour: 9, endMinute: 0 },
+          { shiftKey: '2', startHour: 9, startMinute: 0, endHour: 13, endMinute: 0 },
+        ]
+      : [
+          { shiftKey: '3', startHour: 23, startMinute: 0, endHour: 5, endMinute: 0 },
+        ]
+
+  return definitions.map((definition) => {
+    const start = brLocalToUtcIso(parts, definition.startHour, definition.startMinute)
+    let end = brLocalToUtcIso(parts, definition.endHour, definition.endMinute)
+    if (new Date(end).getTime() <= new Date(start).getTime()) {
+      end = new Date(new Date(end).getTime() + (24 * 60 * 60 * 1000)).toISOString()
+    }
+    return {
+      shiftKey: definition.shiftKey,
+      start,
+      end,
+      effectiveDate: `${parts.year}-${String(parts.month + 1).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`,
+    }
+  })
+}
+
+function getCurrentShiftWindow(date = new Date()) {
+  const today = brDateParts(date)
+  const yesterdayDate = new Date(Date.UTC(today.year, today.month, today.day + 1, 3, 0, 0, 0) - (48 * 60 * 60 * 1000))
+  const yesterday = brDateParts(yesterdayDate)
+  const nowMs = date.getTime()
+  return [
+    ...shiftWindowsForBrDate(yesterday),
+    ...shiftWindowsForBrDate(today),
+  ].find((window) => nowMs >= new Date(window.start).getTime() && nowMs < new Date(window.end).getTime()) || null
+}
+
+async function findShiftOperator({ supabase, companyId, machineCode, shiftWindow }) {
+  if (!shiftWindow?.shiftKey) return null
+
+  const baseQuery = supabase
+    .from('shift_responsibles')
+    .select('operator, responsible, responsavel, created_at')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .eq('shift', String(shiftWindow.shiftKey))
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  const byEffectiveDate = await baseQuery.eq('effective_date', shiftWindow.effectiveDate)
+  if (!byEffectiveDate.error) {
+    const row = (byEffectiveDate.data || [])[0]
+    const name = String(row?.operator || row?.responsible || row?.responsavel || '').trim()
+    if (name) return name
+  }
+
+  const byWindow = await supabase
+    .from('shift_responsibles')
+    .select('operator, responsible, responsavel, created_at')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .eq('shift', String(shiftWindow.shiftKey))
+    .gte('created_at', shiftWindow.start)
+    .lt('created_at', shiftWindow.end)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (byWindow.error) return null
+  const row = (byWindow.data || [])[0]
+  return String(row?.operator || row?.responsible || row?.responsavel || '').trim() || null
+}
+
 export default async function handler(req, res) {
   if (!isMethod(req, 'POST')) {
     sendJson(res, 405, { error: 'Method not allowed' })
@@ -166,11 +264,11 @@ export default async function handler(req, res) {
 
   const { data: activeOrders, error: activeOrderError } = await supabase
     .from('orders')
-    .select('id, code, machine_id, product, status, finalized, qty, boxes, standard, pos')
+    .select('id, code, machine_id, product, status, finalized, qty, boxes, standard, pos, started_at, started_by')
     .eq('company_id', companyId)
     .eq('machine_id', machineCode)
     .eq('finalized', false)
-    .in('status', ['PRODUZINDO', 'BAIXA_EFICIENCIA'])
+    .in('status', ['AGUARDANDO', 'PRODUZINDO', 'BAIXA_EFICIENCIA'])
     .order('pos', { ascending: true })
     .limit(1)
 
@@ -179,7 +277,37 @@ export default async function handler(req, res) {
     return
   }
 
-  const activeOrder = (activeOrders || [])[0] || null
+  let activeOrder = (activeOrders || [])[0] || null
+  const shiftWindow = getCurrentShiftWindow(new Date())
+  const shiftOperator = await findShiftOperator({ supabase, companyId, machineCode, shiftWindow })
+  const receivedAt = nowIso()
+
+  if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'AGUARDANDO') {
+    const startPayload = {
+      status: 'PRODUZINDO',
+      started_at: receivedAt,
+      started_by: shiftOperator || null,
+      interrupted_at: null,
+      interrupted_by: null,
+    }
+    const { data: startedOrder, error: startError } = await supabase
+      .from('orders')
+      .update(startPayload)
+      .eq('id', activeOrder.id)
+      .select('id, code, machine_id, product, status, finalized, qty, boxes, standard, pos, started_at, started_by')
+      .maybeSingle()
+
+    if (startError) {
+      sendJson(res, 500, { error: startError.message || 'Unable to auto start order' })
+      return
+    }
+    activeOrder = startedOrder || { ...activeOrder, ...startPayload }
+  } else if (activeOrder && shiftOperator && !String(activeOrder.started_by || '').trim()) {
+    await supabase
+      .from('orders')
+      .update({ started_by: shiftOperator })
+      .eq('id', activeOrder.id)
+  }
 
   let cavitiesUsed = 1
   if (activeOrder?.product) {
@@ -226,8 +354,9 @@ export default async function handler(req, res) {
 
   const cicloCadastrado = Number(machine.ciclo_cadastrado_seconds || 0)
   const isAutoStopped = cicloCadastrado > 0 && previousPulseMs > 0
-    ? ((nowMs - previousPulseMs) / 1000) > (cicloCadastrado * 4)
+    ? ((nowMs - previousPulseMs) / 1000) >= (cicloCadastrado * 4)
     : false
+  const autoStopAt = isAutoStopped ? getAutoStopAt(previousPulseMs, cicloCadastrado) : null
 
   const eventPayload = {
     company_id: companyId,
@@ -246,10 +375,12 @@ export default async function handler(req, res) {
       pulse_count: pulseCount,
       esp32_id: esp32Id,
       machine_id: machineCode,
-      received_at: nowIso(),
+      received_at: receivedAt,
       cycle_real_seconds: cycleRealSeconds,
       cycle_avg_seconds: nextAvgCycle,
       sensor_operation_mode: operationMode,
+      shift: shiftWindow?.shiftKey || null,
+      shift_operator: shiftOperator || null,
     },
   }
 
@@ -307,7 +438,7 @@ export default async function handler(req, res) {
         machine_id: machineCode,
         good_qty: producedQuantity,
         product: activeOrder.product || null,
-        shift: null,
+        shift: shiftWindow?.shiftKey || null,
         source: 'sensor',
         pulse_count: pulseCount,
         cavities_used: cavitiesUsed,
@@ -327,7 +458,7 @@ export default async function handler(req, res) {
   const machineUpdate = {
     sensor_status: sensorStatus,
     sensor_auto_stopped: isAutoStopped,
-    sensor_auto_stop_at: isAutoStopped ? nowIso() : null,
+    sensor_auto_stop_at: autoStopAt,
   }
 
   if (!isSemiAutomaticIgnore) {

@@ -28,7 +28,14 @@ function shouldMarkAutoStop(lastPulseAt, cicloCadastradoSeconds) {
   const baseCycle = Number(cicloCadastradoSeconds || 0)
   if (!(baseCycle > 0) || !lastPulseAt) return false
   const elapsedSeconds = (Date.now() - new Date(lastPulseAt).getTime()) / 1000
-  return elapsedSeconds > (baseCycle * 4)
+  return elapsedSeconds >= (baseCycle * 4)
+}
+
+function getAutoStopAt(lastPulseAt, cicloCadastradoSeconds) {
+  const baseCycle = Number(cicloCadastradoSeconds || 0)
+  const lastPulseMs = lastPulseAt ? new Date(lastPulseAt).getTime() : 0
+  if (!(baseCycle > 0) || !lastPulseMs) return null
+  return new Date(lastPulseMs + (baseCycle * 4 * 1000)).toISOString()
 }
 
 function canAcceptHeartbeatRate(key) {
@@ -142,6 +149,7 @@ export default async function handler(req, res) {
 
   const sensorStatus = computeStatus(machine.sensor_last_pulse_at ? new Date(machine.sensor_last_pulse_at).getTime() : 0)
   const autoStopped = shouldMarkAutoStop(machine.sensor_last_pulse_at, machine.ciclo_cadastrado_seconds)
+  const autoStopAt = autoStopped ? getAutoStopAt(machine.sensor_last_pulse_at, machine.ciclo_cadastrado_seconds) : null
 
   const { error: machineUpdateError } = await supabase
     .from('machines')
@@ -150,7 +158,7 @@ export default async function handler(req, res) {
       sensor_status: sensorStatus,
       esp32_id: esp32Id,
       sensor_auto_stopped: autoStopped,
-      sensor_auto_stop_at: autoStopped ? nowIso() : null,
+      sensor_auto_stop_at: autoStopAt,
     })
     .eq('id', machine.id)
 
@@ -166,5 +174,6 @@ export default async function handler(req, res) {
     heartbeat_id: (hbRows || [])[0]?.id || null,
     sensor_status: sensorStatus,
     sensor_auto_stopped: autoStopped,
+    sensor_auto_stop_at: autoStopAt,
   })
 }

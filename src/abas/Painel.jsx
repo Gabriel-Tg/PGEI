@@ -1222,12 +1222,12 @@ export default function Painel({
 
     return filteredMachineIds.map((machineId) => {
       const machine = String(machineId || "").toUpperCase();
-      const displayIndex = machineIds.findIndex((item) => String(item).toUpperCase() === machine);
       const ativa = (source[machine] || [])[0] || null;
       const activeOrder = activeOrderMap.get(machine) || null;
       const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
       const itemTech = itemCode ? itemTechByCode[itemCode] : null;
       const machineMeta = machineMetaById[machine] || {};
+      const machineName = String(machineMeta?.machine_name || "").trim();
       const currentStop = openStopsByMachine[machine] || null;
       const reason = currentStop?.reason || ativa?.reason || "";
       const status = ativa?.status || (ativa ? "AGUARDANDO" : "STANDBY");
@@ -1283,8 +1283,8 @@ export default function Painel({
 
       return {
         id: machine,
-        displayName: `PET-${String((displayIndex >= 0 ? displayIndex : 0) + 1).padStart(2, "0")}`,
-        machineLabel: machine,
+        displayName: machine,
+        machineLabel: machineName && machineName.toUpperCase() !== machine ? machineName : machine,
         tone,
         statusLabel,
         statusNote: status === "BAIXA_EFICIENCIA" ? "Baixa eficiência" : reason,
@@ -1325,7 +1325,7 @@ export default function Painel({
         pointingMode: getApontamentoLabel(activeOrder?.apontamentoTipo || machineTypeById[machine]),
       };
     });
-  }, [filteredMachineIds, machineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs]);
+  }, [filteredMachineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs]);
 
   const liveKpis = useMemo(() => {
     const productiveCards = machineCards.filter((card) => card.plannedPieces > 0 || card.producedPieces > 0);
@@ -1451,8 +1451,8 @@ export default function Painel({
             {machineGroupOptions.map((group) => (
               <option value={group.id} key={group.id}>{group.label}</option>
             ))}
-            {machineIds.map((machine, index) => (
-              <option value={machine} key={machine}>INJ-{String(index + 1).padStart(2, "0")} • {machine}</option>
+            {machineIds.map((machine) => (
+              <option value={machine} key={machine}>{machine}</option>
             ))}
           </select>
           <span className="monitor-icon-pill" aria-label="Notificações">○</span>

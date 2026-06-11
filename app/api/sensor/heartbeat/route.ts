@@ -56,6 +56,20 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function getAutoStopAt(lastPulseAt: unknown, cicloCadastradoSeconds: unknown): string | null {
+  const baseCycle = Number(cicloCadastradoSeconds || 0);
+  const lastPulseMs = lastPulseAt ? new Date(String(lastPulseAt)).getTime() : 0;
+  if (!(baseCycle > 0) || !lastPulseMs) return null;
+  return new Date(lastPulseMs + (baseCycle * 4 * 1000)).toISOString();
+}
+
+function shouldMarkAutoStop(lastPulseAt: unknown, cicloCadastradoSeconds: unknown): boolean {
+  const baseCycle = Number(cicloCadastradoSeconds || 0);
+  const lastPulseMs = lastPulseAt ? new Date(String(lastPulseAt)).getTime() : 0;
+  if (!(baseCycle > 0) || !lastPulseMs) return false;
+  return ((Date.now() - lastPulseMs) / 1000) >= (baseCycle * 4);
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -99,7 +113,7 @@ async function resolveAuthorizedMachine(
     const { data, error } = await supabase
       .from('machines')
       .select(
-        'id, company_id, machine_code, machine_name, active, sensor_token_hash, esp32_id'
+        'id, company_id, machine_code, machine_name, active, sensor_token_hash, esp32_id, sensor_last_pulse_at, ciclo_cadastrado_seconds'
       )
       .eq('machine_code', machineCode)
       .eq('active', true)
@@ -180,12 +194,17 @@ export async function POST(request: Request) {
       return jsonResponse({ error: 'Rate limit exceeded' }, 429);
     }
 
+    const autoStopped = shouldMarkAutoStop(machine.sensor_last_pulse_at, machine.ciclo_cadastrado_seconds);
+    const autoStopAt = autoStopped ? getAutoStopAt(machine.sensor_last_pulse_at, machine.ciclo_cadastrado_seconds) : null;
+
     // Atualizar status
     const { error: updateError } = await supabase
       .from('machines')
       .update({
         sensor_last_heartbeat_at: nowIso(),
-        sensor_status: 'online'
+        sensor_status: 'online',
+        sensor_auto_stopped: autoStopped,
+        sensor_auto_stop_at: autoStopAt,
       })
       .eq('id', machine.id);
 
@@ -196,7 +215,9 @@ export async function POST(request: Request) {
     return jsonResponse({
       ok: true,
       machine_id: machineCode,
-      status: 'online'
+      status: 'online',
+      sensor_auto_stopped: autoStopped,
+      sensor_auto_stop_at: autoStopAt,
     }, 200);
 
   } catch (error: any) {

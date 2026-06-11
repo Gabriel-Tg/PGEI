@@ -10,6 +10,8 @@ import "../styles/Pet01.css";
 import { REFUGO_MOTIVOS, MOTIVOS_PARADA } from "../domain/constants";
 import { formatRunningCycleSeconds, getRunningCycleSeconds, runningCycleTone } from "../lib/sensorRuntime";
 
+const AUTO_STOP_CYCLE_MULTIPLIER = 4;
+
 export default function Pet01({
   registroGrupos,
   ativosP1,
@@ -58,6 +60,7 @@ export default function Pet01({
   // listener de scanner: buffer e timestamps
   const scanBufferRef = useRef("");
   const lastKeyTimeRef = useRef(0);
+  const autoStopInFlightRef = useRef(null);
 
   // turno atual (usado para gravar)
 const [currentShift, setCurrentShift] = useState(() => {
@@ -178,6 +181,22 @@ const [currentShift, setCurrentShift] = useState(() => {
   const runningCycleSeconds = getRunningCycleSeconds(sensorLastPulseAt, Date.now())
   const runningCycleClass = runningCycleTone(runningCycleSeconds, configuredCycleSeconds)
 
+  const getSensorAutoStopTimestamp = useCallback(() => {
+    const backendAutoStopAt = String(machineMeta?.sensor_auto_stop_at || '').trim()
+    if (backendAutoStopAt) {
+      const parsed = DateTime.fromISO(backendAutoStopAt, { zone: 'utc' })
+      if (parsed.isValid) return parsed
+    }
+
+    const baseCycleSeconds = Number(configuredCycleSeconds || 0)
+    if (!(baseCycleSeconds > 0) || !sensorLastPulseAt) return null
+
+    const lastPulse = DateTime.fromISO(sensorLastPulseAt, { zone: 'utc' })
+    if (!lastPulse.isValid) return null
+
+    return lastPulse.plus({ seconds: baseCycleSeconds * AUTO_STOP_CYCLE_MULTIPLIER })
+  }, [configuredCycleSeconds, machineMeta?.sensor_auto_stop_at, sensorLastPulseAt])
+
   useEffect(() => {
     setSensorLastPulseAt(machineMeta?.sensor_last_pulse_at || null)
     setSensorOperationMode(machineMeta?.sensor_operation_mode || 'automatic')
@@ -215,27 +234,32 @@ const [currentShift, setCurrentShift] = useState(() => {
   useEffect(() => {
     if (!ativa || !machineMeta || !onStatusChange) {
       setAutoStopPromptedOrderId(null)
+      autoStopInFlightRef.current = null
       return
     }
 
+    const autoStopTimestamp = getSensorAutoStopTimestamp()
     const sensorAutoStopped = Boolean(machineMeta.sensor_auto_stopped)
+      || Boolean(autoStopTimestamp?.isValid && DateTime.now().toMillis() >= autoStopTimestamp.toMillis())
     const activeStatus = String(ativa.status || '').toUpperCase()
     const isProducing = activeStatus === 'PRODUZINDO' || activeStatus === 'BAIXA_EFICIENCIA'
 
     if (!sensorAutoStopped || !isProducing) {
       setAutoStopPromptedOrderId(null)
+      autoStopInFlightRef.current = null
       return
     }
     if (autoStopPromptedOrderId === ativa.id) return
+    if (autoStopInFlightRef.current === ativa.id) return
 
-    const autoStopAt = machineMeta.sensor_auto_stop_at || machineMeta.sensor_last_pulse_at
-    const stopAt = autoStopAt
-      ? DateTime.fromISO(autoStopAt, { zone: 'utc' }).setZone('America/Sao_Paulo')
+    const stopAt = autoStopTimestamp?.isValid
+      ? autoStopTimestamp.setZone('America/Sao_Paulo')
       : DateTime.now().setZone('America/Sao_Paulo')
 
     const timestamp = stopAt.isValid ? stopAt : DateTime.now().setZone('America/Sao_Paulo')
 
     async function confirmSensorStop() {
+      autoStopInFlightRef.current = ativa.id
       const statusResult = await onStatusChange(ativa, 'PARADA', { autoStop: true })
       const modalPayload = {
         ordem: ativa,
@@ -254,8 +278,12 @@ const [currentShift, setCurrentShift] = useState(() => {
       }
     }
 
-    confirmSensorStop()
-  }, [ativa, machineMeta, onStatusChange, setStopModal, autoStopPromptedOrderId, showToast])
+    confirmSensorStop().catch((err) => {
+      autoStopInFlightRef.current = null
+      console.error('Erro ao registrar parada automática do sensor:', err)
+      showToast('Falha ao abrir parada automática do sensor.', 'err', 4200)
+    })
+  }, [ativa, machineMeta, onStatusChange, setStopModal, autoStopPromptedOrderId, showToast, getSensorAutoStopTimestamp, tick])
 
   const formatInt = useCallback((n) => {
     const num = Number(n) || 0;
@@ -458,10 +486,27 @@ const [currentShift, setCurrentShift] = useState(() => {
         created_at: nowBr.toUTC().toISO(),
       };
 
-      const { error } = await supabase.from("shift_responsibles").upsert([payload]);
+      const { error } = await supabase.from("shift_responsibles").insert([payload]);
       if (error) throw error;
 
+      const updateOrdersQuery = withClient(supabase
+        .from("orders")
+        .update({ started_by: nome }))
+        .eq("machine_id", machineId)
+        .gte("started_at", shiftInfo.start.toUTC().toISO())
+        .lt("started_at", shiftInfo.end.toUTC().toISO())
+        .or("started_by.is.null,started_by.eq.");
+
+      const { error: ordersError } = await updateOrdersQuery;
+      if (ordersError) throw ordersError;
+
       setResponsavelTurno(nome);
+      setAtiva((prev) => prev && !String(prev.started_by || "").trim()
+        ? { ...prev, started_by: nome }
+        : prev);
+      setProximo((prev) => prev && !String(prev.started_by || "").trim() && prev.started_at
+        ? { ...prev, started_by: nome }
+        : prev);
       setResponsavelModalOpen(false);
       setResponsavelKey(`${shiftInfo.shiftKey}-${shiftInfo.start.toISODate()}`);
       showToast("Responsável registrado.", "ok");

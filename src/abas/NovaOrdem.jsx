@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { MAQUINAS } from '../domain/constants'
 import Modal from '../components/Modal'
 
-export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
+export default function NovaOrdem({ form, setForm, criarOrdem, setTab, machineIds = MAQUINAS }) {
   // ====== Busca de itens ligada ao campo "Produto" ======
   const [qProd, setQProd] = useState(form.product || '') // espelho do campo Produto
   const [suggestions, setSuggestions] = useState([])
@@ -312,8 +312,10 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab }) {
               className="select"
               value={form.machine_id}
               onChange={e=>setForm(f=>({...f, machine_id:e.target.value}))}
+              disabled={!machineIds.length}
             >
-              {MAQUINAS.map(m=><option key={m} value={m}>{m}</option>)}
+              {machineIds.length === 0 && <option value="">Nenhuma máquina cadastrada</option>}
+              {machineIds.map(m=><option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 

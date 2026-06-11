@@ -179,6 +179,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   const [machinesResolved, setMachinesResolved] = useState(false)
   const [itemTechByCode, setItemTechByCode] = useState({})
   const tenantCompanyId = tenantCompany?.id || null
+  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantCompanyId)
   const machineIds = useMemo(() => {
     if (!tenantCompanyId) return MAQUINAS
     return tenantMachines
@@ -187,7 +188,19 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   }, [tenantCompanyId, tenantMachines])
   const tenantMachinesReady = !tenantCompanyId || machinesResolved
 
-  const { authUser, authChecked, isAdmin, hasAccess, tenantAccessChecked, permissions } = useAuthAdmin(tenantCompanyId)
+  useEffect(() => {
+    if (!tenantMachinesReady) return
+
+    setForm((prev) => {
+      const currentMachineId = String(prev.machine_id || '').toUpperCase()
+      if (machineIds.includes(currentMachineId)) {
+        return currentMachineId === prev.machine_id ? prev : { ...prev, machine_id: currentMachineId }
+      }
+
+      return { ...prev, machine_id: machineIds[0] || '' }
+    })
+  }, [machineIds, tenantMachinesReady])
+
   const canViewDashboard = !!authUser && !!permissions?.canViewDashboard
   const canUseProduction = !!permissions?.canRegisterProduction
   const canApproveOperational = !!permissions?.canApproveOperational
@@ -373,7 +386,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
     createOrder, updateOrder, sendToQueue, finalizeOrder,
     confirmStart, confirmStop, confirmResume, confirmLowEfficiency, confirmEndLowEfficiency,
     activeByMachine, orderRecordGroups, lastFinalizedByMachine, onStatusChange
-  } = useOrders(tenantCompanyId)
+  } = useOrders(tenantCompanyId, machineIds)
   const ativosPorMaquina = activeByMachine || {}
 
   const activeItemCodes = useMemo(() => {
@@ -454,8 +467,11 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   const navigate = useNavigate()
 
   function getDefaultRouteSlug(machineCode) {
-    const m = String(machineCode || '').toUpperCase().match(/^P(\d+)$/)
-    if (m) return `pet-${String(Number(m[1])).padStart(2, '0')}`
+    const code = String(machineCode || '').toUpperCase()
+    const injectionMatch = code.match(/^I(\d+)$/)
+    if (injectionMatch) return `inj-${String(Number(injectionMatch[1])).padStart(2, '0')}`
+    const petMatch = code.match(/^P(\d+)$/)
+    if (petMatch) return `pet-${String(Number(petMatch[1])).padStart(2, '0')}`
     return String(machineCode || '').trim().toLowerCase()
   }
 
@@ -468,10 +484,14 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
 
   function getMachineRouteSlugs(machine) {
     const primarySlug = normalizeRouteSlug(machine?.route_slug) || normalizeRouteSlug(getDefaultRouteSlug(machine?.machine_code))
+    const defaultSlug = normalizeRouteSlug(getDefaultRouteSlug(machine?.machine_code))
     const slugs = new Set([
       primarySlug,
+      defaultSlug,
       primarySlug.replace(/-0(\d+)$/, '-$1'),
+      defaultSlug.replace(/-0(\d+)$/, '-$1'),
       primarySlug.replace(/-/g, ''),
+      defaultSlug.replace(/-/g, ''),
     ])
     return Array.from(slugs).filter(Boolean)
   }
@@ -487,13 +507,33 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
         return
       }
 
+      if (!authChecked || !tenantAccessChecked) {
+        setMachinesLoading(true)
+        return
+      }
+
+      if (!authUser || !hasAccess) {
+        setTenantMachines([])
+        setMachinesLoading(false)
+        setMachinesResolved(true)
+        return
+      }
+
       setMachinesLoading(true)
-      const { data, error } = await supabase
+      const selectMachines = (columns) => supabase
         .from('machines')
-        .select('id, company_id, machine_code, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count')
+        .select(columns)
         .eq('company_id', tenantCompanyId)
         .eq('active', true)
         .order('machine_code', { ascending: true })
+
+      let { data, error } = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds')
+
+      if (error) {
+        const fallback = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active')
+        data = fallback.data
+        error = fallback.error
+      }
 
       if (cancelled) return
 
@@ -509,7 +549,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
 
     loadTenantMachines()
     return () => { cancelled = true }
-  }, [tenantCompanyId])
+  }, [authChecked, authUser, hasAccess, tenantAccessChecked, tenantCompanyId])
 
   useEffect(() => {
     async function loadPriorities() {
