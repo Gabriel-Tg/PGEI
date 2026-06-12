@@ -38,8 +38,9 @@ const char* OTA_PASSWORD = "otasavanti";
 
 #define SENSOR_PIN 32
 #define BAUD_RATE 115200
-#define SENSOR_ACTIVE_LEVEL HIGH
-#define SENSOR_INACTIVE_LEVEL LOW
+#define SENSOR_ACTIVE_LEVEL LOW
+#define SENSOR_INACTIVE_LEVEL HIGH
+#define SENSOR_DEBOUNCE_MS 100
 #define DEBUG_SENSOR_TRANSITIONS 1
 
 #define EVENT_QUEUE_SIZE 500
@@ -51,6 +52,7 @@ const char* OTA_PASSWORD = "otasavanti";
 
 struct PulseEvent {
   uint64_t timestamp;
+  uint32_t millisAt;
 };
 struct SensorTransition {
   uint64_t timestamp;
@@ -65,6 +67,9 @@ volatile uint16_t queueHead = 0;
 volatile uint16_t queueTail = 0;
 volatile uint16_t queueCount = 0;
 volatile bool cycleActive = false;
+volatile bool sensorChangePending = false;
+volatile uint32_t lastSensorInterruptMs = 0;
+int stableSensorLevel = SENSOR_INACTIVE_LEVEL;
 SensorTransition transitionQueue[TRANSITION_QUEUE_SIZE];
 volatile uint16_t transitionHead = 0;
 volatile uint16_t transitionTail = 0;
@@ -79,12 +84,13 @@ void reconnectWifiIfNeeded();
 void setupOTA();
 void setupTime();
 bool isTimeValid();
-bool enqueueEvent(uint64_t ts);
-bool enqueueEventFromIsr(uint64_t ts);
+bool enqueueEvent(uint64_t ts, uint32_t millisAt);
+bool enqueueEventFromSensor(uint64_t ts, uint32_t millisAt);
 bool dequeueEvent(PulseEvent &evt);
 bool enqueueTransitionFromIsr(uint64_t ts, uint32_t millisAt, int level, bool cycleActiveAfter, bool eventQueued, bool eventQueueFull);
 bool dequeueTransition(SensorTransition &transition);
 void handleSensorChange();
+void processSensorChange();
 void processEvents();
 void processSensorTransitionLogs();
 void sendHeartbeat();
@@ -171,10 +177,11 @@ void setup() {
   Serial.println(" ARGOS ESP32 PRODUCAO - VERSAO 2.2.0");
   Serial.println("=========================================");
 
-  pinMode(SENSOR_PIN, INPUT_PULLDOWN);
-  cycleActive = digitalRead(SENSOR_PIN) == SENSOR_ACTIVE_LEVEL;
-  Serial.printf("[Sensor] Nivel inicial: %s | ativo=%s | contabiliza em %s -> %s\n",
-    sensorLevelName(digitalRead(SENSOR_PIN)),
+  pinMode(SENSOR_PIN, INPUT_PULLUP);
+  stableSensorLevel = digitalRead(SENSOR_PIN);
+  cycleActive = stableSensorLevel == SENSOR_ACTIVE_LEVEL;
+  Serial.printf("[Sensor] Nivel inicial: %s | entrada=INPUT_PULLUP | ativo=%s | contabiliza em %s -> %s\n",
+    sensorLevelName(stableSensorLevel),
     sensorLevelName(SENSOR_ACTIVE_LEVEL),
     sensorLevelName(SENSOR_ACTIVE_LEVEL),
     sensorLevelName(SENSOR_INACTIVE_LEVEL));
@@ -203,6 +210,7 @@ void loop() {
 
   ArduinoOTA.handle();
 
+  processSensorChange();
   processSensorTransitionLogs();
 
   reconnectWifiIfNeeded();
@@ -230,8 +238,32 @@ void loop() {
 // ================================================================================
 
 void IRAM_ATTR handleSensorChange() {
+  lastSensorInterruptMs = millis();
+  sensorChangePending = true;
+}
+
+void processSensorChange() {
   uint32_t ms = millis();
+  uint32_t lastInterruptMs;
+
+  noInterrupts();
+  lastInterruptMs = lastSensorInterruptMs;
+  interrupts();
+
+  if (!sensorChangePending || (uint32_t)(ms - lastInterruptMs) < SENSOR_DEBOUNCE_MS) {
+    return;
+  }
+
+  noInterrupts();
+  sensorChangePending = false;
+  interrupts();
+
   int sensorLevel = digitalRead(SENSOR_PIN);
+  if (sensorLevel == stableSensorLevel) {
+    return;
+  }
+
+  stableSensorLevel = sensorLevel;
   uint64_t t = (uint64_t)time(nullptr);
   if (!isTimeValid()) t = 0;
 
@@ -247,7 +279,7 @@ void IRAM_ATTR handleSensorChange() {
   }
 
   cycleActive = false;
-  bool eventQueued = enqueueEventFromIsr(t);
+  bool eventQueued = enqueueEventFromSensor(t, ms);
   enqueueTransitionFromIsr(t, ms, sensorLevel, cycleActive, eventQueued, !eventQueued);
 }
 
@@ -307,11 +339,12 @@ void processSensorTransitionLogs() {
 // FILA CIRCULAR DE EVENTOS
 // ================================================================================
 
-bool enqueueEvent(uint64_t ts) {
+bool enqueueEvent(uint64_t ts, uint32_t millisAt) {
   bool queued = false;
   noInterrupts();
   if (queueCount < EVENT_QUEUE_SIZE) {
     eventQueue[queueHead].timestamp = ts;
+    eventQueue[queueHead].millisAt = millisAt;
     queueHead = (queueHead+1) % EVENT_QUEUE_SIZE;
     queueCount++;
     queued = true;
@@ -319,9 +352,10 @@ bool enqueueEvent(uint64_t ts) {
   interrupts();
   return queued;
 }
-bool IRAM_ATTR enqueueEventFromIsr(uint64_t ts) {
+bool enqueueEventFromSensor(uint64_t ts, uint32_t millisAt) {
   if (queueCount >= EVENT_QUEUE_SIZE) return false;
   eventQueue[queueHead].timestamp = ts;
+  eventQueue[queueHead].millisAt = millisAt;
   queueHead = (queueHead+1) % EVENT_QUEUE_SIZE;
   queueCount++;
   return true;
@@ -387,7 +421,7 @@ void processEvents() {
     if (evt.timestamp == 0) evt.timestamp = (uint64_t)time(nullptr);
     if (!isTimeValid()) {
       // Falha NTP, re-insere evento na fila
-      enqueueEvent(evt.timestamp);
+      enqueueEvent(evt.timestamp, evt.millisAt);
       break;
     }
 
@@ -399,12 +433,12 @@ void processEvents() {
 
     if (!http.begin(client, API_URL)) {
       Serial.println("❌ [Evento] HTTP begin falhou");
-      enqueueEvent(evt.timestamp);
+      enqueueEvent(evt.timestamp, evt.millisAt);
       delay(1000);
       break;
     }
 
-    String eventUid = String(ESP32_ID) + "-" + String((unsigned long)evt.timestamp);
+    String eventUid = String(ESP32_ID) + "-" + String((unsigned long)evt.timestamp) + "-" + String((unsigned long)evt.millisAt);
 
     StaticJsonDocument<384> doc;
     doc["machine_id"] = MACHINE_ID;
@@ -422,11 +456,11 @@ void processEvents() {
     int code = http.POST(json);
 
     if (code >= 200 && code < 300) {
-      Serial.printf("✓ [Evento] Enviado: ts=%llu | event_uid=%s | code=%d\n", evt.timestamp, eventUid.c_str(), code);
+      Serial.printf("✓ [Evento] Enviado: ts=%llu | ms=%lu | event_uid=%s | code=%d\n", evt.timestamp, (unsigned long)evt.millisAt, eventUid.c_str(), code);
     } else {
       String response = http.getString();
       Serial.printf("❌ [Evento] Falha envio | HTTP=%d | Resp=%s | Reinserindo fila\n", code, response.c_str());
-      if (!enqueueEvent(evt.timestamp)) {
+      if (!enqueueEvent(evt.timestamp, evt.millisAt)) {
         Serial.println("❌ [Evento] Fila cheia, não foi possível reinserir evento");
       }
       http.end();

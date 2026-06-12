@@ -135,7 +135,8 @@ const char* ESP32_ID = "ESP32_INJETORA_01";
 ```
 
 **Detalhes:**
-- **Sensor GPIO**: GPIO32 (entrada com debounce de 100ms)
+- **Sensor GPIO**: GPIO32 (entrada `INPUT_PULLUP`, ativo em `LOW`)
+- **Pulso esperado**: o sensor/opto deve puxar o GPIO32 para GND quando aciona e soltar para HIGH ao finalizar
 - **Optoacoplador PC817**: Isola sensor da placa (recomendado)
 - **Debounce**: Já implementado no firmware (DEBOUNCE_DELAY_MS = 100ms)
 

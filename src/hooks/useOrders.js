@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import { mapOrder } from '../domain/entities'
+import { fetchAllPages } from '../lib/supabasePagination'
 
 export default function useOrders(clientId = null, machineIds = MAQUINAS){
   const [orders, setOrders] = useState([])
@@ -21,13 +22,14 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
     const orderIds = rows.map((o) => o?.id).filter(Boolean)
     if (!orderIds.length) return rows
 
-    let query = supabase
-      .from('injection_production_entries')
-      .select('order_id, good_qty, pulse_count, cavities_used')
-      .in('order_id', orderIds)
+    const { data, error } = await fetchAllPages(() => {
+      let query = supabase
+        .from('injection_production_entries')
+        .select('order_id, good_qty, pulse_count, cavities_used')
+        .in('order_id', orderIds)
 
-    query = withClient(query)
-    const { data, error } = await query
+      return withClient(query)
+    })
     if (error) {
       console.warn('Falha ao carregar producao por sensor:', error)
       return rows

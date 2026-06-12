@@ -230,36 +230,10 @@ export default async function handler(req, res) {
     return
   }
 
-  const { data: lastEventRows, error: lastEventError } = await supabase
-    .from('machine_sensor_events')
-    .select('created_at, pulse_count, id')
-    .eq('company_id', companyId)
-    .eq('machine_id', machineCode)
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  if (lastEventError) {
-    sendJson(res, 500, { error: lastEventError.message || 'Unable to check flood window' })
+  const previousPulseMs = machine.sensor_last_pulse_at ? new Date(machine.sensor_last_pulse_at).getTime() : 0
+  if (previousPulseMs > 0 && Date.now() - previousPulseMs < 150) {
+    sendJson(res, 429, { error: 'Flood protection active' })
     return
-  }
-
-  const lastEvent = (lastEventRows || [])[0]
-  if (lastEvent?.created_at) {
-    const elapsedMs = Date.now() - new Date(lastEvent.created_at).getTime()
-    if (elapsedMs < 150) {
-      sendJson(res, 429, { error: 'Flood protection active' })
-      return
-    }
-
-    if (!eventUid && lastEvent.pulse_count === pulseCount && elapsedMs < 2_000) {
-      sendJson(res, 200, {
-        ok: true,
-        duplicate: true,
-        machine_id: machineCode,
-        event_uid: null,
-      })
-      return
-    }
   }
 
   const { data: activeOrders, error: activeOrderError } = await supabase
@@ -340,7 +314,6 @@ export default async function handler(req, res) {
   const producedQuantity = isIgnoredEvent ? 0 : (activeOrder ? pulseCount * cavitiesUsed : 0)
 
   const nowMs = Date.now()
-  const previousPulseMs = machine.sensor_last_pulse_at ? new Date(machine.sensor_last_pulse_at).getTime() : 0
   const cycleRealSeconds = !isIgnoredEvent && previousPulseMs > 0 && nowMs > previousPulseMs
     ? roundCycle((nowMs - previousPulseMs) / 1000 / Math.max(1, pulseCount))
     : null
@@ -358,95 +331,52 @@ export default async function handler(req, res) {
     : false
   const autoStopAt = isAutoStopped ? getAutoStopAt(previousPulseMs, cicloCadastrado) : null
 
-  const eventPayload = {
-    company_id: companyId,
-    machine_id: machineCode,
-    order_id: activeOrder?.id || null,
-    pulse_count: pulseCount,
-    cavities_used: cavitiesUsed,
-    produced_quantity: producedQuantity,
-    esp32_id: esp32Id,
-    source_ip: sourceIp || null,
-    created_by: 'esp32',
-    event_uid: eventUid || null,
-    is_ignored: isIgnoredEvent,
-    ignore_reason: ignoreReason,
-    request_payload: {
-      pulse_count: pulseCount,
-      esp32_id: esp32Id,
-      machine_id: machineCode,
-      received_at: receivedAt,
-      cycle_real_seconds: cycleRealSeconds,
-      cycle_avg_seconds: nextAvgCycle,
-      sensor_operation_mode: operationMode,
-      shift: shiftWindow?.shiftKey || null,
-      shift_operator: shiftOperator || null,
-    },
-  }
+  let aggregateRecord = null
+  if (!isIgnoredEvent && activeOrder && producedQuantity > 0) {
+    const { data: aggregateRows, error: aggregateError } = await supabase
+      .rpc('record_sensor_order_cycle', {
+        p_company_id: companyId,
+        p_order_id: activeOrder.id,
+        p_machine_id: machineCode,
+        p_product: activeOrder.product || null,
+        p_pulse_count: pulseCount,
+        p_cavities_used: cavitiesUsed,
+        p_produced_quantity: producedQuantity,
+        p_pulse_timestamp: receivedAt,
+        p_cycle_seconds: cycleRealSeconds,
+        p_cycle_avg_seconds: nextAvgCycle,
+        p_ciclo_cadastrado_seconds: cicloCadastrado > 0 ? Math.trunc(cicloCadastrado) : null,
+        p_esp32_id: esp32Id,
+        p_event_uid: eventUid || null,
+        p_request_payload: {
+          pulse_count: pulseCount,
+          esp32_id: esp32Id,
+          machine_id: machineCode,
+          received_at: receivedAt,
+          cycle_real_seconds: cycleRealSeconds,
+          cycle_avg_seconds: nextAvgCycle,
+          sensor_operation_mode: operationMode,
+          shift: shiftWindow?.shiftKey || null,
+          shift_operator: shiftOperator || null,
+          source_ip: sourceIp || null,
+        },
+        p_shift: shiftWindow?.shiftKey || null,
+      })
 
-  const { data: eventRows, error: eventError } = await supabase
-    .from('machine_sensor_events')
-    .insert(eventPayload)
-    .select('id, created_at')
-    .limit(1)
+    if (aggregateError) {
+      sendJson(res, 500, { error: aggregateError.message || 'Unable to aggregate sensor production' })
+      return
+    }
 
-  if (eventError) {
-    if (String(eventError.code || '') === '23505') {
+    aggregateRecord = (Array.isArray(aggregateRows) ? aggregateRows[0] : aggregateRows) || null
+    if (aggregateRecord?.duplicate) {
       sendJson(res, 200, {
         ok: true,
         duplicate: true,
         machine_id: machineCode,
         event_uid: eventUid || null,
+        aggregate_id: aggregateRecord.aggregate_id || null,
       })
-      return
-    }
-    sendJson(res, 500, { error: eventError.message || 'Unable to save sensor event' })
-    return
-  }
-
-  const event = (eventRows || [])[0]
-
-  if (!isIgnoredEvent && cycleRealSeconds) {
-    const { error: cycleHistoryError } = await supabase
-      .from('machine_cycle_history')
-      .insert({
-        company_id: companyId,
-        machine_id: machineCode,
-        order_id: activeOrder?.id || null,
-        sensor_event_id: event?.id || null,
-        pulse_timestamp: event?.created_at || nowIso(),
-        cycle_seconds: cycleRealSeconds,
-        cycle_avg_seconds: nextAvgCycle,
-        ciclo_cadastrado_seconds: cicloCadastrado > 0 ? Math.trunc(cicloCadastrado) : null,
-        machine_status: machine.sensor_status || 'online',
-        esp32_id: esp32Id,
-        created_by: 'esp32',
-      })
-
-    if (cycleHistoryError) {
-      sendJson(res, 500, { error: cycleHistoryError.message || 'Unable to persist cycle history' })
-      return
-    }
-  }
-
-  if (!isIgnoredEvent && activeOrder && producedQuantity > 0) {
-    const { error: entryError } = await supabase
-      .from('injection_production_entries')
-      .insert({
-        company_id: companyId,
-        order_id: activeOrder.id,
-        machine_id: machineCode,
-        good_qty: producedQuantity,
-        product: activeOrder.product || null,
-        shift: shiftWindow?.shiftKey || null,
-        source: 'sensor',
-        pulse_count: pulseCount,
-        cavities_used: cavitiesUsed,
-        sensor_event_id: event?.id || null,
-      })
-
-    if (entryError) {
-      sendJson(res, 500, { error: entryError.message || 'Unable to persist production entry' })
       return
     }
   }
@@ -500,6 +430,7 @@ export default async function handler(req, res) {
     remaining_ignored_cycles: isSemiAutomaticIgnore ? Math.max(ignoreCountLeft - 1, 0) : 0,
     sensor_operation_mode: operationMode,
     sensor_status: sensorStatus,
-    event_id: event?.id || null,
+    aggregate_id: aggregateRecord?.aggregate_id || null,
+    event_id: null,
   })
 }

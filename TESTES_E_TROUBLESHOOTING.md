@@ -41,7 +41,7 @@
 ### O que fazer:
 1. Conecte um fio do GND do ESP32 ao GND do sensor
 2. Conecte um fio do GPIO32 ao pino de sinal do sensor (via optoacoplador)
-3. Simule um pulso conectando GPIO32 a 3.3V brevemente (< 100ms)
+3. Simule um pulso encostando GPIO32 no GND brevemente e depois soltando
 4. Observe Serial Monitor
 
 ### Resultado esperado:
@@ -58,7 +58,7 @@
 **Soluções:**
 ```
 1. Verifique conexão GPIO32 (multímetro)
-2. Aumente DEBOUNCE_DELAY_MS se tiver ruído
+2. Confirme que o sinal fica HIGH parado e vai para LOW quando o sensor aciona
 3. Teste com LED: digitalWrite(LED, !LED) em setup()
 4. Verifique alimentação do sensor (5V)
 5. Teste com pushbutton simples em GPIO32

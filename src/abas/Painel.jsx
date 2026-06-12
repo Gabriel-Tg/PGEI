@@ -5,6 +5,7 @@ import { MAQUINAS, STATUS } from "../domain/constants";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
 import { ACTIVE_TURNOS, getShiftWindowAt } from "../lib/shifts";
+import { fetchAllPages } from "../lib/supabasePagination";
 
 function extractItemCodeFromOrderProduct(product) {
   if (!product) return null;
@@ -557,17 +558,22 @@ export default function Painel({
         .select("machine_code, machine_name, sensor_status, sensor_last_pulse_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_last_heartbeat_at, sensor_auto_stopped, sensor_auto_stop_at")
         .in("machine_code", sensorMachines);
 
-      let entriesQuery = supabase
-        .from("injection_production_entries")
-        .select("order_id, good_qty, pulse_count, cavities_used")
-        .in("order_id", activeOrderIds);
-
       if (clientId) {
         machinesQuery = machinesQuery.eq("company_id", clientId);
-        entriesQuery = entriesQuery.eq("company_id", clientId);
       }
 
-      const [machinesRes, entriesRes] = await Promise.all([machinesQuery, entriesQuery]);
+      const [machinesRes, entriesRes] = await Promise.all([
+        machinesQuery,
+        fetchAllPages(() => {
+          let query = supabase
+            .from("injection_production_entries")
+            .select("order_id, good_qty, pulse_count, cavities_used")
+            .in("order_id", activeOrderIds);
+
+          if (clientId) query = query.eq("company_id", clientId);
+          return query;
+        }),
+      ]);
       if (cancelled) return;
 
       if (!machinesRes?.error) {
@@ -661,12 +667,6 @@ export default function Painel({
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
-      let entriesQuery = supabase
-        .from("injection_production_entries")
-        .select("id, created_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
-        .gte("created_at", startIso)
-        .lte("created_at", endIso);
-
       let stopsQuery = supabase
         .from("machine_stops")
         .select("id, machine_id, reason, started_at, resumed_at")
@@ -687,7 +687,6 @@ export default function Painel({
 
       if (clientId) {
         scansQuery = scansQuery.eq("company_id", clientId);
-        entriesQuery = entriesQuery.eq("company_id", clientId);
         stopsQuery = stopsQuery.eq("company_id", clientId);
         lowEffQuery = lowEffQuery.eq("company_id", clientId);
         scrapQuery = scrapQuery.eq("company_id", clientId);
@@ -695,7 +694,6 @@ export default function Painel({
 
       if (filteredMachineIds.length > 0 && filteredMachineIds.length < machineIds.length) {
         scansQuery = scansQuery.in("machine_id", filteredMachineIds);
-        entriesQuery = entriesQuery.in("machine_id", filteredMachineIds);
         stopsQuery = stopsQuery.in("machine_id", filteredMachineIds);
         lowEffQuery = lowEffQuery.in("machine_id", filteredMachineIds);
         scrapQuery = scrapQuery.in("machine_id", filteredMachineIds);
@@ -703,7 +701,19 @@ export default function Painel({
 
       const [scansRes, entriesRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([
         scansQuery,
-        entriesQuery,
+        fetchAllPages(() => {
+          let query = supabase
+            .from("injection_production_entries")
+            .select("id, created_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+            .gte("created_at", startIso)
+            .lte("created_at", endIso);
+
+          if (clientId) query = query.eq("company_id", clientId);
+          if (filteredMachineIds.length > 0 && filteredMachineIds.length < machineIds.length) {
+            query = query.in("machine_id", filteredMachineIds);
+          }
+          return query;
+        }),
         stopsQuery,
         lowEffQuery,
         scrapQuery,
@@ -769,17 +779,22 @@ export default function Painel({
           .select("order_id, qty_pieces")
           .in("order_id", activeOrderIds);
 
-        let activeEntriesQuery = supabase
-          .from("injection_production_entries")
-          .select("order_id, good_qty, pulse_count, cavities_used")
-          .in("order_id", activeOrderIds);
-
         if (clientId) {
           activeScansQuery = activeScansQuery.eq("company_id", clientId);
-          activeEntriesQuery = activeEntriesQuery.eq("company_id", clientId);
         }
 
-        const [activeScansRes, activeEntriesRes] = await Promise.all([activeScansQuery, activeEntriesQuery]);
+        const [activeScansRes, activeEntriesRes] = await Promise.all([
+          activeScansQuery,
+          fetchAllPages(() => {
+            let query = supabase
+              .from("injection_production_entries")
+              .select("order_id, good_qty, pulse_count, cavities_used")
+              .in("order_id", activeOrderIds);
+
+            if (clientId) query = query.eq("company_id", clientId);
+            return query;
+          }),
+        ]);
         if (cancelled) return;
 
         (activeScansRes?.data || []).forEach((row) => {
@@ -1042,16 +1057,22 @@ export default function Painel({
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "injection_production_entries" },
+        { event: "*", schema: "public", table: "injection_production_entries" },
         (payload) => {
+          if (payload?.eventType !== "INSERT" && payload?.eventType !== "UPDATE") return;
           const row = payload?.new;
           if (!row) return;
           if (clientId && String(row.company_id || "") !== String(clientId)) return;
 
           const orderId = String(row.order_id || "");
           const machine = String(row.machine_id || "").trim().toUpperCase();
-          const goodQty = Number(row.good_qty || 0);
-          const pulseCount = Number(row.pulse_count || 0);
+          const isUpdate = payload?.eventType === "UPDATE";
+          const goodQty = isUpdate
+            ? Number(row.sensor_last_delta_qty || 0)
+            : Number(row.good_qty || 0);
+          const pulseCount = isUpdate
+            ? Number(row.sensor_last_delta_pulse_count || 0)
+            : Number(row.pulse_count || 0);
           const cavitiesUsed = Number(row.cavities_used || 0);
           if (!orderId || goodQty <= 0) {
             setPeriodRefreshNonce((prev) => prev + 1);
@@ -1082,7 +1103,7 @@ export default function Painel({
           });
 
           if (machine) {
-            const pulseAt = row.created_at || new Date().toISOString();
+            const pulseAt = row.sensor_last_pulse_at || row.updated_at || row.created_at || new Date().toISOString();
             const sensorEventId = row.sensor_event_id ? String(row.sensor_event_id) : null;
             setSensorRuntimeByMachine((prev) => {
               const baseMeta = machineMetaByIdRef.current[machine] || {};
