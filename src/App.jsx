@@ -527,7 +527,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
         .eq('active', true)
         .order('machine_code', { ascending: true })
 
-      let { data, error } = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds')
+      let { data, error } = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, ciclo_cadastrado_seconds')
 
       if (error) {
         const fallback = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active')

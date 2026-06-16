@@ -1,27 +1,16 @@
 -- 08_sensor_semi_automatic_mode.sql
--- Suporte a modo de operação semi-automático do sensor e contagem de pulsos ignorados.
+-- Remove modo de operacao semi-automatico do sensor. O status passa a depender do heartbeat.
 
 begin;
 
 alter table public.machines
-  add column if not exists sensor_operation_mode text not null default 'automatic',
-  add column if not exists sensor_ignore_pulse_count integer not null default 0;
-
-alter table public.machines
-  drop constraint if exists machines_sensor_operation_mode_check;
-
-alter table public.machines
-  add constraint machines_sensor_operation_mode_check
-  check (sensor_operation_mode in ('automatic', 'semi_automatic'));
-
-alter table public.machines
+  drop constraint if exists machines_sensor_operation_mode_check,
   drop constraint if exists machines_sensor_ignore_pulse_count_check;
 
-alter table public.machines
-  add constraint machines_sensor_ignore_pulse_count_check
-  check (sensor_ignore_pulse_count >= 0);
+drop index if exists public.idx_machines_sensor_operation_mode;
 
-create index if not exists idx_machines_sensor_operation_mode
-  on public.machines (sensor_operation_mode);
+alter table public.machines
+  drop column if exists sensor_operation_mode,
+  drop column if exists sensor_ignore_pulse_count;
 
 commit;

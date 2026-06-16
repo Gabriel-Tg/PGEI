@@ -29,12 +29,54 @@ export default function GlobalModals({
       const now = DateTime.local();
       setStopModal(v => ({
         ...v,
-        data: now.toFormat('yyyy-LL-dd'),
-        hora: now.toFormat('HH:mm'),
+        data: v?.autoStop && v?.data ? v.data : now.toFormat('yyyy-LL-dd'),
+        hora: v?.autoStop && v?.hora ? v.hora : now.toFormat('HH:mm'),
         __initApplied: true,
       }));
     }
   }, [stopModal, setStopModal]);
+
+  useEffect(() => {
+    if (!stopModal?.autoStop) return undefined
+
+    let audioContext = null
+    let intervalId = null
+    let cancelled = false
+
+    const playAlert = () => {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext
+        if (!AudioCtx) return
+        audioContext = audioContext || new AudioCtx()
+        if (audioContext.state === 'suspended') audioContext.resume().catch(() => {})
+
+        const oscillator = audioContext.createOscillator()
+        const gain = audioContext.createGain()
+        oscillator.type = 'sine'
+        oscillator.frequency.setValueAtTime(880, audioContext.currentTime)
+        gain.gain.setValueAtTime(0.0001, audioContext.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.45)
+        oscillator.connect(gain)
+        gain.connect(audioContext.destination)
+        oscillator.start()
+        oscillator.stop(audioContext.currentTime + 0.5)
+      } catch (err) {
+        console.warn('Falha ao tocar alerta sonoro de parada automática:', err)
+      }
+    }
+
+    playAlert()
+    intervalId = window.setInterval(() => {
+      if (!cancelled) playAlert()
+    }, 1400)
+
+    return () => {
+      cancelled = true
+      if (intervalId) window.clearInterval(intervalId)
+      if (audioContext) audioContext.close().catch(() => {})
+    }
+  }, [stopModal?.autoStop])
 
   useEffect(() => {
     if (startModal && !startModal.__initApplied) {
@@ -53,8 +95,8 @@ export default function GlobalModals({
       const now = DateTime.local();
       setResumeModal(v => ({
         ...v,
-        data: now.toFormat('yyyy-LL-dd'),
-        hora: now.toFormat('HH:mm'),
+        data: v?.autoResume && v?.data ? v.data : now.toFormat('yyyy-LL-dd'),
+        hora: v?.autoResume && v?.hora ? v.hora : now.toFormat('HH:mm'),
         __initApplied: true,
       }));
     }
@@ -166,7 +208,8 @@ export default function GlobalModals({
       {/* Parada */}
       <Modal
         open={!!stopModal}
-        onClose={()=>setStopModal(null)}
+        onClose={()=>{}}
+        closeOnBackdrop={false}
         title={(() => {
           const order = resolveModalOrder(stopModal)
           return stopModal ? `Parar máquina • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
@@ -174,19 +217,15 @@ export default function GlobalModals({
       >
         {stopModal && (
           <div className="grid">
-            <div><div className="label">Operador *</div><input className="input" value={stopModal.operador} onChange={e=>setStopModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
+            <div><div className="label">Operador {stopModal.autoStop ? '' : '*'}</div><input className="input" value={stopModal.operador} onChange={e=>setStopModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
             <div className="grid2">
               <div><div className="label">Data *</div><input type="date" className="input" value={safeDate(stopModal.data)} onChange={e=>setStopModal(v=>({...v, data:e.target.value}))} disabled={stopModal.autoStop}/></div>
               <div><div className="label">Hora *</div><input type="time" className="input" value={safeTime(stopModal.hora)} onChange={e=>setStopModal(v=>({...v, hora:e.target.value}))} disabled={stopModal.autoStop}/></div>
             </div>
-            {stopModal.autoStop && (
-              <div className="pet01-sensor-warning" style={{ marginBottom: 12 }}>
-                Data e hora foram preenchidas automaticamente pelo sensor e não podem ser alteradas.
-              </div>
-            )}
             <div>
               <div className="label">Motivo da Parada *</div>
-              <select className="select" value={stopModal.motivo} onChange={e=>setStopModal(v=>({...v, motivo:e.target.value}))}>
+              <select className="select" value={stopModal.motivo || ''} onChange={e=>setStopModal(v=>({...v, motivo:e.target.value}))}>
+                <option value="">Selecione o motivo</option>
                 {MOTIVOS_PARADA.map(m=> <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
@@ -196,15 +235,14 @@ export default function GlobalModals({
             </div>
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setStopModal(null)}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
                 if (!String(stopModal.motivo || '').trim()) {
                   alert('Selecione o motivo da parada.')
                   return
                 }
                 const normalized = { ...stopModal, data: safeDate(stopModal.data), hora: safeTime(stopModal.hora) }
-                if (typeof onConfirmStop === 'function') await onConfirmStop(normalized)
-                setStopModal(null)
+                const confirmed = typeof onConfirmStop === 'function' ? await onConfirmStop(normalized) : true
+                if (confirmed !== false) setStopModal(null)
               }}>Confirmar Parada</button>
             </div>
           </div>
@@ -214,7 +252,8 @@ export default function GlobalModals({
       {/* Retomada (de PARADA) */}
       <Modal
         open={!!resumeModal}
-        onClose={()=>setResumeModal(null)}
+        onClose={()=>{}}
+        closeOnBackdrop={false}
         title={(() => {
           const order = resolveModalOrder(resumeModal)
           return resumeModal ? `Retomar produção • ${order?.machine_id || '-'} • O.P ${order?.code || '-'}` : ''
@@ -222,17 +261,22 @@ export default function GlobalModals({
       >
         {resumeModal && (
           <div className="grid">
-            <div><div className="label">Operador *</div><input className="input" value={resumeModal.operador} onChange={e=>setResumeModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
+            <div><div className="label">Operador {resumeModal.autoResume ? '' : '*'}</div><input className="input" value={resumeModal.operador} onChange={e=>setResumeModal(v=>({...v, operador:e.target.value}))} placeholder="Nome do operador"/></div>
             <div className="grid2">
-              <div><div className="label">Data *</div><input type="date" className="input" value={resumeModal.data} onChange={e=>setResumeModal(v=>({...v, data:e.target.value}))}/></div>
-              <div><div className="label">Hora *</div><input type="time" className="input" value={resumeModal.hora} onChange={e=>setResumeModal(v=>({...v, hora:e.target.value}))}/></div>
+              <div><div className="label">Data *</div><input type="date" className="input" value={safeDate(resumeModal.data)} onChange={e=>setResumeModal(v=>({...v, data:e.target.value}))} disabled={resumeModal.autoResume}/></div>
+              <div><div className="label">Hora *</div><input type="time" className="input" value={safeTime(resumeModal.hora)} onChange={e=>setResumeModal(v=>({...v, hora:e.target.value}))} disabled={resumeModal.autoResume}/></div>
             </div>
+            {resumeModal.autoResume && (
+              <div className="pet01-sensor-warning" style={{ marginBottom: 12 }}>
+                Data e hora foram preenchidas pelo pulso que retomou a produção e não podem ser alteradas.
+              </div>
+            )}
             <div className="sep"></div>
             <div className="flex" style={{justifyContent:'flex-end', gap:8}}>
-              <button className="btn ghost" onClick={()=>setResumeModal(null)}>Cancelar</button>
               <button className="btn primary" onClick={async ()=>{
-                if (typeof onConfirmResume === 'function') await onConfirmResume(resumeModal)
-                setResumeModal(null)
+                const normalized = { ...resumeModal, data: safeDate(resumeModal.data), hora: safeTime(resumeModal.hora) }
+                const confirmed = typeof onConfirmResume === 'function' ? await onConfirmResume(normalized) : true
+                if (confirmed !== false) setResumeModal(null)
               }}>Confirmar Retomada</button>
             </div>
           </div>

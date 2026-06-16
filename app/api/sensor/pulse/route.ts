@@ -69,6 +69,59 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+async function resumeAutoStopIfNeeded(supabase: any, { companyId, machineCode, activeOrder, operatorName, resumedAt }: {
+  companyId: string;
+  machineCode: string;
+  activeOrder: any;
+  operatorName: string | null;
+  resumedAt: string;
+}) {
+  if (!activeOrder?.id) return activeOrder;
+
+  const isStopped = String(activeOrder.status || '').toUpperCase() === 'PARADA';
+  if (!isStopped) return activeOrder;
+
+  const { data: openStop, error: openError } = await supabase
+    .from('machine_stops')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .eq('order_id', activeOrder.id)
+    .is('resumed_at', null)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (openError) throw openError;
+
+  if (openStop?.id) {
+    const { error: stopError } = await supabase
+      .from('machine_stops')
+      .update({ resumed_at: resumedAt, resumed_by: operatorName || null })
+      .eq('id', openStop.id);
+
+    if (stopError) throw stopError;
+  }
+
+  const orderPayload = {
+    status: 'PRODUZINDO',
+    restarted_at: resumedAt,
+    restarted_by: operatorName || null,
+    interrupted_at: null,
+    interrupted_by: null,
+  };
+
+  const { data: resumedOrder, error: orderError } = await supabase
+    .from('orders')
+    .update(orderPayload)
+    .eq('id', activeOrder.id)
+    .select('id, code, machine_id, product, status, finalized, qty, boxes, started_at, started_by')
+    .maybeSingle();
+
+  if (orderError) throw orderError;
+  return resumedOrder || { ...activeOrder, ...orderPayload };
+}
+
 function brDateParts(date = new Date()) {
   const br = new Date(date.getTime() - (3 * 60 * 60 * 1000));
   return {
@@ -209,7 +262,7 @@ async function resolveAuthorizedMachine(
     const { data, error } = await supabase
       .from('machines')
       .select(
-        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds'
+        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, ciclo_cadastrado_seconds'
       )
       .eq('machine_code', machineCode)
       .eq('active', true)
@@ -325,7 +378,7 @@ export async function POST(request: Request) {
       .eq('company_id', companyId)
       .eq('machine_id', machineCode)
       .eq('finalized', false)
-      .in('status', ['AGUARDANDO', 'PRODUZINDO', 'BAIXA_EFICIENCIA'])
+      .in('status', ['AGUARDANDO', 'PRODUZINDO', 'BAIXA_EFICIENCIA', 'PARADA'])
       .order('pos', { ascending: true })
       .limit(1);
 
@@ -341,6 +394,8 @@ export async function POST(request: Request) {
     const shiftWindow = getCurrentShiftWindow(new Date());
     const shiftOperator = await findShiftOperator({ supabase, companyId, machineCode, shiftWindow });
     const receivedAt = nowIso();
+
+    const isStoppedResumePulse = String(activeOrder?.status || '').toUpperCase() === 'PARADA';
 
     if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'AGUARDANDO') {
       const startPayload = {
@@ -390,13 +445,8 @@ export async function POST(request: Request) {
       }
     }
 
-    const ignoreCountLeft = Number(machine.sensor_ignore_pulse_count || 0)
-    const operationMode = String(machine.sensor_operation_mode || 'automatic')
-    const isSemiAutomaticIgnore = operationMode === 'semi_automatic' && ignoreCountLeft > 0
-    const ignoreReason = isSemiAutomaticIgnore
-      ? 'SEMI_AUTOMATIC'
-      : (!activeOrder ? 'NO_ACTIVE_ORDER' : null)
-    const isIgnoredEvent = isSemiAutomaticIgnore || !activeOrder
+    const ignoreReason = isStoppedResumePulse ? 'STOPPED_ORDER_RESUME_PENDING' : (!activeOrder ? 'NO_ACTIVE_ORDER' : null)
+    const isIgnoredEvent = isStoppedResumePulse || !activeOrder
     const producedQuantity = isIgnoredEvent ? 0 : (activeOrder ? pulseCount * cavitiesUsed : 0)
     console.log('📊 Produção calculada:', {
       pulseCount,
@@ -471,14 +521,10 @@ export async function POST(request: Request) {
 
     // Atualizar status da máquina
     const machinePayload: any = {
-      sensor_status: isSemiAutomaticIgnore ? 'online' : 'recebendo_pulsos'
-    }
-
-    if (isSemiAutomaticIgnore) {
-      machinePayload.sensor_ignore_pulse_count = Math.max(ignoreCountLeft - 1, 0)
-      machinePayload.sensor_last_heartbeat_at = nowIso()
-    } else {
-      machinePayload.sensor_last_pulse_at = nowIso()
+      sensor_status: 'recebendo_pulsos',
+      sensor_last_pulse_at: receivedAt,
+      sensor_auto_stopped: false,
+      sensor_auto_stop_at: null,
     }
 
     const { error: machineError } = await supabase
@@ -501,8 +547,7 @@ export async function POST(request: Request) {
       produced_quantity: producedQuantity,
       ignored: isIgnoredEvent,
       ignore_reason: ignoreReason,
-      remaining_ignored_cycles: isSemiAutomaticIgnore ? Math.max(ignoreCountLeft - 1, 0) : 0,
-      sensor_operation_mode: operationMode,
+      remaining_ignored_cycles: 0,
       event_id: event?.id
     };
 

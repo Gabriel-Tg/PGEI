@@ -43,19 +43,17 @@ export function computeMachineSensorStatus(machine, nowMs = Date.now()) {
   const tipo = String(machine?.apontamento_tipo || 'manual')
   if (tipo !== 'sensor') return 'manual'
 
-  const lastPulseMs = parseIsoToMillis(machine?.sensor_last_pulse_at)
   const lastHeartbeatMs = parseIsoToMillis(machine?.sensor_last_heartbeat_at)
 
-  if (lastPulseMs && nowMs - lastPulseMs <= 20_000) return 'recebendo_pulsos'
-  if (lastHeartbeatMs && nowMs - lastHeartbeatMs <= 45_000) return 'online'
-  if (lastHeartbeatMs && nowMs - lastHeartbeatMs <= 180_000) return 'sem_comunicacao'
+  if (lastHeartbeatMs && nowMs - lastHeartbeatMs <= 45_000) {
+    return machine?.sensor_auto_stopped ? 'parada' : 'online'
+  }
   return 'offline'
 }
 
 export function sensorStatusLabel(status) {
-  if (status === 'recebendo_pulsos') return 'Recebendo pulsos'
+  if (status === 'parada') return 'Parada'
   if (status === 'online') return 'Online'
-  if (status === 'sem_comunicacao') return 'Sem comunicacao'
   if (status === 'offline') return 'Offline'
   return 'Manual/Bipagem'
 }

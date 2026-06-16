@@ -521,13 +521,15 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
     return null
   }
 
-  async function confirmStop({ order, operador, motivo, obs, data, hora, endLowEffAtStopStart }) {
-    if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
-    if (!String(motivo || '').trim()) { alert('Selecione o motivo da parada.'); return }
+  async function confirmStop({ order, operador, motivo, obs, data, hora, endLowEffAtStopStart, autoStop, stopId }) {
+    if ((!autoStop && !operador) || !data || !hora) { alert('Preencha operador, data e hora.'); return false }
+    if (!String(motivo || '').trim()) { alert('Selecione o motivo da parada.'); return false }
     const started_at = localDateTimeToISO(data, hora)
 
-    const overlapMsg = await validarSobreposicaoParada({ machineId: order.machine_id, startedAt: started_at })
-    if (overlapMsg) { alert(overlapMsg); return }
+    if (!autoStop) {
+      const overlapMsg = await validarSobreposicaoParada({ machineId: order.machine_id, startedAt: started_at })
+      if (overlapMsg) { alert(overlapMsg); return false }
+    }
 
     // 1) Se vier de baixa eficiência, encerra-a neste mesmo timestamp + limpa observação NO LOG NOVO
     if (endLowEffAtStopStart) {
@@ -548,30 +550,59 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
       }
     }
 
-    // 2) Registra parada
-    const ins = await supabase.from('machine_stops')
-      .insert([{ company_id: clientId, order_id: order.id, machine_id: order.machine_id, started_by: operador, started_at, reason: String(motivo).trim(), notes: obs }])
-      .select('*').maybeSingle()
-    if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return }
+    // 2) Registra parada ou completa a parada automática aberta
+    if (autoStop) {
+      let openStopId = stopId || null
+      if (!openStopId) {
+        const open = await supabase.from('machine_stops')
+          .select('id')
+          .eq('order_id', order.id)
+          .is('resumed_at', null)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (open.error) { alert('Erro ao localizar parada automática: ' + open.error.message); return false }
+        openStopId = open.data?.id || null
+      }
+
+      if (openStopId) {
+        const upd = await supabase.from('machine_stops')
+          .update({ started_by: operador || null, reason: String(motivo).trim(), notes: obs })
+          .eq('id', openStopId)
+        if (upd.error) { alert('Erro ao atualizar parada automática: ' + upd.error.message); return false }
+      } else {
+        const ins = await supabase.from('machine_stops')
+          .insert([{ company_id: clientId, order_id: order.id, machine_id: order.machine_id, started_by: operador || null, started_at, reason: String(motivo).trim(), notes: obs }])
+          .select('*').maybeSingle()
+        if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return false }
+      }
+    } else {
+      const ins = await supabase.from('machine_stops')
+        .insert([{ company_id: clientId, order_id: order.id, machine_id: order.machine_id, started_by: operador || null, started_at, reason: String(motivo).trim(), notes: obs }])
+        .select('*').maybeSingle()
+      if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return false }
+    }
 
     // 3) Muda status para PARADA
     await setStatus(order, 'PARADA')
+    return true
   }
 
-  async function confirmResume({ order, operador, data, hora, targetStatus }) {
-    if (!operador || !data || !hora) { alert('Preencha operador, data e hora.'); return }
+  async function confirmResume({ order, operador, data, hora, targetStatus, autoResume }) {
+    if ((!autoResume && !operador) || !data || !hora) { alert('Preencha operador, data e hora.'); return false }
     const resumed_at = localDateTimeToISO(data, hora)
     const sel = await supabase.from('machine_stops').select('*')
       .eq('order_id', order.id).is('resumed_at', null)
       .order('started_at', { ascending:false })
       .limit(1).maybeSingle()
-    if (sel.error) { alert('Erro ao localizar parada aberta: ' + sel.error.message); return }
+    if (sel.error) { alert('Erro ao localizar parada aberta: ' + sel.error.message); return false }
     if (sel.data) {
-      const upd = await supabase.from('machine_stops').update({ resumed_by: operador, resumed_at })
+      const upd = await supabase.from('machine_stops').update({ resumed_by: operador || null, resumed_at })
         .eq('id', sel.data.id)
-      if (upd.error) { alert('Erro ao encerrar parada: ' + upd.error.message); return }
+      if (upd.error) { alert('Erro ao encerrar parada: ' + upd.error.message); return false }
     }
     await setStatus(order, targetStatus || 'PRODUZINDO')
+    return true
   }
 
   // ========================= NOVA LÓGICA: Baixa Eficiência no low_efficiency_logs =========================

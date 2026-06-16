@@ -7,10 +7,10 @@ import { getTurnoAtual, statusClass } from "../lib/utils";
 import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
-import { REFUGO_MOTIVOS, MOTIVOS_PARADA } from "../domain/constants";
-import { formatRunningCycleSeconds, getRunningCycleSeconds, runningCycleTone } from "../lib/sensorRuntime";
+import { REFUGO_MOTIVOS } from "../domain/constants";
+import { computeMachineSensorStatus, runningCycleTone, sensorStatusLabel } from "../lib/sensorRuntime";
 
-const AUTO_STOP_CYCLE_MULTIPLIER = 4;
+const AUTO_STOP_CYCLE_MULTIPLIER = 3;
 
 export default function Pet01({
   registroGrupos,
@@ -49,9 +49,8 @@ export default function Pet01({
   const [fichaModalOpen, setFichaModalOpen] = useState(false);
   const [autoStopPromptedOrderId, setAutoStopPromptedOrderId] = useState(null);
   const [sensorLastPulseAt, setSensorLastPulseAt] = useState(machineMeta?.sensor_last_pulse_at || null);
-  const [sensorOperationMode, setSensorOperationMode] = useState(machineMeta?.sensor_operation_mode || 'automatic');
-  const [sensorIgnoreCyclesLeft, setSensorIgnoreCyclesLeft] = useState(Number(machineMeta?.sensor_ignore_pulse_count || 0));
-  const [ignoreCountInput, setIgnoreCountInput] = useState('');
+  const [sensorRuntime, setSensorRuntime] = useState(() => machineMeta || {});
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
 
 
   // toast de notificação superior
@@ -61,6 +60,7 @@ export default function Pet01({
   const scanBufferRef = useRef("");
   const lastKeyTimeRef = useRef(0);
   const autoStopInFlightRef = useRef(null);
+  const autoResumePromptedPulseRef = useRef(null);
 
   // turno atual (usado para gravar)
 const [currentShift, setCurrentShift] = useState(() => {
@@ -141,51 +141,73 @@ const [currentShift, setCurrentShift] = useState(() => {
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), ms);
   }, []);
 
+  const formatCycleSeconds = useCallback((value, digits = 1) => {
+    const num = Number(value)
+    if (!Number.isFinite(num) || num <= 0) return '—'
+    return `${num.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}s`
+  }, [])
+
   const formatCycleValue = useCallback((value) => {
     const num = Number(value)
     if (!Number.isFinite(num) || num <= 0) return '—'
     return `${num.toFixed(3)}s`
   }, [])
 
-  async function updateSensorOperation(mode, cycles = 0) {
-    if (!machineMeta?.id) {
-      showToast('Máquina não disponível para atualizar modo.', 'err')
-      return
-    }
+  const mergeSensorPulseRuntime = useCallback((pulseAt, sensorEventId = null) => {
+    if (!pulseAt) return
+    setSensorLastPulseAt(pulseAt)
+    setSensorRuntime((prev) => {
+      const current = prev || {}
+      if (sensorEventId && String(current.sensor_last_event_id || '') === sensorEventId) return prev
 
-    const payload = {
-      sensor_operation_mode: mode,
-      sensor_ignore_pulse_count: mode === 'semi_automatic' ? Math.max(0, Math.trunc(cycles)) : 0,
-    }
+      const previousPulseAt = current.sensor_last_pulse_at || machineMeta?.sensor_last_pulse_at || null
+      const previousPulseMs = previousPulseAt ? DateTime.fromISO(String(previousPulseAt)).toMillis() : NaN
+      const pulseMs = DateTime.fromISO(String(pulseAt)).toMillis()
+      const previousCycle = Number.isFinite(previousPulseMs) && Number.isFinite(pulseMs) && pulseMs > previousPulseMs
+        ? (pulseMs - previousPulseMs) / 1000
+        : Number(current.sensor_last_cycle_seconds || machineMeta?.sensor_last_cycle_seconds || 0)
+      const cycleCount = Number(current.sensor_cycle_count || machineMeta?.sensor_cycle_count || 0) + 1
+      const avgBefore = Number(current.sensor_avg_cycle_seconds || machineMeta?.sensor_avg_cycle_seconds || 0)
+      const avgCycle = previousCycle > 0
+        ? (avgBefore > 0 && cycleCount > 1
+            ? ((avgBefore * (cycleCount - 1)) + previousCycle) / cycleCount
+            : previousCycle)
+        : avgBefore
 
-    const { error } = await supabase
-      .from('machines')
-      .update(payload)
-      .eq('id', machineMeta.id)
-
-    if (error) {
-      console.error('Erro ao atualizar modo do sensor:', error)
-      showToast('Falha ao atualizar modo do sensor.', 'err')
-      return
-    }
-
-    setSensorOperationMode(mode)
-    setSensorIgnoreCyclesLeft(payload.sensor_ignore_pulse_count)
-    setIgnoreCountInput('')
-    showToast('Modo do sensor atualizado.', 'ok')
-  }
+      return {
+        ...current,
+        sensor_last_event_id: sensorEventId || current.sensor_last_event_id || null,
+        sensor_last_pulse_at: pulseAt,
+        sensor_last_cycle_seconds: previousCycle,
+        sensor_avg_cycle_seconds: avgCycle,
+        sensor_cycle_count: cycleCount,
+        sensor_status: 'recebendo_pulsos',
+      }
+    })
+  }, [machineMeta?.sensor_avg_cycle_seconds, machineMeta?.sensor_cycle_count, machineMeta?.sensor_last_cycle_seconds, machineMeta?.sensor_last_pulse_at])
 
   const activeItemCode = useMemo(() => String(ativa?.product || '').split('-')[0]?.trim() || '', [ativa?.product])
   const activeItemTech = activeItemCode ? itemTechByCode?.[activeItemCode] : null
-  const configuredCycleSeconds = Number(machineMeta?.ciclo_cadastrado_seconds || activeItemTech?.cycleSeconds || 0) || null
-  const runningCycleSeconds = getRunningCycleSeconds(sensorLastPulseAt, Date.now())
+  const runtimeMeta = sensorRuntime || machineMeta || {}
+  const configuredCycleSeconds = Number(runtimeMeta?.ciclo_cadastrado_seconds || activeItemTech?.cycleSeconds || 0) || null
+  const activeStatus = String(ativa?.status || '').toUpperCase()
+  const isProducingBySensor = activeStatus === 'PRODUZINDO' || activeStatus === 'BAIXA_EFICIENCIA'
+  const lastPulseMs = sensorLastPulseAt ? DateTime.fromISO(String(sensorLastPulseAt)).toMillis() : NaN
+  const runningCycleSeconds = isProducingBySensor && Number.isFinite(lastPulseMs)
+    ? Math.max(0, (liveNowMs - lastPulseMs) / 1000)
+    : 0
+  const previousCycleSeconds = Number(runtimeMeta?.sensor_last_cycle_seconds || 0)
+  const avgCycleSeconds = Number(runtimeMeta?.sensor_avg_cycle_seconds || 0)
+  const displayedRealCycleSeconds = runningCycleSeconds > 0 ? runningCycleSeconds : previousCycleSeconds || avgCycleSeconds
   const runningCycleClass = runningCycleTone(runningCycleSeconds, configuredCycleSeconds)
+  const sensorStatus = computeMachineSensorStatus(runtimeMeta, liveNowMs)
+  const sensorStatusText = sensorStatusLabel(sensorStatus)
 
-  const getSensorAutoStopTimestamp = useCallback(() => {
+  const getSensorAutoStopInfo = useCallback(() => {
     const backendAutoStopAt = String(machineMeta?.sensor_auto_stop_at || '').trim()
     if (backendAutoStopAt) {
       const parsed = DateTime.fromISO(backendAutoStopAt, { zone: 'utc' })
-      if (parsed.isValid) return parsed
+      if (parsed.isValid) return { detectedAt: parsed, stopAt: parsed }
     }
 
     const baseCycleSeconds = Number(configuredCycleSeconds || 0)
@@ -194,15 +216,22 @@ const [currentShift, setCurrentShift] = useState(() => {
     const lastPulse = DateTime.fromISO(sensorLastPulseAt, { zone: 'utc' })
     if (!lastPulse.isValid) return null
 
-    return lastPulse.plus({ seconds: baseCycleSeconds * AUTO_STOP_CYCLE_MULTIPLIER })
+    return {
+      detectedAt: lastPulse.plus({ seconds: baseCycleSeconds * AUTO_STOP_CYCLE_MULTIPLIER }),
+      stopAt: lastPulse,
+    }
   }, [configuredCycleSeconds, machineMeta?.sensor_auto_stop_at, sensorLastPulseAt])
 
   useEffect(() => {
     setSensorLastPulseAt(machineMeta?.sensor_last_pulse_at || null)
-    setSensorOperationMode(machineMeta?.sensor_operation_mode || 'automatic')
-    setSensorIgnoreCyclesLeft(Number(machineMeta?.sensor_ignore_pulse_count || 0))
-    setIgnoreCountInput('')
-  }, [machineMeta?.sensor_last_pulse_at, machineMeta?.sensor_operation_mode, machineMeta?.sensor_ignore_pulse_count])
+    setSensorRuntime((prev) => ({ ...(prev || {}), ...(machineMeta || {}) }))
+  }, [machineMeta?.sensor_last_pulse_at, machineMeta?.sensor_last_heartbeat_at, machineMeta?.sensor_status, machineMeta?.sensor_auto_stopped, machineMeta?.sensor_auto_stop_at])
+
+  useEffect(() => {
+    if (machineMeta?.apontamento_tipo !== 'sensor') return undefined
+    const interval = window.setInterval(() => setLiveNowMs(Date.now()), 100)
+    return () => window.clearInterval(interval)
+  }, [machineMeta?.apontamento_tipo])
 
   useEffect(() => {
     if (!clientId || !machineId || machineMeta?.apontamento_tipo !== 'sensor') return undefined
@@ -217,7 +246,7 @@ const [currentShift, setCurrentShift] = useState(() => {
           if (!row) return
           if (String(row.company_id || '') !== String(clientId)) return
           if (String(row.machine_id || '').toUpperCase() !== machineId) return
-          setSensorLastPulseAt(row.created_at || new Date().toISOString())
+          mergeSensorPulseRuntime(row.created_at || new Date().toISOString(), row.id ? String(row.id) : null)
         }
       )
       .subscribe()
@@ -229,20 +258,24 @@ const [currentShift, setCurrentShift] = useState(() => {
         console.warn('Falha ao remover canal de ciclo real PET-01:', err)
       }
     }
-  }, [clientId, machineId, machineMeta?.apontamento_tipo])
+  }, [clientId, machineId, machineMeta?.apontamento_tipo, mergeSensorPulseRuntime])
 
   useEffect(() => {
-    if (!ativa || !machineMeta || !onStatusChange) {
+    if (!ativa || !machineMeta) {
       setAutoStopPromptedOrderId(null)
       autoStopInFlightRef.current = null
       return
     }
 
-    const autoStopTimestamp = getSensorAutoStopTimestamp()
+    const autoStopInfo = getSensorAutoStopInfo()
     const sensorAutoStopped = Boolean(machineMeta.sensor_auto_stopped)
-      || Boolean(autoStopTimestamp?.isValid && DateTime.now().toMillis() >= autoStopTimestamp.toMillis())
-    const activeStatus = String(ativa.status || '').toUpperCase()
+      || Boolean(autoStopInfo?.detectedAt?.isValid && DateTime.now().toMillis() >= autoStopInfo.detectedAt.toMillis())
     const isProducing = activeStatus === 'PRODUZINDO' || activeStatus === 'BAIXA_EFICIENCIA'
+
+    if (activeStatus === 'PARADA') {
+      autoStopInFlightRef.current = null
+      return
+    }
 
     if (!sensorAutoStopped || !isProducing) {
       setAutoStopPromptedOrderId(null)
@@ -252,38 +285,120 @@ const [currentShift, setCurrentShift] = useState(() => {
     if (autoStopPromptedOrderId === ativa.id) return
     if (autoStopInFlightRef.current === ativa.id) return
 
-    const stopAt = autoStopTimestamp?.isValid
-      ? autoStopTimestamp.setZone('America/Sao_Paulo')
+    const stopAt = autoStopInfo?.stopAt?.isValid
+      ? autoStopInfo.stopAt.setZone('America/Sao_Paulo')
       : DateTime.now().setZone('America/Sao_Paulo')
 
     const timestamp = stopAt.isValid ? stopAt : DateTime.now().setZone('America/Sao_Paulo')
+    const startedAt = timestamp.toUTC().toISO()
+    const companyId = clientId || ativa.company_id || machineMeta.company_id || null
 
     async function confirmSensorStop() {
       autoStopInFlightRef.current = ativa.id
-      const statusResult = await onStatusChange(ativa, 'PARADA', { autoStop: true })
-      const modalPayload = {
-        ordem: ativa,
+
+      if (!companyId) {
+        throw new Error('Empresa não identificada para registrar parada automática.')
+      }
+
+      if (activeStatus === 'BAIXA_EFICIENCIA') {
+        await supabase
+          .from('low_efficiency_logs')
+          .update({ ended_at: startedAt })
+          .eq('order_id', ativa.id)
+          .is('ended_at', null)
+      }
+
+      const updateOrder = await supabase
+        .from('orders')
+        .update({ status: 'PARADA', interrupted_at: startedAt, interrupted_by: null })
+        .eq('id', ativa.id)
+
+      if (updateOrder.error) throw updateOrder.error
+
+      if (machineMeta.id) {
+        const updateMachine = await supabase
+          .from('machines')
+          .update({ sensor_auto_stopped: true, sensor_auto_stop_at: startedAt })
+          .eq('id', machineMeta.id)
+
+        if (updateMachine.error) throw updateMachine.error
+      }
+
+      setAtiva((current) => current?.id === ativa.id ? { ...current, status: 'PARADA', interrupted_at: startedAt, interrupted_by: null } : current)
+      setAutoStopPromptedOrderId(ativa.id)
+      setStopModal({
+        ordem: { ...ativa, status: 'PARADA', interrupted_at: startedAt, interrupted_by: null },
         operador: '',
-        motivo: MOTIVOS_PARADA[0],
-        obs: 'Parada detectada automaticamente pelo sensor. Registre o motivo da parada.',
+        motivo: '',
         data: timestamp.toISODate(),
         hora: timestamp.toFormat('HH:mm'),
         autoStop: true,
-      }
-
-      if (statusResult?.action === 'openStopModal' || statusResult?.action === 'statusSet') {
-        setStopModal(modalPayload)
-        setAutoStopPromptedOrderId(ativa.id)
-        showToast('Parada detectada pelo sensor. Complete o motivo no modal.', 'ok', 4200)
-      }
+        __initApplied: true,
+      })
+      showToast('Parada automática detectada pelo sensor. Informe o motivo para confirmar.', 'ok', 4200)
     }
 
     confirmSensorStop().catch((err) => {
       autoStopInFlightRef.current = null
       console.error('Erro ao registrar parada automática do sensor:', err)
-      showToast('Falha ao abrir parada automática do sensor.', 'err', 4200)
+      showToast('Falha ao registrar parada automática do sensor.', 'err', 4200)
     })
-  }, [ativa, machineMeta, onStatusChange, setStopModal, autoStopPromptedOrderId, showToast, getSensorAutoStopTimestamp, tick])
+  }, [ativa, activeStatus, clientId, machineMeta, autoStopPromptedOrderId, showToast, getSensorAutoStopInfo, tick])
+
+  useEffect(() => {
+    if (!ativa || !setStopModal || machineMeta?.apontamento_tipo !== 'sensor') return
+    if (activeStatus !== 'PARADA') return
+
+    const pendingStop = paradaAberta && !String(paradaAberta.reason || '').trim()
+      ? paradaAberta
+      : null
+    const fallbackStopAt = machineMeta?.sensor_auto_stop_at || ativa.interrupted_at || null
+    if (!pendingStop && !fallbackStopAt) return
+    if (autoStopPromptedOrderId === ativa.id) return
+
+    const stopAtIso = pendingStop?.started_at || fallbackStopAt
+    const stopAt = DateTime.fromISO(String(stopAtIso), { zone: 'utc' }).setZone('America/Sao_Paulo')
+    const timestamp = stopAt.isValid ? stopAt : DateTime.now().setZone('America/Sao_Paulo')
+
+    setStopModal({
+      ordem: ativa,
+      operador: pendingStop?.started_by || '',
+      motivo: pendingStop?.reason || '',
+      data: timestamp.toISODate(),
+      hora: timestamp.toFormat('HH:mm'),
+      autoStop: true,
+      stopId: pendingStop?.id || null,
+      __initApplied: true,
+    })
+    setAutoStopPromptedOrderId(ativa.id)
+  }, [ativa, activeStatus, autoStopPromptedOrderId, machineMeta?.apontamento_tipo, machineMeta?.sensor_auto_stop_at, paradaAberta, setStopModal])
+
+  useEffect(() => {
+    if (!ativa || !setResumeModal || machineMeta?.apontamento_tipo !== 'sensor') return
+    if (activeStatus !== 'PARADA') {
+      autoResumePromptedPulseRef.current = null
+      return
+    }
+    if (!paradaAberta?.started_at || !sensorLastPulseAt) return
+    if (!String(paradaAberta.reason || '').trim()) return
+
+    const stopStartMs = DateTime.fromISO(String(paradaAberta.started_at)).toMillis()
+    const pulseMs = DateTime.fromISO(String(sensorLastPulseAt)).toMillis()
+    if (!Number.isFinite(stopStartMs) || !Number.isFinite(pulseMs) || pulseMs <= stopStartMs) return
+    if (autoResumePromptedPulseRef.current === sensorLastPulseAt) return
+
+    const pulseAt = DateTime.fromMillis(pulseMs).setZone('America/Sao_Paulo')
+    setResumeModal({
+      ordem: ativa,
+      operador: responsavelTurno || '',
+      data: pulseAt.toISODate(),
+      hora: pulseAt.toFormat('HH:mm'),
+      targetStatus: 'PRODUZINDO',
+      autoResume: true,
+      __initApplied: true,
+    })
+    autoResumePromptedPulseRef.current = sensorLastPulseAt
+  }, [ativa, activeStatus, machineMeta?.apontamento_tipo, paradaAberta, responsavelTurno, sensorLastPulseAt, setResumeModal])
 
   const formatInt = useCallback((n) => {
     const num = Number(n) || 0;
@@ -820,57 +935,11 @@ if (typeof window !== "undefined") {
         {machineMeta?.apontamento_tipo === 'sensor' && (
           <div className="pet01-sensor-panel">
             <div>
-              <div className="pet01-sensor-label">Modo de operação</div>
-              <div className="pet01-sensor-mode-buttons">
-                <button
-                  type="button"
-                  className={`pet01-sensor-mode-btn ${sensorOperationMode === 'automatic' ? 'active' : ''}`}
-                  onClick={() => updateSensorOperation('automatic', 0)}
-                >
-                  Automático
-                </button>
-                <button
-                  type="button"
-                  className={`pet01-sensor-mode-btn ${sensorOperationMode === 'semi_automatic' ? 'active' : ''}`}
-                  onClick={() => setSensorOperationMode('semi_automatic')}
-                >
-                  Semi-automático
-                </button>
+              <div className="pet01-sensor-label">Status do sensor</div>
+              <div className={`pet01-sensor-status ${sensorStatus}`}>
+                <span className="pet01-sensor-status-dot" aria-hidden="true" />
+                {sensorStatusText}
               </div>
-              {sensorOperationMode === 'semi_automatic' && (
-                <div className="pet01-sensor-ignore-block">
-                  <div className="pet01-sensor-ignore-text">
-                    {sensorIgnoreCyclesLeft > 0
-                      ? `Ignorar próximos ${sensorIgnoreCyclesLeft} pulso${sensorIgnoreCyclesLeft === 1 ? '' : 's'}`
-                      : 'Defina quantos ciclos ignorar'}
-                  </div>
-                  <div className="pet01-sensor-ignore-controls">
-                    <input
-                      type="number"
-                      min="1"
-                      className="pet01-sensor-ignore-input"
-                      value={ignoreCountInput}
-                      onChange={(e) => setIgnoreCountInput(e.target.value)}
-                      placeholder="Ciclos"
-                    />
-                    <button
-                      type="button"
-                      className="pet01-sensor-ignore-apply"
-                      onClick={() => {
-                        const count = Number(ignoreCountInput)
-                        if (!count || count <= 0) {
-                          showToast('Informe um número válido de ciclos.', 'err')
-                          return
-                        }
-                        updateSensorOperation('semi_automatic', count)
-                      }}
-                      disabled={!ignoreCountInput || Number(ignoreCountInput) <= 0}
-                    >
-                      Aplicar
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo cadastrado</div>
@@ -878,17 +947,12 @@ if (typeof window !== "undefined") {
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo real</div>
-              <div className={`pet01-sensor-value pet01-cycle-timer ${runningCycleClass}`}>{formatRunningCycleSeconds(runningCycleSeconds)}</div>
+              <div className={`pet01-sensor-value pet01-cycle-timer ${runningCycleClass}`}>{formatCycleSeconds(displayedRealCycleSeconds, 1)}</div>
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo médio</div>
-              <div className="pet01-sensor-value">{formatCycleValue(machineMeta.sensor_avg_cycle_seconds)}</div>
+              <div className="pet01-sensor-value">{formatCycleValue(avgCycleSeconds)}</div>
             </div>
-            {machineMeta.sensor_auto_stopped && (
-              <div className="pet01-sensor-warning">
-                Parada automática detectada pelo sensor. Complete o motivo no modal.
-              </div>
-            )}
           </div>
         )}
 
@@ -899,35 +963,6 @@ if (typeof window !== "undefined") {
                   )}
         </div>
                   
-        <div className="sep" style={{ marginTop: 12 }} />
-
-        <div className="pet01-field" style={{ marginTop: 10 }}>
-          <label style={{ minWidth: 90 }}>Situação</label>
-          <select value={ativa?.status || "AGUARDANDO"} onChange={(e) => handleStatusChange(e.target.value)}>
-            <option value="PRODUZINDO">Produzindo</option>
-            <option value="BAIXA_EFICIENCIA">Baixa Eficiência</option>
-            <option value="PARADA">Parada</option>
-          </select>
-
-          <div style={{ marginLeft: 12 }}>
-            {ativa?.status === "AGUARDANDO" && (
-          <button
-              className="btn small primary"
-                onClick={() => {
-                 if (!setStartModal) return;
-                  const n = DateTime.now().setZone("America/Sao_Paulo");
-                   setStartModal({
-                     ordem: ativa,
-                     operador: "",
-                     data: n.toISODate(),          // YYYY-MM-DD
-                     hora: n.toFormat("HH:mm"),    // HH:mm
-                   });
-                 }}>
-                Iniciar Produção
-              </button>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Próximo item */}

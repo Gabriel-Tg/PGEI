@@ -56,18 +56,88 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+const AUTO_STOP_CYCLE_MULTIPLIER = 3;
+
 function getAutoStopAt(lastPulseAt: unknown, cicloCadastradoSeconds: unknown): string | null {
   const baseCycle = Number(cicloCadastradoSeconds || 0);
   const lastPulseMs = lastPulseAt ? new Date(String(lastPulseAt)).getTime() : 0;
   if (!(baseCycle > 0) || !lastPulseMs) return null;
-  return new Date(lastPulseMs + (baseCycle * 4 * 1000)).toISOString();
+  return new Date(lastPulseMs).toISOString();
 }
 
 function shouldMarkAutoStop(lastPulseAt: unknown, cicloCadastradoSeconds: unknown): boolean {
   const baseCycle = Number(cicloCadastradoSeconds || 0);
   const lastPulseMs = lastPulseAt ? new Date(String(lastPulseAt)).getTime() : 0;
   if (!(baseCycle > 0) || !lastPulseMs) return false;
-  return ((Date.now() - lastPulseMs) / 1000) >= (baseCycle * 4);
+  return ((Date.now() - lastPulseMs) / 1000) >= (baseCycle * AUTO_STOP_CYCLE_MULTIPLIER);
+}
+
+async function findRunningOrder(supabase: any, companyId: string, machineCode: string) {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, status, machine_id')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .eq('finalized', false)
+    .in('status', ['PRODUZINDO', 'BAIXA_EFICIENCIA'])
+    .order('pos', { ascending: true })
+    .limit(1);
+
+  if (error) throw error;
+  return (data || [])[0] || null;
+}
+
+async function ensureAutoStop(supabase: any, { companyId, machineCode, order, startedAt }: {
+  companyId: string;
+  machineCode: string;
+  order: any;
+  startedAt: string | null;
+}) {
+  if (!order?.id || !startedAt) return;
+
+  const { data: openStop, error: openError } = await supabase
+    .from('machine_stops')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('machine_id', machineCode)
+    .is('resumed_at', null)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (openError) throw openError;
+  if (openStop?.id) return;
+
+  const { error: insertError } = await supabase
+    .from('machine_stops')
+    .insert({
+      company_id: companyId,
+      order_id: order.id,
+      machine_id: machineCode,
+      started_at: startedAt,
+      started_by: null,
+      reason: null,
+      notes: 'Parada automática por ausência de pulsos do sensor',
+    });
+
+  if (insertError) throw insertError;
+
+  await supabase
+    .from('low_efficiency_logs')
+    .update({ ended_at: startedAt })
+    .eq('order_id', order.id)
+    .is('ended_at', null);
+
+  const { error: orderError } = await supabase
+    .from('orders')
+    .update({
+      status: 'PARADA',
+      interrupted_at: startedAt,
+      interrupted_by: null,
+    })
+    .eq('id', order.id);
+
+  if (orderError) throw orderError;
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -196,6 +266,16 @@ export async function POST(request: Request) {
 
     const autoStopped = shouldMarkAutoStop(machine.sensor_last_pulse_at, machine.ciclo_cadastrado_seconds);
     const autoStopAt = autoStopped ? getAutoStopAt(machine.sensor_last_pulse_at, machine.ciclo_cadastrado_seconds) : null;
+
+    if (autoStopped) {
+      const activeOrder = await findRunningOrder(supabase, companyId, machineCode);
+      await ensureAutoStop(supabase, {
+        companyId,
+        machineCode,
+        order: activeOrder,
+        startedAt: autoStopAt,
+      });
+    }
 
     // Atualizar status
     const { error: updateError } = await supabase

@@ -115,6 +115,68 @@ function getDashboardPeriodRange(periodKey) {
   };
 }
 
+function getEffectiveProductionTimestamp(row) {
+  return row?.sensor_last_pulse_at || row?.created_at || row?.updated_at || null;
+}
+
+function isDateTimeInRange(value, start, end) {
+  const dt = DateTime.fromISO(String(value || "")).setZone("America/Sao_Paulo");
+  return dt.isValid && dt >= start && dt <= end;
+}
+
+function getWorkdayStartMs(nowMs) {
+  return DateTime.fromMillis(nowMs)
+    .setZone("America/Sao_Paulo")
+    .set({ hour: 7, minute: 0, second: 0, millisecond: 0 })
+    .toMillis();
+}
+
+function sumClippedSeconds(rows, { machine, startMs, endMs, startField = "started_at", endField = "resumed_at" }) {
+  const machineKey = String(machine || "").trim().toUpperCase();
+  return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+    if (machineKey && String(row?.machine_id || "").trim().toUpperCase() !== machineKey) return acc;
+    const startedMs = DateTime.fromISO(String(row?.[startField] || "")).toMillis();
+    if (!Number.isFinite(startedMs)) return acc;
+    const rawEndMs = row?.[endField] ? DateTime.fromISO(String(row?.[endField] || "")).toMillis() : endMs;
+    const finishedMs = Number.isFinite(rawEndMs) ? rawEndMs : endMs;
+    const clippedStart = Math.max(startMs, startedMs);
+    const clippedEnd = Math.min(endMs, finishedMs);
+    if (clippedEnd <= clippedStart) return acc;
+    return acc + Math.floor((clippedEnd - clippedStart) / 1000);
+  }, 0);
+}
+
+function buildSensorCycleEntries(cycleRows, rangeStart, rangeEnd) {
+  const entries = [];
+  (Array.isArray(cycleRows) ? cycleRows : []).forEach((row) => {
+    const timestamps = Array.isArray(row?.cycle_timestamps) ? row.cycle_timestamps : [];
+    const timestampsInRange = timestamps.filter((value) => isDateTimeInRange(value, rangeStart, rangeEnd));
+    if (!timestampsInRange.length) return;
+
+    const producedQuantity = Number(row?.produced_quantity || 0);
+    const piecesPerCycle = producedQuantity > 0 && timestamps.length > 0
+      ? producedQuantity / timestamps.length
+      : Number(row?.cavities_used || 0) || 1;
+    const pulseCount = Number(row?.pulse_count || 0);
+    const pulsesPerCycle = pulseCount > 0 && timestamps.length > 0 ? pulseCount / timestamps.length : 1;
+
+    timestampsInRange.forEach((timestamp) => {
+      entries.push({
+        id: `${row?.id || row?.order_id}-${timestamp}`,
+        created_at: timestamp,
+        machine_id: row?.machine_id,
+        order_id: row?.order_id,
+        good_qty: piecesPerCycle,
+        pulse_count: pulsesPerCycle,
+        cavities_used: row?.cavities_used,
+        source: "sensor",
+        order: row?.order,
+      });
+    });
+  });
+  return entries;
+}
+
 function buildTrendSeries(scans, entries, periodKey, rangeStart) {
   const scanRows = Array.isArray(scans) ? scans : [];
   const entryRows = Array.isArray(entries) ? entries : [];
@@ -125,7 +187,7 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
       pieces: Number(row?.qty_pieces || 0),
     })),
     ...entryRows.map((row) => ({
-      created_at: row?.created_at,
+      created_at: getEffectiveProductionTimestamp(row),
       boxes: 0,
       pieces: Number(row?.good_qty || 0),
     })),
@@ -154,7 +216,7 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
       cumulativePieces.push(next);
       return next;
     }, 0);
-    return { labels, trendBoxes: cumulativeBoxes, trendPieces: cumulativePieces };
+    return { labels, trendBoxes: cumulativeBoxes, trendPieces: cumulativePieces, bucketBoxes: countBoxes, bucketPieces: countPieces };
   }
 
   if (periodKey === "month") {
@@ -181,7 +243,7 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
       cumulativePieces.push(next);
       return next;
     }, 0);
-    return { labels, trendBoxes: cumulativeBoxes, trendPieces: cumulativePieces };
+    return { labels, trendBoxes: cumulativeBoxes, trendPieces: cumulativePieces, bucketBoxes: countBoxes, bucketPieces: countPieces };
   }
 
   const labels = Array.from({ length: 25 }, (_, idx) => `${String(idx).padStart(2, "0")}h`);
@@ -210,7 +272,7 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
     return next;
   }, 0);
 
-  return { labels, trendBoxes, trendPieces };
+  return { labels, trendBoxes, trendPieces, bucketBoxes: countBoxes, bucketPieces: countPieces };
 }
 
 function buildShiftOutput(scans, entries) {
@@ -232,7 +294,7 @@ function buildShiftOutput(scans, entries) {
   });
 
   (Array.isArray(entries) ? entries : []).forEach((entry) => {
-    const shiftKey = getShiftWindowAt(entry?.created_at)?.shiftKey;
+    const shiftKey = getShiftWindowAt(getEffectiveProductionTimestamp(entry))?.shiftKey;
     if (!shiftKey || !byShift[shiftKey]) return;
     byShift[shiftKey].pieces += Number(entry?.good_qty || 0);
     byShift[shiftKey].pulses += Number(entry?.pulse_count || 0);
@@ -243,6 +305,42 @@ function buildShiftOutput(scans, entries) {
     ...byShift[turno.key],
     active: turno.key === currentShiftKey,
   }));
+}
+
+function buildHourlyScrapSeries(scraps, rangeStart) {
+  const countPieces = new Array(24).fill(0);
+  (Array.isArray(scraps) ? scraps : []).forEach((row) => {
+    const dt = DateTime.fromISO(String(row?.created_at || "")).setZone("America/Sao_Paulo");
+    if (!dt.isValid) return;
+    const diffHours = dt.diff(rangeStart, "hours").hours;
+    const bucket = Math.max(0, Math.min(23, Math.floor(diffHours)));
+    countPieces[bucket] += Number(row?.qty || 0);
+  });
+  return countPieces;
+}
+
+function buildHourlyStopSeries(stops, rangeStart, rangeEnd) {
+  const seconds = new Array(24).fill(0);
+  const startMs = rangeStart.toMillis();
+  const endMs = rangeEnd.toMillis();
+  (Array.isArray(stops) ? stops : []).forEach((stop) => {
+    const stopStartMs = DateTime.fromISO(String(stop?.started_at || "")).toMillis();
+    if (!Number.isFinite(stopStartMs)) return;
+    const rawStopEndMs = stop?.resumed_at ? DateTime.fromISO(String(stop.resumed_at)).toMillis() : Date.now();
+    const stopEndMs = Number.isFinite(rawStopEndMs) ? rawStopEndMs : Date.now();
+    const clippedStart = Math.max(startMs, stopStartMs);
+    const clippedEnd = Math.min(endMs, stopEndMs);
+    if (clippedEnd <= clippedStart) return;
+
+    for (let hour = 0; hour < 24; hour += 1) {
+      const bucketStart = rangeStart.plus({ hours: hour }).toMillis();
+      const bucketEnd = rangeStart.plus({ hours: hour + 1 }).toMillis();
+      const overlapStart = Math.max(clippedStart, bucketStart);
+      const overlapEnd = Math.min(clippedEnd, bucketEnd);
+      if (overlapEnd > overlapStart) seconds[hour] += Math.floor((overlapEnd - overlapStart) / 1000);
+    }
+  });
+  return seconds;
 }
 
 function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, source, machineIds, itemTechByCode }) {
