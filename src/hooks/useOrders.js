@@ -521,13 +521,15 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
     return null
   }
 
-  async function confirmStop({ order, operador, motivo, obs, data, hora, endLowEffAtStopStart, autoStop, stopId }) {
+  async function confirmStop({ order, ordem, operador, motivo, obs, data, hora, endLowEffAtStopStart, autoStop, stopId }) {
+    const targetOrder = order || ordem
+    if (!targetOrder?.id) { alert('Não foi possível identificar a ordem da parada.'); return false }
     if ((!autoStop && !operador) || !data || !hora) { alert('Preencha operador, data e hora.'); return false }
     if (!String(motivo || '').trim()) { alert('Selecione o motivo da parada.'); return false }
     const started_at = localDateTimeToISO(data, hora)
 
     if (!autoStop) {
-      const overlapMsg = await validarSobreposicaoParada({ machineId: order.machine_id, startedAt: started_at })
+      const overlapMsg = await validarSobreposicaoParada({ machineId: targetOrder.machine_id, startedAt: started_at })
       if (overlapMsg) { alert(overlapMsg); return false }
     }
 
@@ -535,7 +537,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
     if (endLowEffAtStopStart) {
       // tenta encerrar log associado
       try {
-        const key = `order_${order.id}`
+        const key = `order_${targetOrder.id}`
         const sessionId = lowEffSessions?.[key]
         if (sessionId) {
           await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('id', sessionId)
@@ -543,7 +545,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
           setLowEffSessions(prev => { const c={...prev}; delete c[key]; return c })
         } else {
           // fallback: encerra registros abertos para essa ordem
-          await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('order_id', order.id).is('ended_at', null)
+          await supabase.from('low_efficiency_logs').update({ ended_at: started_at }).eq('order_id', targetOrder.id).is('ended_at', null)
         }
       } catch (e) {
         console.warn('Erro ao encerrar baixa eficiência automaticamente ao iniciar parada:', e)
@@ -556,7 +558,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
       if (!openStopId) {
         const open = await supabase.from('machine_stops')
           .select('id')
-          .eq('order_id', order.id)
+          .eq('order_id', targetOrder.id)
           .is('resumed_at', null)
           .order('started_at', { ascending: false })
           .limit(1)
@@ -572,27 +574,29 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
         if (upd.error) { alert('Erro ao atualizar parada automática: ' + upd.error.message); return false }
       } else {
         const ins = await supabase.from('machine_stops')
-          .insert([{ company_id: clientId, order_id: order.id, machine_id: order.machine_id, started_by: operador || null, started_at, reason: String(motivo).trim(), notes: obs }])
+          .insert([{ company_id: clientId, order_id: targetOrder.id, machine_id: targetOrder.machine_id, started_by: operador || null, started_at, reason: String(motivo).trim(), notes: obs }])
           .select('*').maybeSingle()
         if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return false }
       }
     } else {
       const ins = await supabase.from('machine_stops')
-        .insert([{ company_id: clientId, order_id: order.id, machine_id: order.machine_id, started_by: operador || null, started_at, reason: String(motivo).trim(), notes: obs }])
+        .insert([{ company_id: clientId, order_id: targetOrder.id, machine_id: targetOrder.machine_id, started_by: operador || null, started_at, reason: String(motivo).trim(), notes: obs }])
         .select('*').maybeSingle()
       if (ins.error) { alert('Erro ao registrar parada: ' + ins.error.message); return false }
     }
 
     // 3) Muda status para PARADA
-    await setStatus(order, 'PARADA')
+    await setStatus(targetOrder, 'PARADA')
     return true
   }
 
-  async function confirmResume({ order, operador, data, hora, targetStatus, autoResume }) {
+  async function confirmResume({ order, ordem, operador, data, hora, targetStatus, autoResume }) {
+    const targetOrder = order || ordem
+    if (!targetOrder?.id) { alert('Não foi possível identificar a ordem da retomada.'); return false }
     if ((!autoResume && !operador) || !data || !hora) { alert('Preencha operador, data e hora.'); return false }
     const resumed_at = localDateTimeToISO(data, hora)
     const sel = await supabase.from('machine_stops').select('*')
-      .eq('order_id', order.id).is('resumed_at', null)
+      .eq('order_id', targetOrder.id).is('resumed_at', null)
       .order('started_at', { ascending:false })
       .limit(1).maybeSingle()
     if (sel.error) { alert('Erro ao localizar parada aberta: ' + sel.error.message); return false }
@@ -601,7 +605,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
         .eq('id', sel.data.id)
       if (upd.error) { alert('Erro ao encerrar parada: ' + upd.error.message); return false }
     }
-    await setStatus(order, targetStatus || 'PRODUZINDO')
+    await setStatus(targetOrder, targetStatus || 'PRODUZINDO')
     return true
   }
 

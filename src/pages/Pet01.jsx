@@ -60,7 +60,6 @@ export default function Pet01({
   const scanBufferRef = useRef("");
   const lastKeyTimeRef = useRef(0);
   const autoStopInFlightRef = useRef(null);
-  const autoResumePromptedPulseRef = useRef(null);
 
   // turno atual (usado para gravar)
 const [currentShift, setCurrentShift] = useState(() => {
@@ -352,11 +351,10 @@ const [currentShift, setCurrentShift] = useState(() => {
     const pendingStop = paradaAberta && !String(paradaAberta.reason || '').trim()
       ? paradaAberta
       : null
-    const fallbackStopAt = machineMeta?.sensor_auto_stop_at || ativa.interrupted_at || null
-    if (!pendingStop && !fallbackStopAt) return
+    if (!pendingStop) return
     if (autoStopPromptedOrderId === ativa.id) return
 
-    const stopAtIso = pendingStop?.started_at || fallbackStopAt
+    const stopAtIso = pendingStop.started_at
     const stopAt = DateTime.fromISO(String(stopAtIso), { zone: 'utc' }).setZone('America/Sao_Paulo')
     const timestamp = stopAt.isValid ? stopAt : DateTime.now().setZone('America/Sao_Paulo')
 
@@ -371,34 +369,7 @@ const [currentShift, setCurrentShift] = useState(() => {
       __initApplied: true,
     })
     setAutoStopPromptedOrderId(ativa.id)
-  }, [ativa, activeStatus, autoStopPromptedOrderId, machineMeta?.apontamento_tipo, machineMeta?.sensor_auto_stop_at, paradaAberta, setStopModal])
-
-  useEffect(() => {
-    if (!ativa || !setResumeModal || machineMeta?.apontamento_tipo !== 'sensor') return
-    if (activeStatus !== 'PARADA') {
-      autoResumePromptedPulseRef.current = null
-      return
-    }
-    if (!paradaAberta?.started_at || !sensorLastPulseAt) return
-    if (!String(paradaAberta.reason || '').trim()) return
-
-    const stopStartMs = DateTime.fromISO(String(paradaAberta.started_at)).toMillis()
-    const pulseMs = DateTime.fromISO(String(sensorLastPulseAt)).toMillis()
-    if (!Number.isFinite(stopStartMs) || !Number.isFinite(pulseMs) || pulseMs <= stopStartMs) return
-    if (autoResumePromptedPulseRef.current === sensorLastPulseAt) return
-
-    const pulseAt = DateTime.fromMillis(pulseMs).setZone('America/Sao_Paulo')
-    setResumeModal({
-      ordem: ativa,
-      operador: responsavelTurno || '',
-      data: pulseAt.toISODate(),
-      hora: pulseAt.toFormat('HH:mm'),
-      targetStatus: 'PRODUZINDO',
-      autoResume: true,
-      __initApplied: true,
-    })
-    autoResumePromptedPulseRef.current = sensorLastPulseAt
-  }, [ativa, activeStatus, machineMeta?.apontamento_tipo, paradaAberta, responsavelTurno, sensorLastPulseAt, setResumeModal])
+  }, [ativa, activeStatus, autoStopPromptedOrderId, machineMeta?.apontamento_tipo, paradaAberta, setStopModal])
 
   const formatInt = useCallback((n) => {
     const num = Number(n) || 0;

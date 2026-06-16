@@ -395,7 +395,18 @@ export async function POST(request: Request) {
     const shiftOperator = await findShiftOperator({ supabase, companyId, machineCode, shiftWindow });
     const receivedAt = nowIso();
 
-    const isStoppedResumePulse = String(activeOrder?.status || '').toUpperCase() === 'PARADA';
+    try {
+      activeOrder = await resumeAutoStopIfNeeded(supabase, {
+        companyId,
+        machineCode,
+        activeOrder,
+        operatorName: shiftOperator,
+        resumedAt: receivedAt,
+      });
+    } catch (resumeError: any) {
+      console.error('Erro ao retomar parada automaticamente:', resumeError);
+      return jsonResponse({ error: resumeError.message || 'Unable to auto resume stop' }, 500);
+    }
 
     if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'AGUARDANDO') {
       const startPayload = {
@@ -445,8 +456,8 @@ export async function POST(request: Request) {
       }
     }
 
-    const ignoreReason = isStoppedResumePulse ? 'STOPPED_ORDER_RESUME_PENDING' : (!activeOrder ? 'NO_ACTIVE_ORDER' : null)
-    const isIgnoredEvent = isStoppedResumePulse || !activeOrder
+    const ignoreReason = !activeOrder ? 'NO_ACTIVE_ORDER' : null
+    const isIgnoredEvent = !activeOrder
     const producedQuantity = isIgnoredEvent ? 0 : (activeOrder ? pulseCount * cavitiesUsed : 0)
     console.log('📊 Produção calculada:', {
       pulseCount,
