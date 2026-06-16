@@ -238,11 +238,11 @@ export default async function handler(req, res) {
 
   const { data: activeOrders, error: activeOrderError } = await supabase
     .from('orders')
-    .select('id, code, machine_id, product, status, finalized, qty, boxes, standard, pos, started_at, started_by')
+    .select('id, code, machine_id, product, status, finalized, qty, boxes, standard, pos, started_at, started_by, restarted_at, restarted_by')
     .eq('company_id', companyId)
     .eq('machine_id', machineCode)
     .eq('finalized', false)
-    .in('status', ['AGUARDANDO', 'PRODUZINDO', 'BAIXA_EFICIENCIA'])
+    .in('status', ['AGUARDANDO', 'PRODUZINDO', 'BAIXA_EFICIENCIA', 'PARADA'])
     .order('pos', { ascending: true })
     .limit(1)
 
@@ -276,6 +276,49 @@ export default async function handler(req, res) {
       return
     }
     activeOrder = startedOrder || { ...activeOrder, ...startPayload }
+  } else if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'PARADA') {
+    const resumedBy = shiftOperator || 'esp32'
+    const { data: openStop, error: openStopError } = await supabase
+      .from('machine_stops')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('order_id', activeOrder.id)
+      .eq('machine_id', machineCode)
+      .is('resumed_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (openStopError) {
+      sendJson(res, 500, { error: openStopError.message || 'Unable to find open machine stop' })
+      return
+    }
+
+    if (openStop?.id) {
+      const { error: resumeStopError } = await supabase
+        .from('machine_stops')
+        .update({ resumed_by: resumedBy, resumed_at: receivedAt })
+        .eq('id', openStop.id)
+
+      if (resumeStopError) {
+        sendJson(res, 500, { error: resumeStopError.message || 'Unable to resume open machine stop' })
+        return
+      }
+    }
+
+    const resumePayload = { status: 'PRODUZINDO' }
+    const { data: resumedOrder, error: resumeOrderError } = await supabase
+      .from('orders')
+      .update(resumePayload)
+      .eq('id', activeOrder.id)
+      .select('id, code, machine_id, product, status, finalized, qty, boxes, standard, pos, started_at, started_by, restarted_at, restarted_by')
+      .maybeSingle()
+
+    if (resumeOrderError) {
+      sendJson(res, 500, { error: resumeOrderError.message || 'Unable to auto resume order' })
+      return
+    }
+    activeOrder = resumedOrder || { ...activeOrder, ...resumePayload }
   } else if (activeOrder && shiftOperator && !String(activeOrder.started_by || '').trim()) {
     await supabase
       .from('orders')
