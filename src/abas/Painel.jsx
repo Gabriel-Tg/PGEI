@@ -84,8 +84,19 @@ function isOrderOngoingStatus(status) {
   return Array.isArray(STATUS) && STATUS.includes(normalized);
 }
 
-function getDashboardPeriodRange(periodKey) {
+function getDashboardPeriodRange(periodKey, customStart = "", customEnd = "") {
   const now = DateTime.now().setZone("America/Sao_Paulo");
+  if (periodKey === "custom") {
+    const start = DateTime.fromISO(String(customStart || ""), { zone: "America/Sao_Paulo" });
+    const end = DateTime.fromISO(String(customEnd || customStart || ""), { zone: "America/Sao_Paulo" });
+    if (start.isValid && end.isValid) {
+      return {
+        start: start.startOf("day"),
+        end: end.endOf("day"),
+        label: `${start.toFormat("dd/LL/yyyy")} a ${end.toFormat("dd/LL/yyyy")}`,
+      };
+    }
+  }
   if (periodKey === "yesterday") {
     const day = now.minus({ days: 1 });
     return {
@@ -101,11 +112,11 @@ function getDashboardPeriodRange(periodKey) {
       label: "Últimos 7 dias",
     };
   }
-  if (periodKey === "month") {
+  if (periodKey === "this_month") {
     return {
-      start: now.minus({ days: 29 }).startOf("day"),
+      start: now.startOf("month"),
       end: now.endOf("day"),
-      label: "Últimos 30 dias",
+      label: "Este mês",
     };
   }
   return {
@@ -113,6 +124,23 @@ function getDashboardPeriodRange(periodKey) {
     end: now.endOf("day"),
     label: "Hoje",
   };
+}
+
+function isDailyTrendPeriod(periodKey) {
+  return !["today", "yesterday"].includes(String(periodKey || "today"));
+}
+
+function getShiftKeyForTimestamp(value) {
+  return getShiftWindowAt(value)?.shiftKey || null;
+}
+
+function matchesShiftFilter(value, shiftFilter) {
+  if (!shiftFilter || shiftFilter === "__ALL__") return true;
+  return String(getShiftKeyForTimestamp(value) || "") === String(shiftFilter);
+}
+
+function getScrapItemCode(row) {
+  return extractItemCodeFromOrderProduct(row?.order?.product || row?.product || row?.item || row?.code);
 }
 
 function getEffectiveProductionTimestamp(row) {
@@ -149,7 +177,9 @@ function sumClippedSeconds(rows, { machine, startMs, endMs, startField = "starte
 function buildSensorCycleEntries(cycleRows, rangeStart, rangeEnd) {
   const entries = [];
   (Array.isArray(cycleRows) ? cycleRows : []).forEach((row) => {
-    const timestamps = Array.isArray(row?.cycle_timestamps) ? row.cycle_timestamps : [];
+    const timestamps = Array.isArray(row?.cycle_timestamps)
+      ? row.cycle_timestamps
+      : [];
     const timestampsInRange = timestamps.filter((value) => isDateTimeInRange(value, rangeStart, rangeEnd));
     if (!timestampsInRange.length) return;
 
@@ -177,7 +207,24 @@ function buildSensorCycleEntries(cycleRows, rangeStart, rangeEnd) {
   return entries;
 }
 
-function buildTrendSeries(scans, entries, periodKey, rangeStart) {
+function mergeEntriesWithSensorCycles(entries, cycleEntries) {
+  const sensorCycleOrderIds = new Set(
+    (Array.isArray(cycleEntries) ? cycleEntries : [])
+      .map((entry) => String(entry?.order_id || ""))
+      .filter(Boolean)
+  );
+  if (!sensorCycleOrderIds.size) return Array.isArray(entries) ? entries : [];
+
+  return [
+    ...(Array.isArray(entries) ? entries : []).filter((entry) => {
+      if (String(entry?.source || "").toLowerCase() !== "sensor") return true;
+      return !sensorCycleOrderIds.has(String(entry?.order_id || ""));
+    }),
+    ...(Array.isArray(cycleEntries) ? cycleEntries : []),
+  ];
+}
+
+function buildTrendSeries(scans, entries, periodKey, rangeStart, rangeEnd) {
   const scanRows = Array.isArray(scans) ? scans : [];
   const entryRows = Array.isArray(entries) ? entries : [];
   const rows = [
@@ -193,43 +240,17 @@ function buildTrendSeries(scans, entries, periodKey, rangeStart) {
     })),
   ];
 
-  if (periodKey === "week") {
-    const labels = Array.from({ length: 7 }, (_, idx) => rangeStart.plus({ days: idx }).toFormat("dd/LL"));
-    const countBoxes = new Array(7).fill(0);
-    const countPieces = new Array(7).fill(0);
+  if (isDailyTrendPeriod(periodKey)) {
+    const dayCount = Math.max(1, Math.floor(rangeEnd.startOf("day").diff(rangeStart.startOf("day"), "days").days) + 1);
+    const labels = Array.from({ length: dayCount }, (_, idx) => rangeStart.plus({ days: idx }).toFormat("dd/LL"));
+    const countBoxes = new Array(dayCount).fill(0);
+    const countPieces = new Array(dayCount).fill(0);
     rows.forEach((scan) => {
       const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
       if (!dt.isValid) return;
-      const idx = Math.max(0, Math.min(6, Math.floor(dt.startOf("day").diff(rangeStart.startOf("day"), "days").days)));
+      const idx = Math.max(0, Math.min(dayCount - 1, Math.floor(dt.startOf("day").diff(rangeStart.startOf("day"), "days").days)));
       countBoxes[idx] += Number(scan?.boxes || 0);
       countPieces[idx] += Number(scan?.pieces || 0);
-    });
-    const cumulativeBoxes = [];
-    countBoxes.reduce((acc, val) => {
-      const next = acc + val;
-      cumulativeBoxes.push(next);
-      return next;
-    }, 0);
-    const cumulativePieces = [];
-    countPieces.reduce((acc, val) => {
-      const next = acc + val;
-      cumulativePieces.push(next);
-      return next;
-    }, 0);
-    return { labels, trendBoxes: cumulativeBoxes, trendPieces: cumulativePieces, bucketBoxes: countBoxes, bucketPieces: countPieces };
-  }
-
-  if (periodKey === "month") {
-    const daysInMonth = 30;
-    const labels = Array.from({ length: daysInMonth }, (_, idx) => rangeStart.plus({ days: idx }).toFormat("dd/LL"));
-    const countBoxes = new Array(daysInMonth).fill(0);
-    const countPieces = new Array(daysInMonth).fill(0);
-    rows.forEach((scan) => {
-      const dt = DateTime.fromISO(String(scan?.created_at || "")).setZone("America/Sao_Paulo");
-      if (!dt.isValid) return;
-      const dayIdx = Math.max(0, Math.min(daysInMonth - 1, Math.floor(dt.startOf("day").diff(rangeStart.startOf("day"), "days").days)));
-      countBoxes[dayIdx] += Number(scan?.boxes || 0);
-      countPieces[dayIdx] += Number(scan?.pieces || 0);
     });
     const cumulativeBoxes = [];
     countBoxes.reduce((acc, val) => {
@@ -348,10 +369,7 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
   const periodStartMs = periodStart.toMillis();
   const periodEndMs = periodEnd.toMillis();
   const pointsMs = safeLabels.map((_, idx) => {
-    if (periodKey === "week") {
-      return periodStart.plus({ days: idx + 1 }).toMillis();
-    }
-    if (periodKey === "month") {
+    if (isDailyTrendPeriod(periodKey)) {
       return periodStart.plus({ days: idx + 1 }).toMillis();
     }
     return periodStart.plus({ hours: idx }).toMillis();
@@ -420,11 +438,17 @@ export default function Painel({
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
   const [itemTechByCode, setItemTechByCode] = useState({});
   const [periodFilter, setPeriodFilter] = useState("today");
+  const [customPeriodStart, setCustomPeriodStart] = useState(() => DateTime.now().setZone("America/Sao_Paulo").toISODate());
+  const [customPeriodEnd, setCustomPeriodEnd] = useState(() => DateTime.now().setZone("America/Sao_Paulo").toISODate());
+  const [sectorFilter, setSectorFilter] = useState("__ALL__");
   const [machineFilter, setMachineFilter] = useState("__ALL__");
+  const [shiftFilter, setShiftFilter] = useState("__ALL__");
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [sensorRuntimeByMachine, setSensorRuntimeByMachine] = useState({});
   const machineMetaByIdRef = useRef({});
   const [barTooltip, setBarTooltip] = useState(null);
+  const [chartZoom, setChartZoom] = useState(null);
+  const [chartDrag, setChartDrag] = useState(null);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
   const [periodData, setPeriodData] = useState({
     producedTotal: 0,
@@ -447,6 +471,8 @@ export default function Painel({
     shiftOutput: ACTIVE_TURNOS.map((turno) => ({ ...turno, boxes: 0, pieces: 0, pulses: 0, active: false })),
     scrapPieces: 0,
     scrapPct: 0,
+    scrapWeightKg: 0,
+    scrapReasons: [],
     ongoingOrders: [],
     periodLabel: "Hoje",
   });
@@ -458,33 +484,35 @@ export default function Painel({
     return () => window.clearInterval(interval);
   }, []);
 
-  const machineGroupOptions = useMemo(() => {
-    const groups = new Map();
+  const sectorOptions = useMemo(() => {
+    const sectors = new Set();
     (tenantMachines || []).forEach((machine) => {
-      const code = String(machine?.machine_code || "").trim().toUpperCase();
-      if (!code) return;
-      const type = String(machine?.apontamento_tipo || "manual").trim().toLowerCase();
-      if (!groups.has(type)) groups.set(type, []);
-      groups.get(type).push(code);
+      const sector = String(machine?.sector || machine?.setor || "").trim();
+      if (sector) sectors.add(sector);
     });
-    return Array.from(groups.entries()).map(([type, machines]) => ({
-      id: `group:${type}`,
-      type,
-      label: type === "sensor" ? "Grupo Sensor" : type === "bipagem" ? "Grupo Bipagem" : "Grupo Manual",
-      machines,
-    }));
+    return Array.from(sectors).sort((a, b) => a.localeCompare(b, "pt-BR"));
   }, [tenantMachines]);
 
   const filteredMachineIds = useMemo(() => {
-    if (machineFilter === "__ALL__") return machineIds;
-    if (machineFilter.startsWith("group:")) {
-      const group = machineGroupOptions.find((item) => item.id === machineFilter);
-      if (!group) return machineIds;
-      const allowed = new Set(group.machines.map((machine) => String(machine).toUpperCase()));
-      return machineIds.filter((machine) => allowed.has(String(machine).toUpperCase()));
-    }
-    return machineIds.filter((machine) => String(machine).toUpperCase() === String(machineFilter).toUpperCase());
-  }, [machineFilter, machineIds, machineGroupOptions]);
+    const tenantByCode = new Map((tenantMachines || []).map((machine) => [String(machine?.machine_code || "").trim().toUpperCase(), machine]));
+    return machineIds.filter((machine) => {
+      const machineCode = String(machine || "").trim().toUpperCase();
+      const tenantMachine = tenantByCode.get(machineCode);
+      const sector = String(tenantMachine?.sector || tenantMachine?.setor || "").trim();
+      if (sectorFilter !== "__ALL__" && sector !== sectorFilter) return false;
+      if (machineFilter !== "__ALL__" && machineCode !== String(machineFilter).toUpperCase()) return false;
+      return true;
+    });
+  }, [machineFilter, machineIds, sectorFilter, tenantMachines]);
+
+  const machineOptions = useMemo(() => {
+    const tenantByCode = new Map((tenantMachines || []).map((machine) => [String(machine?.machine_code || "").trim().toUpperCase(), machine]));
+    return machineIds.filter((machine) => {
+      const tenantMachine = tenantByCode.get(String(machine || "").trim().toUpperCase());
+      const sector = String(tenantMachine?.sector || tenantMachine?.setor || "").trim();
+      return sectorFilter === "__ALL__" || sector === sectorFilter;
+    });
+  }, [machineIds, sectorFilter, tenantMachines]);
 
   const machineTypeById = useMemo(() => {
     const map = {};
@@ -755,7 +783,7 @@ export default function Painel({
     let cancelled = false;
 
     async function loadPeriodData() {
-      const period = getDashboardPeriodRange(periodFilter);
+      const period = getDashboardPeriodRange(periodFilter, customPeriodStart, customPeriodEnd);
       const startIso = period.start.toUTC().toISO();
       const endIso = period.end.toUTC().toISO();
 
@@ -779,7 +807,7 @@ export default function Painel({
 
       let scrapQuery = supabase
         .from("scrap_logs")
-        .select("qty")
+        .select("id, qty, reason, machine_id, created_at, order:orders(id, product)")
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
@@ -797,14 +825,27 @@ export default function Painel({
         scrapQuery = scrapQuery.in("machine_id", filteredMachineIds);
       }
 
-      const [scansRes, entriesRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([
+      const [scansRes, entriesRes, sensorCyclesRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([
         scansQuery,
         fetchAllPages(() => {
           let query = supabase
             .from("injection_production_entries")
-            .select("id, created_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+            .select("id, created_at, updated_at, sensor_last_pulse_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
             .gte("created_at", startIso)
             .lte("created_at", endIso);
+
+          if (clientId) query = query.eq("company_id", clientId);
+          if (filteredMachineIds.length > 0 && filteredMachineIds.length < machineIds.length) {
+            query = query.in("machine_id", filteredMachineIds);
+          }
+          return query;
+        }),
+        fetchAllPages(() => {
+          let query = supabase
+            .from("machine_sensor_order_cycles")
+            .select("id, machine_id, order_id, produced_quantity, pulse_count, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+            .lte("first_pulse_at", endIso)
+            .gte("last_pulse_at", startIso);
 
           if (clientId) query = query.eq("company_id", clientId);
           if (filteredMachineIds.length > 0 && filteredMachineIds.length < machineIds.length) {
@@ -818,15 +859,18 @@ export default function Painel({
       ]);
       if (cancelled) return;
 
-      const scans = scansRes?.data || [];
+      const scans = (scansRes?.data || []).filter((row) => matchesShiftFilter(row?.created_at, shiftFilter));
       const entries = entriesRes?.data || [];
-      const stops = stopsRes?.data || [];
-      const lowEff = lowEffRes?.data || [];
-      const scraps = scrapRes?.data || [];
+      const sensorCycleEntries = buildSensorCycleEntries(sensorCyclesRes?.data || [], period.start, period.end);
+      const entriesForTimeline = mergeEntriesWithSensorCycles(entries, sensorCycleEntries)
+        .filter((row) => matchesShiftFilter(getEffectiveProductionTimestamp(row), shiftFilter));
+      const stops = (stopsRes?.data || []).filter((row) => matchesShiftFilter(row?.started_at, shiftFilter));
+      const lowEff = (lowEffRes?.data || []).filter((row) => matchesShiftFilter(row?.started_at, shiftFilter));
+      const scraps = (scrapRes?.data || []).filter((row) => matchesShiftFilter(row?.created_at, shiftFilter));
 
       const producedBoxesFromScans = scans.length;
       const producedPiecesFromScans = scans.reduce((acc, scan) => acc + Number(scan?.qty_pieces || 0), 0);
-      const producedPiecesFromEntries = entries.reduce((acc, row) => acc + Number(row?.good_qty || 0), 0);
+      const producedPiecesFromEntries = entriesForTimeline.reduce((acc, row) => acc + Number(row?.good_qty || 0), 0);
       const producedPieces = producedPiecesFromScans + producedPiecesFromEntries;
       const producedBoxes = producedBoxesFromScans;
       const producedTotal = producedBoxes;
@@ -838,7 +882,7 @@ export default function Painel({
         machineOutputMap[machine].boxes += 1;
         machineOutputMap[machine].pieces += Number(scan?.qty_pieces || 0);
       });
-      entries.forEach((entry) => {
+      entriesForTimeline.forEach((entry) => {
         const machine = String(entry?.machine_id || "").toUpperCase();
         if (!machineOutputMap[machine]) machineOutputMap[machine] = { boxes: 0, pieces: 0 };
         machineOutputMap[machine].pieces += Number(entry?.good_qty || 0);
@@ -851,8 +895,47 @@ export default function Painel({
       }));
 
       const scrapPieces = scraps.reduce((acc, row) => acc + Number(row?.qty || 0), 0);
-      const scrapPctBase = producedPieces + scrapPieces;
-      const scrapPct = scrapPctBase > 0 ? (scrapPieces / scrapPctBase) * 100 : 0;
+      const scrapPct = producedPieces > 0 ? (scrapPieces / producedPieces) * 100 : 0;
+      const scrapItemCodes = [...new Set(scraps.map(getScrapItemCode).filter(Boolean))];
+      const scrapItemTechByCode = { ...itemTechByCode };
+      const missingScrapItemCodes = scrapItemCodes.filter((code) => !scrapItemTechByCode[code]);
+      if (missingScrapItemCodes.length) {
+        let scrapItemsQuery = supabase
+          .from("items")
+          .select("code, part_weight_g")
+          .in("code", missingScrapItemCodes);
+        if (clientId) scrapItemsQuery = scrapItemsQuery.eq("company_id", clientId);
+        const { data: scrapItems } = await scrapItemsQuery;
+        (scrapItems || []).forEach((item) => {
+          const code = String(item?.code || "").trim();
+          if (!code) return;
+          scrapItemTechByCode[code] = {
+            ...(scrapItemTechByCode[code] || {}),
+            partWeightG: Number(item?.part_weight_g || 0),
+          };
+        });
+      }
+      const scrapWeightKg = scraps.reduce((acc, row) => {
+        const itemCode = getScrapItemCode(row);
+        const partWeightG = itemCode ? Number(scrapItemTechByCode?.[itemCode]?.partWeightG || 0) : 0;
+        return acc + ((Number(row?.qty || 0) * partWeightG) / 1000);
+      }, 0);
+      const scrapReasonMap = {};
+      scraps.forEach((row) => {
+        const reason = String(row?.reason || "Outro").trim() || "Outro";
+        const itemCode = getScrapItemCode(row);
+        const partWeightG = itemCode ? Number(scrapItemTechByCode?.[itemCode]?.partWeightG || 0) : 0;
+        if (!scrapReasonMap[reason]) scrapReasonMap[reason] = { reason, pieces: 0, weightKg: 0, count: 0 };
+        scrapReasonMap[reason].pieces += Number(row?.qty || 0);
+        scrapReasonMap[reason].weightKg += (Number(row?.qty || 0) * partWeightG) / 1000;
+        scrapReasonMap[reason].count += 1;
+      });
+      const scrapReasons = Object.values(scrapReasonMap)
+        .sort((a, b) => Number(b.pieces || 0) - Number(a.pieces || 0))
+        .map((item) => ({
+          ...item,
+          percent: scrapPieces > 0 ? Math.round((Number(item.pieces || 0) / scrapPieces) * 100) : 0,
+        }));
 
       const activeOrders = filteredMachineIds
         .map((machine) => {
@@ -998,8 +1081,8 @@ export default function Painel({
           percent: reasonTotalMs > 0 ? Math.round((Number(totalMs || 0) / reasonTotalMs) * 100) : 0,
         }));
 
-      const trendBase = buildTrendSeries(scans, entries, periodFilter, period.start);
-      const shiftOutput = buildShiftOutput(scans, entries);
+      const trendBase = buildTrendSeries(scans, entriesForTimeline, periodFilter, period.start, period.end);
+      const shiftOutput = buildShiftOutput(scans, entriesForTimeline);
       const dynamicGoal = buildDynamicGoalSeries({
         periodKey: periodFilter,
         labels: trendBase.labels,
@@ -1033,6 +1116,8 @@ export default function Painel({
         shiftOutput,
         scrapPieces,
         scrapPct,
+        scrapWeightKg,
+        scrapReasons,
         ongoingOrders,
         periodLabel: period.label,
       });
@@ -1043,7 +1128,7 @@ export default function Painel({
     });
 
     return () => { cancelled = true; };
-  }, [periodFilter, clientId, machineIds, filteredMachineIds, machineTypeById, source, paradas, itemTechByCode, periodRefreshNonce]);
+  }, [periodFilter, customPeriodStart, customPeriodEnd, shiftFilter, clientId, machineIds, filteredMachineIds, machineTypeById, source, paradas, itemTechByCode, periodRefreshNonce]);
 
   // util helper para testar se um item corresponde a um order_id / code
   function matchesOrder(item, orderIdOrCode) {
@@ -1402,6 +1487,8 @@ export default function Painel({
       shiftOutput: periodData.shiftOutput || [],
       scrapPieces: Number(periodData.scrapPieces || 0),
       scrapPct: Number(periodData.scrapPct || 0),
+      scrapWeightKg: Number(periodData.scrapWeightKg || 0),
+      scrapReasons: periodData.scrapReasons || [],
       trendLabels: periodData.trendLabels || [],
       periodLabel: periodData.periodLabel || "Hoje",
     };
@@ -1615,13 +1702,10 @@ export default function Painel({
     const avgOee = productiveCards.length
       ? productiveCards.reduce((acc, card) => acc + Number(card.oee || 0), 0) / productiveCards.length
       : Number(overview.efficiency || 0);
-    const activeMachines = machineCards.filter((card) => card.tone === "producing").length;
     const stopMinutes = Math.round(Number(overview.openStopSeconds || 0) / 60);
     return {
       avgOee,
       production: Number(overview.producedPieces || 0),
-      activeMachines,
-      totalMachines: machineCards.length,
       stopMinutes,
     };
   }, [machineCards, overview]);
@@ -1655,44 +1739,97 @@ export default function Painel({
     }));
   }, [overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, periodFilter]);
 
-  const goalLinePoints = useMemo(() => {
-    if (!productionBuckets.length) return "";
-    if (productionBuckets.length === 1) {
-      const y = 100 - Number(productionBuckets[0]?.goalHeight || 0);
-      return `0,${y} 100,${y}`;
+  const scopedProductionBuckets = useMemo(() => {
+    let buckets = productionBuckets;
+    if (chartZoom && buckets.length > 1) {
+      const start = Math.max(0, Math.min(chartZoom.start, buckets.length - 1));
+      const end = Math.max(start, Math.min(chartZoom.end, buckets.length - 1));
+      buckets = buckets.slice(start, end + 1);
     }
-    return productionBuckets
-      .map((bucket, index) => {
-        const x = (index / (productionBuckets.length - 1)) * 100;
-        const y = 100 - Number(bucket?.goalHeight || 0);
-        return `${x},${y}`;
-      })
-      .join(" ");
-  }, [productionBuckets]);
+
+    return buckets.length ? buckets : productionBuckets;
+  }, [chartZoom, productionBuckets]);
+
+  const productionChart = useMemo(() => {
+    const width = 1400;
+    const height = 320;
+    const top = 28;
+    const right = 24;
+    const bottom = 42;
+    const left = 82;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    const maxValue = Math.max(1, ...scopedProductionBuckets.map((bucket) => Math.max(bucket.production, bucket.goal)));
+    const bucketWidth = scopedProductionBuckets.length > 0 ? plotWidth / scopedProductionBuckets.length : plotWidth;
+    const barWidth = Math.max(8, Math.min(34, bucketWidth * 0.48));
+    const scaleX = (index) => left + (bucketWidth * index) + (bucketWidth / 2);
+    const scaleY = (value) => top + plotHeight - (Number(value || 0) / maxValue) * plotHeight;
+    const points = scopedProductionBuckets.map((bucket, index) => ({
+      ...bucket,
+      index,
+      x: scaleX(index),
+      yProduction: scaleY(bucket.production),
+      yGoal: scaleY(bucket.goal),
+      barX: scaleX(index) - (barWidth / 2),
+      barY: scaleY(bucket.production),
+      barWidth,
+      barHeight: Math.max(bucket.production > 0 ? 3 : 1, (Number(bucket.production || 0) / maxValue) * plotHeight),
+      status: bucket.efficiency >= 100 ? "above" : bucket.efficiency >= 90 ? "near" : "below",
+    }));
+    const goalLine = points.map((point) => `${point.x},${point.yGoal}`).join(" ");
+    const guideValues = [0.25, 0.5, 0.75, 1].map((ratio) => ({
+      y: top + plotHeight - (plotHeight * ratio),
+      label: Math.round(maxValue * ratio),
+    }));
+
+    return { width, height, top, right, bottom, left, plotWidth, plotHeight, points, goalLine, guideValues };
+  }, [scopedProductionBuckets]);
 
   const topStopReasons = useMemo(() => (overview.stopReasons || []).slice(0, 5), [overview.stopReasons]);
-
-  function updateBarTooltip(event, bucket) {
-    const margin = 14;
-    const tooltipWidth = 220;
-    const tooltipHeight = 132;
-    const clientX = event.clientX || event.touches?.[0]?.clientX || 0;
-    const clientY = event.clientY || event.touches?.[0]?.clientY || 0;
-    const left = Math.min(Math.max(margin, clientX + 14), window.innerWidth - tooltipWidth - margin);
-    const top = Math.min(Math.max(margin, clientY + 14), window.innerHeight - tooltipHeight - margin);
-    setBarTooltip({ ...bucket, left, top });
-  }
+  const topScrapReasons = useMemo(() => (overview.scrapReasons || []).slice(0, 5), [overview.scrapReasons]);
 
   function handleProductionChartPointer(event) {
-    if (!productionBuckets.length) return;
+    if (!productionChart.points.length) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
     const relativeX = Math.min(Math.max(0, clientX - rect.left), rect.width);
-    const bucketIndex = Math.min(
-      productionBuckets.length - 1,
-      Math.max(0, Math.floor((relativeX / Math.max(1, rect.width)) * productionBuckets.length))
-    );
-    updateBarTooltip(event, productionBuckets[bucketIndex]);
+    const plotRatio = Math.min(1, Math.max(0, relativeX / Math.max(1, rect.width)));
+    const bucketIndex = Math.min(productionChart.points.length - 1, Math.max(0, Math.round(plotRatio * (productionChart.points.length - 1))));
+    const point = productionChart.points[bucketIndex];
+    setBarTooltip({ ...point, cursorPercent: (point.x / productionChart.width) * 100 });
+  }
+
+  function handleProductionChartPointerDown(event) {
+    if (scopedProductionBuckets.length < 3) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
+    const startPercent = Math.min(100, Math.max(0, ((clientX - rect.left) / Math.max(1, rect.width)) * 100));
+    setChartDrag({ startPercent, endPercent: startPercent });
+  }
+
+  function handleProductionChartDrag(event) {
+    handleProductionChartPointer(event);
+    if (!chartDrag) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
+    const endPercent = Math.min(100, Math.max(0, ((clientX - rect.left) / Math.max(1, rect.width)) * 100));
+    setChartDrag((prev) => prev ? { ...prev, endPercent } : prev);
+  }
+
+  function handleProductionChartPointerUp() {
+    if (!chartDrag || scopedProductionBuckets.length < 3) {
+      setChartDrag(null);
+      return;
+    }
+    const minPercent = Math.min(chartDrag.startPercent, chartDrag.endPercent);
+    const maxPercent = Math.max(chartDrag.startPercent, chartDrag.endPercent);
+    if (maxPercent - minPercent >= 8) {
+      const sourceLength = scopedProductionBuckets.length;
+      const start = Math.max(0, Math.floor((minPercent / 100) * (sourceLength - 1)));
+      const end = Math.min(sourceLength - 1, Math.ceil((maxPercent / 100) * (sourceLength - 1)));
+      if (end > start) setChartZoom({ start, end });
+    }
+    setChartDrag(null);
   }
 
   const selectedMachine = useMemo(
@@ -1725,32 +1862,55 @@ export default function Painel({
         </div>
         <div className="monitor-control-row">
           <select
-            className="monitor-filter-select"
-            value={machineFilter}
-            onChange={(event) => setMachineFilter(event.target.value)}
-            aria-label="Filtrar máquina do dashboard"
-          >
-            <option value="__ALL__">Todas as máquinas</option>
-            {machineGroupOptions.map((group) => (
-              <option value={group.id} key={group.id}>{group.label}</option>
-            ))}
-            {machineIds.map((machine) => (
-              <option value={machine} key={machine}>{machine}</option>
-            ))}
-          </select>
-          <span className="monitor-icon-pill" aria-label="Notificações">○</span>
-          <span className="monitor-icon-pill pulse" aria-label="Atualização automática">⌁</span>
-          <span className="monitor-live-pill"><i /> ao vivo</span>
-          <select
             className="monitor-period-select"
             value={periodFilter}
-            onChange={(event) => setPeriodFilter(event.target.value)}
+            onChange={(event) => { setPeriodFilter(event.target.value); setChartZoom(null); }}
             aria-label="Filtrar período do dashboard"
           >
             <option value="today">Hoje</option>
             <option value="yesterday">Ontem</option>
             <option value="week">Últimos 7 dias</option>
-            <option value="month">Últimos 30 dias</option>
+            <option value="this_month">Este mês</option>
+            <option value="custom">Período personalizado</option>
+          </select>
+          {periodFilter === "custom" && (
+            <>
+              <input className="monitor-date-input" type="date" value={customPeriodStart} onChange={(event) => { setCustomPeriodStart(event.target.value); setChartZoom(null); }} aria-label="Data inicial" />
+              <input className="monitor-date-input" type="date" value={customPeriodEnd} onChange={(event) => { setCustomPeriodEnd(event.target.value); setChartZoom(null); }} aria-label="Data final" />
+            </>
+          )}
+          <select
+            className="monitor-filter-select"
+            value={sectorFilter}
+            onChange={(event) => { setSectorFilter(event.target.value); setMachineFilter("__ALL__"); setChartZoom(null); }}
+            aria-label="Filtrar setor do dashboard"
+          >
+            <option value="__ALL__">Todos os setores</option>
+            {sectorOptions.map((sector) => (
+              <option value={sector} key={sector}>{sector}</option>
+            ))}
+          </select>
+          <select
+            className="monitor-filter-select"
+            value={machineFilter}
+            onChange={(event) => { setMachineFilter(event.target.value); setChartZoom(null); }}
+            aria-label="Filtrar máquina do dashboard"
+          >
+            <option value="__ALL__">Todas as máquinas</option>
+            {machineOptions.map((machine) => (
+              <option value={machine} key={machine}>{machine}</option>
+            ))}
+          </select>
+          <select
+            className="monitor-filter-select"
+            value={shiftFilter}
+            onChange={(event) => { setShiftFilter(event.target.value); setChartZoom(null); }}
+            aria-label="Filtrar turno do dashboard"
+          >
+            <option value="__ALL__">Todos os turnos</option>
+            {ACTIVE_TURNOS.map((turno) => (
+              <option value={turno.key} key={turno.key}>{turno.label}</option>
+            ))}
           </select>
         </div>
       </section>
@@ -1767,9 +1927,9 @@ export default function Painel({
           <small className="positive">{overview.periodLabel} • dados reais</small>
         </article>
         <article className="monitor-kpi-card is-emphasis">
-          <span>MÁQUINAS ATIVAS</span>
-          <strong>{liveKpis.activeMachines} / {liveKpis.totalMachines}</strong>
-          <small className="positive">{formatPercent((liveKpis.activeMachines / Math.max(1, liveKpis.totalMachines)) * 100)} ativas</small>
+          <span>REFUGO</span>
+          <strong>{formatPercent(overview.scrapPct, 2)}</strong>
+          <small className={overview.scrapPct > 3 ? "negative" : "positive"}>{formatCompactNumber(overview.scrapPieces)} peças • {formatDecimal(overview.scrapWeightKg, 2)} kg</small>
         </article>
         <article className="monitor-kpi-card">
           <span>PARADAS (MIN)</span>
@@ -1907,61 +2067,92 @@ export default function Painel({
       <section className="monitor-charts-row">
         <article className="monitor-chart-card bar-chart-card">
           <header className="monitor-section-header">
-            <h3>Produção por Hora</h3>
-            <span>{overview.periodLabel}</span>
+            <h3>{isDailyTrendPeriod(periodFilter) ? "Produção por Dia x Meta" : "Produção por Hora x Meta"}</h3>
+            <div className="production-chart-actions">
+              {chartZoom && <button type="button" onClick={() => setChartZoom(null)}>Reset zoom</button>}
+              <span>{overview.periodLabel}</span>
+            </div>
           </header>
           <div className="production-chart-meta">
             <span><i className="legend-real" />Produção</span>
             <span><i className="legend-goal" />Meta</span>
-            <strong>{formatCompactNumber(productionBuckets.reduce((acc, bar) => acc + bar.production, 0))} peças</strong>
+            <strong>{formatCompactNumber(scopedProductionBuckets.reduce((acc, bar) => acc + bar.production, 0))} peças</strong>
           </div>
           <div className="production-chart-frame">
-            <div className="production-chart-grid" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
             <div
-              className="production-chart-plot"
+              className="production-chart-plot line-chart-plot"
               role="img"
-              aria-label="Produção por período"
-              style={{ "--bucket-count": Math.max(1, productionBuckets.length) }}
+              aria-label="Produção por hora comparada com meta"
               onMouseEnter={handleProductionChartPointer}
-              onMouseMove={handleProductionChartPointer}
+              onMouseMove={handleProductionChartDrag}
               onMouseLeave={() => setBarTooltip(null)}
               onPointerEnter={handleProductionChartPointer}
-              onPointerMove={handleProductionChartPointer}
-              onPointerLeave={() => setBarTooltip(null)}
-              onTouchMove={handleProductionChartPointer}
+              onPointerDown={handleProductionChartPointerDown}
+              onPointerMove={handleProductionChartDrag}
+              onPointerUp={handleProductionChartPointerUp}
+              onPointerCancel={() => setChartDrag(null)}
+              onPointerLeave={() => { setBarTooltip(null); setChartDrag(null); }}
+              onTouchMove={handleProductionChartDrag}
             >
-              {goalLinePoints && (
-                <svg className="goal-line-chart" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <polyline points={goalLinePoints} />
-                </svg>
-              )}
-              {productionBuckets.map((bar, index) => (
+              <svg className="production-area-chart production-bar-chart" viewBox={`0 0 ${productionChart.width} ${productionChart.height}`} preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="productionBarGradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#7ee8ff" stopOpacity="0.96" />
+                    <stop offset="48%" stopColor="#22c7ff" stopOpacity="0.86" />
+                    <stop offset="100%" stopColor="#266dff" stopOpacity="0.72" />
+                  </linearGradient>
+                </defs>
+                {productionChart.guideValues.map((guide) => (
+                  <g className="chart-guide" key={guide.y}>
+                    <line x1={productionChart.left} x2={productionChart.width - productionChart.right} y1={guide.y} y2={guide.y} />
+                    <text x={productionChart.left - 12} y={guide.y + 4}>{formatCompactNumber(guide.label)}</text>
+                  </g>
+                ))}
+                {productionChart.goalLine && <polyline className="production-goal-line" points={productionChart.goalLine} />}
+                {productionChart.points.map((point) => (
+                  <rect
+                    className={`production-column${barTooltip?.id === point.id ? " is-active" : ""}${point.production <= 0 ? " is-zero" : ""}`}
+                    key={point.id}
+                    x={point.barX}
+                    y={point.barY}
+                    width={point.barWidth}
+                    height={point.barHeight}
+                    rx="7"
+                  />
+                ))}
+                {barTooltip && (
+                  <g className="chart-crosshair">
+                    <line x1={barTooltip.x} x2={barTooltip.x} y1={productionChart.top} y2={productionChart.top + productionChart.plotHeight} />
+                  </g>
+                )}
+              </svg>
+              <div className="production-chart-axis" aria-hidden="true">
+                {productionChart.points.map((point, index) => (
+                  <span key={point.id}>{index % Math.ceil(Math.max(1, productionChart.points.length) / 6) === 0 ? point.label.split(" ")[0] : ""}</span>
+                ))}
+              </div>
+              {barTooltip && <div className="point-tooltip" style={{ left: `${barTooltip.cursorPercent}%`, top: `${Math.max(12, (barTooltip.yProduction / productionChart.height) * 100)}%` }}>{formatCompactNumber(barTooltip.production)}</div>}
+              {chartDrag && (
                 <div
-                  className="production-bar-slot"
-                  key={bar.id}
+                  className="chart-zoom-selection"
                   style={{
-                    "--bar-height": `${bar.height}%`,
+                    left: `${Math.min(chartDrag.startPercent, chartDrag.endPercent)}%`,
+                    width: `${Math.abs(chartDrag.endPercent - chartDrag.startPercent)}%`,
                   }}
-                  aria-hidden="true"
-                >
-                  <span className="production-bar-real" />
-                  <small>{index % Math.ceil(Math.max(1, productionBuckets.length) / 6) === 0 ? bar.label.split(" ")[0] : ""}</small>
+                />
+              )}
+              <aside className={`production-hover-card status-${barTooltip?.status || "idle"}`}>
+                <span>{barTooltip ? barTooltip.label : "Passe o mouse no gráfico"}</span>
+                <strong>{barTooltip ? `${formatCompactNumber(barTooltip.production)} peças` : "Aguardando ponto"}</strong>
+                <div>
+                  <p><b>Meta esperada</b><em>{barTooltip ? `${formatCompactNumber(barTooltip.goal)} peças` : "-"}</em></p>
+                  <p><b>Diferença</b><em>{barTooltip ? `${barTooltip.production - barTooltip.goal >= 0 ? "+" : ""}${formatCompactNumber(barTooltip.production - barTooltip.goal)} peças` : "-"}</em></p>
+                  <p><b>Eficiência</b><em>{barTooltip ? formatPercent(barTooltip.efficiency, 0) : "-"}</em></p>
                 </div>
-              ))}
+                <small>{barTooltip?.status === "above" ? "Acima da meta" : barTooltip?.status === "near" ? "Dentro da meta" : barTooltip?.status === "below" ? "Abaixo da meta" : "Sem seleção"}</small>
+              </aside>
             </div>
           </div>
-          {barTooltip && (
-            <div className="bar-floating-tooltip" style={{ left: barTooltip.left, top: barTooltip.top }}>
-              <strong>{barTooltip.label}</strong>
-              <span>Produção: {formatCompactNumber(barTooltip.production)} peças</span>
-              <span>Meta: {formatCompactNumber(barTooltip.goal)} peças</span>
-              <span>Eficiência: {formatPercent(barTooltip.efficiency, 0)}</span>
-            </div>
-          )}
         </article>
 
         <article className="monitor-chart-card top-stops-card">
@@ -1982,6 +2173,30 @@ export default function Painel({
                   </div>
                   <div className="top-stop-bar"><div style={{ width: `${stop.percent}%` }} /></div>
                   <small>{stop.percent}% de participação • {stop.count} ocorrência(s)</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="monitor-chart-card top-stops-card top-scrap-card">
+          <header className="monitor-section-header">
+            <h3>Top 5 Motivos de Refugo</h3>
+            <span>peças refugadas</span>
+          </header>
+          <div className="top-stops-list">
+            {topScrapReasons.length === 0 ? (
+              <div className="top-stops-empty">Nenhum refugo registrado no período.</div>
+            ) : topScrapReasons.map((scrap, index) => (
+              <div className="top-stop-row" key={scrap.reason}>
+                <div className="top-stop-rank scrap-rank">{index + 1}</div>
+                <div className="top-stop-main">
+                  <div className="top-stop-head">
+                    <strong>{scrap.reason}</strong>
+                    <span>{formatCompactNumber(scrap.pieces)} pç</span>
+                  </div>
+                  <div className="top-stop-bar scrap-bar"><div style={{ width: `${scrap.percent}%` }} /></div>
+                  <small>{scrap.percent}% do refugo • {formatDecimal(scrap.weightKg, 2)} kg</small>
                 </div>
               </div>
             ))}

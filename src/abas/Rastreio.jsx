@@ -25,9 +25,66 @@ const formatTimeBr = (value) => {
   return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
+const formatHourRangeBr = (value) => {
+  const start = new Date(value)
+  if (!Number.isFinite(start.getTime())) return 'N/A'
+  const end = new Date(start.getTime() + (60 * 60 * 1000))
+  return `${start.toLocaleDateString('pt-BR')} - ${formatTimeBr(start)} às ${formatTimeBr(end)}`
+}
+
 const extractItemCodeFromOrderProduct = (product) => {
   if (!product) return ''
   return String(product).split('-')[0]?.trim() || ''
+}
+
+const getHourBucketIso = (value) => {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return null
+  date.setMinutes(0, 0, 0)
+  return date.toISOString()
+}
+
+const getProductionTimestamp = (entry) => entry?.sensor_last_pulse_at || entry?.created_at || entry?.updated_at || null
+
+const buildHourlyProductionEvents = (entries) => {
+  const byHour = new Map()
+
+  const addToHour = (entry, timestamp, qty, pulseCount = 0) => {
+    const bucketIso = getHourBucketIso(timestamp)
+    if (!bucketIso) return
+    const key = `${entry?.machine_id || ''}-${entry?.shift || ''}-${bucketIso}`
+    const current = byHour.get(key) || {
+      id: key,
+      created_at: bucketIso,
+      machine_id: entry?.machine_id || null,
+      shift: entry?.shift || null,
+      product: entry?.product || null,
+      good_qty: 0,
+      pulse_count: 0,
+      source: entry?.source || null,
+      launch_count: 0,
+    }
+    current.good_qty += Number(qty || 0)
+    current.pulse_count += Number(pulseCount || 0)
+    current.launch_count += 1
+    current.product = current.product || entry?.product || null
+    current.source = current.source || entry?.source || null
+    byHour.set(key, current)
+  }
+
+  ;(Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const cycleTimestamps = Array.isArray(entry?.cycle_timestamps) ? entry.cycle_timestamps : []
+    if (cycleTimestamps.length) {
+      const qtyPerCycle = Number(entry?.produced_quantity || entry?.good_qty || 0) / Math.max(1, cycleTimestamps.length)
+      const pulsesPerCycle = Number(entry?.pulse_count || 0) / Math.max(1, cycleTimestamps.length)
+      cycleTimestamps.forEach((timestamp) => addToHour(entry, timestamp, qtyPerCycle, pulsesPerCycle))
+      return
+    }
+
+    addToHour(entry, getProductionTimestamp(entry), Number(entry?.good_qty || 0), Number(entry?.pulse_count || 0))
+  })
+
+  return [...byHour.values()].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 }
 
 export default function Rastreio({ externalSearchRequest = null }) {
@@ -82,7 +139,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
         .lte('created_at', productionEnd)
         .order('created_at', { ascending: true })
 
-      const [scanRes, scrapRes, stopRes, manualRes, operatorRes] = await Promise.all([
+      const [scanRes, scrapRes, stopRes, manualRes, sensorCycleRes, operatorRes] = await Promise.all([
         supabase
           .from('production_scans')
           .select('*')
@@ -103,13 +160,22 @@ export default function Rastreio({ externalSearchRequest = null }) {
           .select('*')
           .eq('order_id', ord.id)
           .order('created_at', { ascending: true }),
+        supabase
+          .from('machine_sensor_order_cycles')
+          .select('id, machine_id, order_id, product, produced_quantity, pulse_count, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at, shift, created_at, updated_at')
+          .eq('order_id', ord.id)
+          .order('first_pulse_at', { ascending: true }),
         operatorStart ? operatorQuery.gte('created_at', operatorStart) : operatorQuery,
       ])
 
       setScans(scanRes?.data || [])
       setScraps(scrapRes?.data || [])
       setStops(stopRes?.data || [])
-      setManualEntries(manualRes?.data || [])
+      const sensorCycleRows = sensorCycleRes?.data || []
+      const productionEntryRows = sensorCycleRows.length
+        ? (manualRes?.data || []).filter((row) => String(row?.source || '').toLowerCase() !== 'sensor')
+        : (manualRes?.data || [])
+      setManualEntries(buildHourlyProductionEvents([...productionEntryRows, ...sensorCycleRows]))
       setOperatorChanges(operatorRes?.data || [])
     } catch (err) {
       console.warn('Falha ao rastrear O.S.', err)
@@ -356,7 +422,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
     })
     manualEntries.forEach((m) => {
       if (!m?.created_at) return
-      events.push({ type: 'manual', ts: m.created_at, key: `manual-${m.id}`, data: m })
+      events.push({ type: 'production', ts: m.created_at, key: `production-${m.id}`, data: m })
     })
     scraps.forEach((sr) => {
       if (!sr?.created_at) return
@@ -610,13 +676,13 @@ export default function Rastreio({ externalSearchRequest = null }) {
                           )
                         }
 
-                        if (ev.type === 'manual') {
+                        if (ev.type === 'production') {
                           const m = ev.data || {}
                           return (
                             <div className="trace-item" key={ev.key}>
                               <div className="trace-head">
-                                <span className="trace-date">{fmtDateTime(ev.ts)}</span>
-                                <span className="badge badge-manual">Prod. manual</span>
+                                <span className="trace-date">{formatHourRangeBr(ev.ts)}</span>
+                                <span className="badge badge-manual">Produção</span>
                               </div>
                               <div className="trace-info">
                                 <div>
@@ -625,7 +691,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
                                 </div>
                                 <div>
                                   <label>Máquina / Turno</label>
-                                  <strong>{m.machine_id || 'N/A'} • {m.shift || 'N/A'}</strong>
+                                  <strong>{m.machine_id || 'N/A'} * {m.shift || 'N/A'}</strong>
                                 </div>
                                 <div>
                                   <label>Produto</label>
