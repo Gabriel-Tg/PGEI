@@ -258,15 +258,25 @@ async function resolveAuthorizedMachine(
 ) {
   try {
     const tokenHash = sha256(token);
-    
-    const { data, error } = await supabase
+
+    const machineSensorColumns = 'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, ciclo_cadastrado_seconds';
+    let { data, error } = await supabase
       .from('machines')
-      .select(
-        'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, ciclo_cadastrado_seconds'
-      )
+      .select(`${machineSensorColumns}, cavities`)
       .eq('machine_code', machineCode)
       .eq('active', true)
       .limit(5);
+
+    if (error) {
+      const fallback = await supabase
+        .from('machines')
+        .select(machineSensorColumns)
+        .eq('machine_code', machineCode)
+        .eq('active', true)
+        .limit(5);
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) throw error;
 
@@ -438,7 +448,7 @@ export async function POST(request: Request) {
     console.log('📦 O.P. ativa:', activeOrder?.code || 'nenhuma');
 
     // Buscar cavidades
-    let cavitiesUsed = 1;
+    let cavitiesUsed = Number(machine.cavities || 0) > 0 ? Math.trunc(Number(machine.cavities)) : 1;
     if (activeOrder?.product) {
       const productCode = parseProductCode(activeOrder.product);
       if (productCode) {
@@ -450,7 +460,7 @@ export async function POST(request: Request) {
           .limit(1);
 
         const cavities = Number((itemRows || [])[0]?.cavities || 0);
-        if (Number.isFinite(cavities) && cavities > 0) {
+        if (!(Number(machine.cavities || 0) > 0) && Number.isFinite(cavities) && cavities > 0) {
           cavitiesUsed = Math.trunc(cavities);
         }
       }

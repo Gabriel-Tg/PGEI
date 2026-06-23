@@ -314,15 +314,221 @@
 }
 
 @media (max-width: 760px) {
+  .rastreio-page {
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .rastreio-header {
+    gap: 8px;
+  }
+
+  .rastreio-header h2 {
+    font-size: 1.15rem;
+    line-height: 1.15;
+  }
+
+  .rastreio-header > div:first-child > div {
+    font-size: 12px !important;
+    line-height: 1.35;
+  }
+
+  .rastreio-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+    align-items: stretch;
+    padding: 10px;
+    border: 1px solid rgba(93, 161, 242, 0.2);
+    border-radius: 12px;
+    background: rgba(7, 22, 42, 0.72);
+  }
+
+  .rastreio-form input[type="text"] {
+    grid-column: 1 / -1;
+    min-width: 0;
+    width: 100%;
+    min-height: 46px;
+    font-size: 16px;
+  }
+
+  .rastreio-form button {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px;
+  }
+
+  .rastreio-status {
+    grid-column: 1 / -1;
+    width: 100%;
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+
+  .rastreio-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .rastreio-card {
+    min-width: 0;
+    padding: 10px;
+    border-radius: 9px;
+  }
+
+  .rastreio-card strong {
+    font-size: 12.5px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .rastreio-card span {
+    font-size: 11px;
+  }
+
+  .rastreio-grid {
+    gap: 12px;
+  }
+
+  .panel-box {
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .panel-title {
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+
+  .trace-list {
+    position: relative;
+    gap: 10px;
+    padding-left: 14px;
+  }
+
+  .trace-list::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(34, 199, 255, 0.55), rgba(56, 242, 161, 0.22));
+  }
+
+  .trace-item {
+    position: relative;
+    padding: 10px;
+    border-radius: 11px;
+  }
+
+  .trace-item::before {
+    content: "";
+    position: absolute;
+    left: -15px;
+    top: 16px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #28d3ff;
+    box-shadow: 0 0 0 4px rgba(40, 211, 255, 0.14);
+  }
+
+  .trace-head {
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .trace-date {
+    flex: 1 1 100%;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .badge {
+    min-height: 28px;
+    padding: 5px 9px;
+    font-size: 10px;
+  }
+
+  .trace-info {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .trace-info div {
+    padding: 8px;
+    border: 1px solid rgba(117, 162, 222, 0.12);
+    border-radius: 8px;
+    background: rgba(4, 14, 28, 0.36);
+  }
+
+  .trace-info label {
+    font-size: 11px;
+  }
+
+  .trace-info strong {
+    font-size: 13px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+
+  .empty-state,
+  .error-box {
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .rastreio-modal-overlay {
+    padding: 10px;
+  }
+
+  .rastreio-modal {
+    width: min(100%, calc(100vw - 20px));
+    max-height: calc(100dvh - 20px);
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .rastreio-modal-head h3 {
+    font-size: 16px;
+  }
+
   .rastreio-modal-form {
     grid-template-columns: 1fr;
+  }
+
+  .rastreio-modal-form select,
+  .rastreio-modal-form input,
+  .rastreio-modal-form button {
+    min-height: 44px;
+    font-size: 16px;
   }
 
   .rastreio-order-option {
     grid-template-columns: 1fr;
     gap: 4px;
+    padding: 10px;
   }
 
+  .order-option-code {
+    font-size: 13px;
+  }
+
+}
+
+@media (max-width: 380px) {
+  .rastreio-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .rastreio-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @keyframes pulse {

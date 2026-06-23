@@ -1109,27 +1109,45 @@ html body {
     --argos-container: min(100% - 28px, 1220px);
   }
 
+  .site-nav {
+    width: calc(100% - 20px);
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .site-brand {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
   .site-brand img {
     width: 112px;
   }
 
   .site-nav-cta {
+    flex: 0 0 auto;
     min-height: 42px;
     padding: 10px 13px;
     font-size: 0.72rem;
   }
 
   .site-menu {
-    gap: 14px;
+    max-width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    overflow: visible;
+    gap: 8px 12px;
+    padding-inline: 1px;
   }
 
   .site-nav-link {
+    flex: 0 0 auto;
     font-size: 0.72rem;
   }
 
   .argos-hero {
     min-height: 0;
-    padding-top: 138px;
+    padding-top: 168px;
   }
 
   .hero-copy h1 {

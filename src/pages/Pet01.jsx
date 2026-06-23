@@ -28,6 +28,7 @@ export default function Pet01({
   machineMeta = null,
   itemTechByCode = {},
   clientId = null,
+  onMachineMetaUpdate,
 }) {
   const machineId = String(machineIdProp || "P1").toUpperCase();
   const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query);
@@ -47,6 +48,9 @@ export default function Pet01({
   const [shiftInfo, setShiftInfo] = useState(null); // { shiftKey, start, end }
   const [responsavelKey, setResponsavelKey] = useState("");
   const [fichaModalOpen, setFichaModalOpen] = useState(false);
+  const [cavitiesModalOpen, setCavitiesModalOpen] = useState(false);
+  const [cavitiesInput, setCavitiesInput] = useState("");
+  const [savingCavities, setSavingCavities] = useState(false);
   const [autoStopPromptedOrderId, setAutoStopPromptedOrderId] = useState(null);
   const [sensorLastPulseAt, setSensorLastPulseAt] = useState(machineMeta?.sensor_last_pulse_at || null);
   const [sensorRuntime, setSensorRuntime] = useState(() => machineMeta || {});
@@ -174,6 +178,8 @@ const [currentShift, setCurrentShift] = useState(() => {
 
   const activeItemCode = useMemo(() => String(ativa?.product || '').split('-')[0]?.trim() || '', [ativa?.product])
   const activeItemTech = activeItemCode ? itemTechByCode?.[activeItemCode] : null
+  const configuredCavities = Number(activeItemTech?.cavities || 0)
+  const activeCavities = Number(machineMeta?.cavities || configuredCavities || 0)
   const runtimeMeta = sensorRuntime || machineMeta || {}
   const configuredCycleSeconds = Number(runtimeMeta?.ciclo_cadastrado_seconds || activeItemTech?.cycleSeconds || 0) || null
   const activeStatus = String(ativa?.status || '').toUpperCase()
@@ -606,6 +612,42 @@ const [currentShift, setCurrentShift] = useState(() => {
     }
   }
 
+  async function salvarCavidadesAbertas() {
+    const value = Number.parseInt(String(cavitiesInput || '').replace(/[^0-9]/g, ''), 10)
+    if (!Number.isFinite(value) || value <= 0) {
+      showToast('Informe a quantidade de cavidades abertas.', 'err')
+      return
+    }
+    if (configuredCavities > 0 && value > configuredCavities) {
+      showToast(`Máximo cadastrado para o item: ${configuredCavities}.`, 'err')
+      return
+    }
+
+    setSavingCavities(true)
+    try {
+      let query = supabase.from('machines').update({ cavities: value })
+      if (machineMeta?.id) {
+        query = query.eq('id', machineMeta.id)
+      } else {
+        query = query.eq('machine_code', machineId)
+        if (clientId) query = query.eq('company_id', clientId)
+      }
+
+      const { error } = await query
+      if (error) throw error
+
+      setSensorRuntime((prev) => ({ ...(prev || {}), cavities: value }))
+      onMachineMetaUpdate && onMachineMetaUpdate(machineId, { cavities: value })
+      setCavitiesModalOpen(false)
+      showToast('Cavidades atualizadas.', 'ok')
+    } catch (err) {
+      console.error('Erro ao salvar cavidades abertas:', err)
+      showToast('Falha ao salvar cavidades.', 'err')
+    } finally {
+      setSavingCavities(false)
+    }
+  }
+
 // Substitua sua função biparWithCode por esta (coloque no mesmo escopo)
 async function biparWithCode(code) {
   const value = (code || "").trim();
@@ -849,6 +891,16 @@ if (typeof window !== "undefined") {
       {/* Buttons: keep only Refugo (we removed Apontar Produção button per your request) */}
       <div className="pet01-buttons" style={{ marginBottom: 12 }}>
         <button className="pet01-btn orange" onClick={() => setShowRefugo(true)}>Apontar Refugo</button>
+        <button
+          className="pet01-btn green"
+          onClick={() => {
+            setCavitiesInput(String(activeCavities || configuredCavities || ''))
+            setCavitiesModalOpen(true)
+          }}
+          disabled={!ativa?.id}
+        >
+          Cavidades
+        </button>
       </div>
 
       <div className="pet01-operator-row">
@@ -973,6 +1025,44 @@ if (typeof window !== "undefined") {
           disabled={!responsavelInput.trim()}
         >
           Confirmar
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* MODAL — CAVIDADES */}
+{cavitiesModalOpen && (
+  <div className="pet01-modal-bg" role="dialog" aria-modal>
+    <div className="pet01-modal">
+      <h3>Cavidades Abertas</h3>
+      <p className="pet01-modal-description">
+        Informe quantas cavidades da {machineId} estão abertas agora. Este valor impacta a produção por ciclo e o O.E.E.
+      </p>
+
+      <label style={{ marginTop: 12 }}>Cavidades abertas *</label>
+      <input
+        className="input"
+        value={cavitiesInput}
+        onChange={(e) => setCavitiesInput(e.target.value.replace(/[^0-9]/g, ''))}
+        inputMode="numeric"
+        autoFocus
+      />
+      <p className="pet01-modal-description">
+        Cadastrado no item: {configuredCavities || '—'} • Em uso: {activeCavities || '—'}
+      </p>
+
+      <div className="pet01-modal-buttons" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+        <button type="button" className="gray" onClick={() => setCavitiesModalOpen(false)} disabled={savingCavities}>
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="green"
+          onClick={salvarCavidadesAbertas}
+          disabled={savingCavities || !cavitiesInput.trim()}
+        >
+          {savingCavities ? 'Salvando...' : 'Confirmar'}
         </button>
       </div>
     </div>

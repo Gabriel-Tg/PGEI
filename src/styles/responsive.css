@@ -284,3 +284,776 @@
     right: 16px;
   }
 }
+
+/* ----- Mobile ergonomic pass: somente ate 768px ----- */
+@media (max-width: 768px) {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    width: 100%;
+    min-width: 0;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    width: 100%;
+    min-width: 0;
+    touch-action: manipulation;
+  }
+
+  img,
+  svg,
+  canvas,
+  video {
+    max-width: 100%;
+  }
+
+  .app {
+    width: 100%;
+    min-height: 100dvh;
+    padding: 8px;
+  }
+
+  .dashboard-shell,
+  .dashboard-main,
+  .dashboard-content,
+  .dashboard-overview,
+  .argos-monitor,
+  .board,
+  .column,
+  .column-body,
+  .rastreio-page,
+  .estoque-page,
+  .prioridade-page,
+  .pet01-wrapper,
+  .ficha-page,
+  .site-app {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .dashboard-main {
+    gap: 10px;
+    padding-bottom: calc(98px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dashboard-content {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .dashboard-topbar {
+    min-height: auto;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .topbar-title-group h2 {
+    font-size: 18px;
+    line-height: 1.15;
+  }
+
+  .topbar-subtitle,
+  .system-status-pill,
+  .system-clock,
+  .topbar-user-pill {
+    font-size: 11px;
+  }
+
+  .topbar-right {
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .system-status-pill,
+  .system-clock,
+  .topbar-user-pill {
+    max-width: 100%;
+    padding: 7px 10px;
+  }
+
+  .mobile-bottom-nav {
+    width: min(calc(100% - 14px), 520px);
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    gap: 4px;
+    padding: 6px;
+    border-radius: 18px;
+  }
+
+  .mobile-bottom-nav-item {
+    min-width: 0;
+    min-height: 54px;
+    padding: 7px 4px;
+    border-radius: 13px;
+  }
+
+  .mobile-nav-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 11px;
+  }
+
+  .input,
+  .select,
+  input,
+  select,
+  textarea,
+  button {
+    max-width: 100%;
+  }
+
+  .input,
+  .select,
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  button,
+  .btn,
+  .pet01-btn,
+  .sidebar-nav-item,
+  .mobile-bottom-nav-item {
+    min-height: 44px;
+  }
+
+  .btn,
+  .pet01-btn,
+  .modal button,
+  .pet01-modal-buttons button,
+  .machine-cavities-actions button,
+  .machine-detail-actions button {
+    padding-inline: 12px;
+  }
+
+  .flex,
+  .row,
+  .actions,
+  .button-row,
+  .form-actions,
+  .modal-actions,
+  .pet01-buttons,
+  .pet01-modal-buttons,
+  .machine-cavities-actions,
+  .production-chart-actions,
+  .monitor-brand-row,
+  .monitor-control-row,
+  .monitor-section-header,
+  .production-chart-meta,
+  .estoque-actions,
+  .rastreio-header,
+  .rastreio-form {
+    flex-wrap: wrap;
+  }
+
+  .monitor-top-panel,
+  .monitor-kpi-card,
+  .machine-status-panel,
+  .monitor-chart-card,
+  .kpi-card,
+  .orders-table-card,
+  .card,
+  .rastreio-card,
+  .estoque-card,
+  .pet01-card,
+  .pet01-next,
+  .column {
+    border-radius: 12px;
+  }
+
+  .argos-monitor {
+    gap: 12px;
+    min-height: auto;
+    padding: 10px;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .monitor-top-panel {
+    min-height: auto;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .monitor-brand-row {
+    gap: 10px;
+  }
+
+  .monitor-brand-row img {
+    width: 52px;
+  }
+
+  .monitor-brand-row strong {
+    font-size: 1.05rem;
+    line-height: 1.15;
+  }
+
+  .monitor-brand-row span,
+  .monitor-section-header span,
+  .monitor-kpi-card small {
+    font-size: 0.75rem;
+  }
+
+  .monitor-control-row {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .monitor-control-row > * {
+    min-width: 0;
+  }
+
+  .monitor-filter-select,
+  .monitor-period-select,
+  .monitor-date-input,
+  .monitor-live-pill {
+    min-height: 42px;
+    border-radius: 12px;
+  }
+
+  .monitor-filter-select,
+  .monitor-period-select,
+  .monitor-date-input {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+
+  .monitor-period-select {
+    flex-basis: 100%;
+  }
+
+  .monitor-icon-pill {
+    width: 42px;
+    min-height: 42px;
+    border-radius: 12px;
+  }
+
+  .monitor-live-pill {
+    justify-content: center;
+    flex: 1 1 100%;
+  }
+
+  .monitor-kpi-grid,
+  .machine-card-grid,
+  .monitor-charts-row,
+  .kpi-grid,
+  .dashboard-charts-grid,
+  .orders-layout,
+  .rastreio-detail-grid,
+  .rastreio-grid,
+  .grid,
+  .grid2,
+  .estoque-form-grid,
+  .pet01-inline-metrics,
+  .pet01-sensor-panel,
+  .popover-grid.two-cols,
+  .popover-grid.three-cols,
+  .popover-time-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .monitor-kpi-grid,
+  .machine-card-grid,
+  .monitor-charts-row {
+    gap: 10px;
+  }
+
+  .monitor-kpi-card {
+    min-height: 92px;
+    padding: 14px;
+  }
+
+  .monitor-kpi-card strong {
+    font-size: 1.75rem;
+  }
+
+  .monitor-kpi-card small {
+    line-height: 1.25;
+  }
+
+  .machine-status-panel,
+  .monitor-chart-card {
+    padding: 12px;
+  }
+
+  .monitor-section-header {
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .monitor-section-header h3 {
+    font-size: 1rem;
+  }
+
+  .machine-monitor-card {
+    min-height: 132px;
+  }
+
+  .machine-card-main {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .machine-card-head {
+    align-items: flex-start;
+  }
+
+  .machine-card-head span {
+    max-width: 52%;
+    white-space: normal;
+  }
+
+  .machine-card-metrics p {
+    font-size: 0.84rem;
+  }
+
+  .machine-progress-track,
+  .popover-progress {
+    height: 8px;
+  }
+
+  .monitor-chart-card,
+  .production-chart-frame,
+  .production-chart-plot,
+  .chart-frame,
+  .chart-wrap,
+  .chart-container {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .production-area-chart,
+  .production-bar-chart,
+  .monitor-chart-card svg {
+    min-width: 620px;
+  }
+
+  .production-chart-frame::after,
+  .monitor-chart-card::after {
+    content: none;
+  }
+
+  .production-chart-meta {
+    align-items: flex-start;
+    gap: 8px 12px;
+  }
+
+  .production-chart-meta strong {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .production-chart-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .production-chart-actions button {
+    flex: 1 1 auto;
+    min-height: 34px;
+  }
+
+  .machine-detail-overlay,
+  .modalbg,
+  .pet01-modal-bg,
+  .rastreio-modal-overlay {
+    align-items: center;
+    justify-items: center;
+    padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(10px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .modal,
+  .modal.modal-xl,
+  .machine-detail-modal,
+  .machine-cavities-modal,
+  .pet01-modal,
+  .rastreio-modal,
+  .ficha-tech-modal {
+    width: min(100%, calc(100vw - 20px));
+    max-width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    border-radius: 14px;
+    overflow: auto;
+  }
+
+  .machine-detail-overlay .machine-detail-modal,
+  .machine-detail-overlay .machine-cavities-modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+  }
+
+  .app:has(.machine-detail-overlay) .mobile-bottom-nav,
+  .app:has(.modalbg) .mobile-bottom-nav,
+  .app:has(.pet01-modal-bg) .mobile-bottom-nav,
+  .app:has(.rastreio-modal-overlay) .mobile-bottom-nav {
+    display: none;
+  }
+
+  .modal,
+  .pet01-modal,
+  .rastreio-modal {
+    padding: 14px;
+  }
+
+  .machine-detail-modal-top {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .machine-modal-select {
+    min-width: 0;
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding-inline: 10px;
+    font-size: 0.9rem;
+  }
+
+  .machine-modal-close {
+    flex: 0 0 42px;
+  }
+
+  .machine-detail-actions {
+    justify-content: stretch;
+    padding: 10px 10px 0;
+  }
+
+  .machine-detail-actions button {
+    width: 100%;
+  }
+
+  .machine-detail-popover,
+  .machine-cavities-body {
+    padding: 12px;
+  }
+
+  .popover-topline {
+    gap: 10px;
+  }
+
+  .popover-topline strong {
+    font-size: 1.1rem;
+  }
+
+  .popover-topline b {
+    font-size: 1.2rem;
+  }
+
+  .popover-grid,
+  .popover-time-grid {
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .popover-grid div,
+  .popover-time-grid div {
+    padding: 9px;
+  }
+
+  .machine-cavities-actions,
+  .pet01-modal-buttons {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .machine-cavities-actions button,
+  .pet01-modal-buttons button,
+  .modal-actions button,
+  .form-actions button {
+    width: 100%;
+  }
+
+  .board {
+    gap: 10px;
+  }
+
+  .column-header,
+  .column-body {
+    padding: 10px;
+  }
+
+  .lista-grid,
+  .orders-table-responsive,
+  .orders-table-card,
+  .estoque-table-wrap,
+  .rastreio-table-wrap,
+  .table-responsive,
+  .responsive-table,
+  .ficha-history,
+  .ficha-rev-card pre {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table,
+  .orders-table,
+  .estoque-table {
+    width: max-content;
+    min-width: 640px;
+  }
+
+  .tableline,
+  .tablehead {
+    min-width: 0;
+  }
+
+  .cell-painel .grid2 {
+    gap: 10px;
+  }
+
+  .cell-painel .select {
+    width: 100%;
+  }
+
+  .cell-painel .grid2 > .flex {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch !important;
+    gap: 8px !important;
+    width: 100%;
+  }
+
+  .cell-painel .grid2 > .flex .btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+  }
+
+  .cell-painel .grid2 > .flex .btn:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .fila {
+    gap: 8px;
+    margin-inline: -2px;
+    padding-inline: 2px;
+  }
+
+  .fila .card {
+    min-width: min(86vw, 300px);
+  }
+
+  .card,
+  .kpi-card,
+  .orders-table-card,
+  .stop-reason-card,
+  .rastreio-card,
+  .estoque-card,
+  .maquina-card,
+  .turno-card,
+  .pet01-metric-card {
+    padding: 12px;
+  }
+
+  .brand-bar {
+    padding: 10px;
+  }
+
+  .brand-logo {
+    height: 54px;
+  }
+
+  .brand-title {
+    font-size: 19px;
+    line-height: 1.1;
+  }
+
+  .brand-sub {
+    font-size: 11px;
+  }
+
+  .pet01-wrapper {
+    padding: 10px;
+  }
+
+  .pet01-title {
+    font-size: 1.35rem;
+    line-height: 1.15;
+  }
+
+  .pet01-card,
+  .pet01-next {
+    padding: 12px;
+  }
+
+  .pet01-card-header,
+  .pet01-card-header .right,
+  .pet01-card-header .left,
+  .pet01-operator-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pet01-card-header .right {
+    justify-content: flex-start;
+  }
+
+  .pet01-card-header .right .btn {
+    margin-left: 0 !important;
+  }
+
+  .pet01-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .pet01-sensor-panel {
+    gap: 8px;
+  }
+
+  .pet01-sensor-panel > div,
+  .pet01-metric-card {
+    min-width: 0;
+  }
+
+  .etiqueta,
+  .etiqueta * {
+    max-width: 100%;
+  }
+
+  .rastreio-modal-form,
+  .rastreio-modal-results,
+  .prioridade-row,
+  .ficha-grid,
+  .ficha-molde-row,
+  .ficha-molde-header {
+    grid-template-columns: 1fr !important;
+  }
+
+  .rastreio-modal-head,
+  .orders-table-card header,
+  .estoque-header,
+  .rastreio-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+
+@media (min-width: 380px) and (max-width: 768px) {
+  .monitor-kpi-grid,
+  .dashboard-overview .kpi-grid,
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .monitor-kpi-card {
+    min-height: 104px;
+  }
+}
+
+@media (min-width: 560px) and (max-width: 768px) {
+  .machine-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .monitor-filter-select,
+  .monitor-date-input {
+    flex-basis: calc(50% - 6px);
+  }
+
+  .monitor-period-select {
+    flex-basis: calc(50% - 6px);
+  }
+}
+
+@media (max-width: 480px) {
+  .app {
+    padding: 6px;
+  }
+
+  .dashboard-content,
+  .argos-monitor,
+  .monitor-top-panel,
+  .machine-status-panel,
+  .monitor-chart-card {
+    padding: 8px;
+  }
+
+  .dashboard-topbar {
+    padding: 10px;
+  }
+
+  .monitor-kpi-card strong {
+    font-size: 1.5rem;
+  }
+
+  .machine-card-head {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .machine-card-head span {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .popover-topline {
+    flex-direction: column;
+  }
+
+  .machine-detail-overlay .machine-detail-modal,
+  .machine-detail-overlay .machine-cavities-modal {
+    width: calc(100vw - 40px);
+    max-width: calc(100vw - 40px);
+  }
+
+  .mobile-bottom-nav {
+    width: calc(100% - 10px);
+  }
+
+  .mobile-bottom-nav-item {
+    min-height: 50px;
+    padding-inline: 2px;
+  }
+
+  .mobile-nav-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .production-area-chart,
+  .production-bar-chart,
+  .monitor-chart-card svg {
+    min-width: 560px;
+  }
+}
+
+@media (max-width: 360px) {
+  .dashboard-content,
+  .argos-monitor,
+  .monitor-top-panel,
+  .machine-status-panel,
+  .monitor-chart-card,
+  .modal,
+  .pet01-modal,
+  .machine-detail-popover,
+  .machine-cavities-body {
+    padding: 8px;
+  }
+
+  .topbar-title-group h2,
+  .brand-title {
+    font-size: 17px;
+  }
+
+  .monitor-brand-row img {
+    width: 44px;
+  }
+
+  .monitor-kpi-card strong {
+    font-size: 1.35rem;
+  }
+}

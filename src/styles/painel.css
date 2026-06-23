@@ -568,6 +568,74 @@
   background: rgba(255, 91, 110, 0.34);
 }
 
+.machine-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px 0;
+  background: rgba(5, 16, 33, 0.58);
+}
+
+.machine-detail-actions button,
+.machine-cavities-actions button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(var(--status-rgb, 52, 171, 255), 0.34);
+  border-radius: 10px;
+  color: #f3f8ff;
+  font-weight: 900;
+  background: rgba(var(--status-rgb, 52, 171, 255), 0.18);
+  cursor: pointer;
+}
+
+.machine-cavities-modal {
+  width: min(460px, calc(100vw - 28px));
+  border: 1px solid rgba(91, 199, 255, 0.26);
+  border-radius: 18px;
+  overflow: hidden;
+  color: #f3f8ff;
+  background: #071324;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+}
+
+.machine-cavities-body {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.machine-cavities-body label {
+  color: rgba(231, 241, 255, 0.82);
+  font-weight: 800;
+}
+
+.machine-cavities-body input {
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid rgba(91, 199, 255, 0.32);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.machine-cavities-body p {
+  margin: 0;
+  color: rgba(231, 241, 255, 0.68);
+  font-size: 0.92rem;
+}
+
+.machine-cavities-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.machine-cavities-actions button:first-child {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .machine-detail-popover {
   position: relative;
   width: 100%;

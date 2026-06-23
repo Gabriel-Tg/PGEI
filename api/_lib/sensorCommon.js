@@ -74,17 +74,27 @@ export function isMethod(req, method) {
 
 export async function resolveAuthorizedMachine({ supabase, machineCode, esp32Id, token }) {
   const tokenHash = sha256(token)
-  let query = supabase
-    .from('machines')
-    .select('id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds')
-    .eq('machine_code', machineCode)
-    .eq('active', true)
+  const machineSensorColumns = 'id, company_id, machine_code, machine_name, active, apontamento_tipo, esp32_id, sensor_token_hash, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_status, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, sensor_operation_mode, sensor_ignore_pulse_count, ciclo_cadastrado_seconds'
+  const buildQuery = (columns) => {
+    let query = supabase
+      .from('machines')
+      .select(columns)
+      .eq('machine_code', machineCode)
+      .eq('active', true)
 
-  if (esp32Id) {
-    query = query.eq('esp32_id', esp32Id)
+    if (esp32Id) {
+      query = query.eq('esp32_id', esp32Id)
+    }
+
+    return query.limit(5)
   }
 
-  const { data, error } = await query.limit(5)
+  let { data, error } = await buildQuery(`${machineSensorColumns}, cavities`)
+  if (error) {
+    const fallback = await buildQuery(machineSensorColumns)
+    data = fallback.data
+    error = fallback.error
+  }
   if (error) throw error
 
   const row = (data || []).find((m) => {

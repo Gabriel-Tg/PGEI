@@ -326,7 +326,7 @@ export default async function handler(req, res) {
       .eq('id', activeOrder.id)
   }
 
-  let cavitiesUsed = 1
+  let cavitiesUsed = Number(machine.cavities || 0) > 0 ? Math.trunc(Number(machine.cavities)) : 1
   if (activeOrder?.product) {
     const productCode = parseProductCode(activeOrder.product)
     if (productCode) {
@@ -343,7 +343,7 @@ export default async function handler(req, res) {
       }
 
       const cavities = Number((itemRows || [])[0]?.cavities || 0)
-      if (Number.isFinite(cavities) && cavities > 0) cavitiesUsed = Math.trunc(cavities)
+      if (!(Number(machine.cavities || 0) > 0) && Number.isFinite(cavities) && cavities > 0) cavitiesUsed = Math.trunc(cavities)
     }
   }
 

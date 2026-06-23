@@ -459,6 +459,7 @@ export default function Painel({
   machineIds = MAQUINAS,
   tenantMachines = [],
   clientId = null,
+  onMachineMetaUpdate,
 }) {
   // localAtivos é o estado usado para render e será atualizado via realtime
   const [localAtivos, setLocalAtivos] = useState(ativosPorMaquina || {});
@@ -476,6 +477,9 @@ export default function Painel({
   const [chartZoom, setChartZoom] = useState(null);
   const [chartDrag, setChartDrag] = useState(null);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
+  const [cavitiesModalMachineId, setCavitiesModalMachineId] = useState(null);
+  const [cavitiesInput, setCavitiesInput] = useState("");
+  const [savingCavities, setSavingCavities] = useState(false);
   const [periodData, setPeriodData] = useState({
     producedTotal: 0,
     producedBoxes: 0,
@@ -501,6 +505,8 @@ export default function Painel({
     scrapReasons: [],
     ongoingOrders: [],
     periodLabel: "Hoje",
+    periodStartIso: null,
+    periodEndIso: null,
   });
   const [periodRefreshNonce, setPeriodRefreshNonce] = useState(0);
   const source = useMemo(() => localAtivos || {}, [localAtivos]);
@@ -999,7 +1005,9 @@ export default function Painel({
         let activeScansQuery = supabase
           .from("production_scans")
           .select("order_id, qty_pieces")
-          .in("order_id", activeOrderIds);
+          .in("order_id", activeOrderIds)
+          .gte("created_at", startIso)
+          .lte("created_at", endIso);
 
         if (clientId) {
           activeScansQuery = activeScansQuery.eq("company_id", clientId);
@@ -1011,7 +1019,9 @@ export default function Painel({
             let query = supabase
               .from("injection_production_entries")
               .select("order_id, good_qty, pulse_count, cavities_used")
-              .in("order_id", activeOrderIds);
+              .in("order_id", activeOrderIds)
+              .gte("created_at", startIso)
+              .lte("created_at", endIso);
 
             if (clientId) query = query.eq("company_id", clientId);
             return query;
@@ -1163,6 +1173,8 @@ export default function Painel({
         scrapReasons,
         ongoingOrders,
         periodLabel: period.label,
+        periodStartIso: period.start.toISO(),
+        periodEndIso: period.end.toISO(),
       });
     }
 
@@ -1443,9 +1455,13 @@ export default function Painel({
 
   const overview = useMemo(() => {
     const nowMs = Date.now() + (Number(tick || 0) * 0);
+    const periodStartMs = periodData.periodStartIso ? DateTime.fromISO(String(periodData.periodStartIso)).toMillis() : NaN;
+    const periodEndMs = periodData.periodEndIso ? DateTime.fromISO(String(periodData.periodEndIso)).toMillis() : NaN;
+    const cappedNowMs = Number.isFinite(periodEndMs) ? Math.min(nowMs, periodEndMs) : nowMs;
+    const activeOrderMap = new Map((periodData.ongoingOrders || []).map((row) => [String(row.machine || "").toUpperCase(), row]));
 
     // Eficiência dinâmica: compara produção real atual com meta acumulada até o horário atual,
-    // partindo do started_at e usando ciclo/cavidades do item.
+    // limitada ao período filtrado e usando ciclo/cavidades do item.
     let dynamicProducedBoxes = 0;
     let dynamicProducedPieces = 0;
     let dynamicMetaBoxes = 0;
@@ -1457,7 +1473,8 @@ export default function Painel({
 
       const startRef = ativa?.started_at || ativa?.restarted_at || null;
       const startMs = startRef ? DateTime.fromISO(String(startRef)).toMillis() : NaN;
-      if (!Number.isFinite(startMs) || startMs >= nowMs) continue;
+      const windowStartMs = Number.isFinite(periodStartMs) ? Math.max(startMs, periodStartMs) : startMs;
+      if (!Number.isFinite(windowStartMs) || windowStartMs >= cappedNowMs) continue;
 
       const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
       const tech = itemCode ? itemTechByCode[itemCode] : null;
@@ -1465,18 +1482,16 @@ export default function Painel({
       const cavities = Number(tech?.cavities || 0);
       if (!(cycleSeconds > 0 && cavities > 0)) continue;
 
-      const elapsedSeconds = Math.max(0, (nowMs - startMs) / 1000);
+      const elapsedSeconds = Math.max(0, (cappedNowMs - windowStartMs) / 1000);
       const piecesPerHour = (3600 / cycleSeconds) * cavities;
       const metaPiecesNow = (elapsedSeconds / 3600) * piecesPerHour;
 
       const piecesPerBox = parsePiecesPerBox(ativa?.standard);
-      const apontamentoTipo = String(machineTypeById[machine] || "manual");
-      const producedPieces = apontamentoTipo === "sensor"
-        ? Number(ativa?.sensor_produced_pieces || 0)
-        : (piecesPerBox > 0 ? Number(ativa?.scanned_count || 0) * piecesPerBox : Number(ativa?.scanned_count || 0));
+      const activeOrder = activeOrderMap.get(String(machine || "").toUpperCase()) || null;
+      const producedPieces = Number(activeOrder?.producedPieces || 0);
       const producedBoxes = piecesPerBox > 0
         ? producedPieces / piecesPerBox
-        : Number(ativa?.scanned_count || 0);
+        : Number(activeOrder?.producedBoxes || 0);
       const metaBoxesNow = piecesPerBox > 0 ? (metaPiecesNow / piecesPerBox) : 0;
 
       dynamicProducedBoxes += producedBoxes;
@@ -1519,7 +1534,7 @@ export default function Painel({
       trendLabels: periodData.trendLabels || [],
       periodLabel: periodData.periodLabel || "Hoje",
     };
-  }, [filteredMachineIds, periodData, source, itemTechByCode, machineTypeById, tick]);
+  }, [filteredMachineIds, periodData, source, itemTechByCode, tick]);
 
   function getBucketDelta(values, index) {
     const current = Number(values?.[index] || 0);
@@ -1616,6 +1631,8 @@ export default function Painel({
 
   const machineCards = useMemo(() => {
     const activeOrderMap = new Map((ongoingOrders || []).map((row) => [String(row.machine || "").toUpperCase(), row]));
+    const periodStartMs = periodData.periodStartIso ? DateTime.fromISO(String(periodData.periodStartIso)).toMillis() : NaN;
+    const periodEndMs = periodData.periodEndIso ? DateTime.fromISO(String(periodData.periodEndIso)).toMillis() : NaN;
 
     return filteredMachineIds.map((machineId) => {
       const machine = String(machineId || "").toUpperCase();
@@ -1651,14 +1668,18 @@ export default function Painel({
       const startedAt = ativa?.restarted_at || ativa?.started_at || null;
       const startedMs = startedAt ? DateTime.fromISO(String(startedAt)).toMillis() : NaN;
       const cycleStandard = Number(itemTech?.cycleSeconds || 0);
-      const cavities = Number(itemTech?.cavities || activeOrder?.cavitiesUsed || 0);
+      const itemCavities = Number(itemTech?.cavities || 0);
+      const cavities = Number(machineMeta?.cavities || activeOrder?.cavitiesUsed || itemCavities || 0);
       const lastPulseAt = machineMeta?.sensor_last_pulse_at || null;
       const lastPulseMs = lastPulseAt ? DateTime.fromISO(String(lastPulseAt)).toMillis() : NaN;
       const oeeNowMs = pointingMode === "sensor" && Number.isFinite(lastPulseMs) && (!Number.isFinite(startedMs) || lastPulseMs >= startedMs)
         ? lastPulseMs
         : liveNowMs;
-      const liveElapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, (liveNowMs - startedMs) / 1000) : 0;
-      const oeeElapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, (oeeNowMs - startedMs) / 1000) : 0;
+      const oeeWindowStartMs = Number.isFinite(periodStartMs) && Number.isFinite(startedMs) ? Math.max(startedMs, periodStartMs) : startedMs;
+      const liveWindowEndMs = Number.isFinite(periodEndMs) ? Math.min(liveNowMs, periodEndMs) : liveNowMs;
+      const oeeWindowEndMs = Number.isFinite(periodEndMs) ? Math.min(oeeNowMs, periodEndMs) : oeeNowMs;
+      const liveElapsedSeconds = Number.isFinite(oeeWindowStartMs) ? Math.max(0, (liveWindowEndMs - oeeWindowStartMs) / 1000) : 0;
+      const oeeElapsedSeconds = Number.isFinite(oeeWindowStartMs) ? Math.max(0, (oeeWindowEndMs - oeeWindowStartMs) / 1000) : 0;
       const currentCycle = tone === "producing" && Number.isFinite(lastPulseMs)
         ? Math.max(0, (liveNowMs - lastPulseMs) / 1000)
         : 0;
@@ -1668,13 +1689,13 @@ export default function Painel({
         : 0;
       const realCycle = currentCycle > 0 ? currentCycle : previousCycle || calculatedCycle;
       const cycleEfficiency = realCycle > 0 && cycleStandard > 0 ? (cycleStandard / realCycle) * 100 : 0;
-      const stoppedSecondsForOee = sumStopSecondsInWindow(activeOrder?.stopRows || [], startedMs, oeeNowMs);
+      const stoppedSecondsForOee = sumStopSecondsInWindow(activeOrder?.stopRows || [], oeeWindowStartMs, oeeWindowEndMs);
       const availableSeconds = oeeElapsedSeconds;
       const productiveSecondsForOee = Math.max(0, availableSeconds - stoppedSecondsForOee);
       const theoreticalPieces = cycleStandard > 0 && cavities > 0 && productiveSecondsForOee > 0
         ? (productiveSecondsForOee / cycleStandard) * cavities
         : 0;
-      const liveStoppedSeconds = sumStopSecondsInWindow(activeOrder?.stopRows || [], startedMs, liveNowMs);
+      const liveStoppedSeconds = sumStopSecondsInWindow(activeOrder?.stopRows || [], oeeWindowStartMs, liveWindowEndMs);
       const liveProductiveSeconds = Math.max(0, liveElapsedSeconds - liveStoppedSeconds);
       const liveTheoreticalPieces = cycleStandard > 0 && cavities > 0 && liveProductiveSeconds > 0
         ? (liveProductiveSeconds / cycleStandard) * cavities
@@ -1727,6 +1748,8 @@ export default function Painel({
         partWeightG: Number(itemTech?.partWeightG || 0),
         channelWeightG: 0,
         cavities,
+        itemCavities,
+        machineRecordId: machineMeta?.id || null,
         mold: formatMaybe(ativa?.mold || ativa?.molde),
         operator: formatMaybe(ativa?.started_by || ativa?.restarted_by),
         shift: currentShift?.shiftLabel || currentShift?.label || "Turno atual",
@@ -1742,7 +1765,58 @@ export default function Painel({
         pointingMode: getApontamentoLabel(pointingMode),
       };
     });
-  }, [filteredMachineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs]);
+  }, [filteredMachineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs, periodData.periodStartIso, periodData.periodEndIso]);
+
+  const cavitiesModalMachine = useMemo(() => {
+    if (!cavitiesModalMachineId) return null;
+    return machineCards.find((machine) => machine.id === cavitiesModalMachineId) || null;
+  }, [cavitiesModalMachineId, machineCards]);
+
+  function openCavitiesModal(machine) {
+    if (!machine) return;
+    setCavitiesInput(String(machine.cavities || machine.itemCavities || ""));
+    setCavitiesModalMachineId(machine.id);
+  }
+
+  async function saveCavitiesModal() {
+    const machine = cavitiesModalMachine;
+    const value = Number.parseInt(String(cavitiesInput || "").replace(/[^0-9]/g, ""), 10);
+    if (!machine || !Number.isFinite(value) || value <= 0) return;
+    if (Number(machine.itemCavities || 0) > 0 && value > Number(machine.itemCavities || 0)) {
+      window.alert(`Máximo cadastrado para o item: ${machine.itemCavities}.`);
+      return;
+    }
+
+    setSavingCavities(true);
+    try {
+      let query = supabase.from("machines").update({ cavities: value });
+      if (machine.machineRecordId) {
+        query = query.eq("id", machine.machineRecordId);
+      } else {
+        query = query.eq("machine_code", machine.id);
+        if (clientId) query = query.eq("company_id", clientId);
+      }
+
+      const { error } = await query;
+      if (error) throw error;
+
+      setSensorRuntimeByMachine((prev) => ({
+        ...prev,
+        [machine.id]: {
+          ...(prev[machine.id] || {}),
+          cavities: value,
+          machine_code: machine.id,
+        },
+      }));
+      onMachineMetaUpdate && onMachineMetaUpdate(machine.id, { cavities: value });
+      setCavitiesModalMachineId(null);
+    } catch (error) {
+      console.error("Falha ao salvar cavidades abertas:", error);
+      window.alert("Falha ao salvar cavidades abertas.");
+    } finally {
+      setSavingCavities(false);
+    }
+  }
 
   const liveKpis = useMemo(() => {
     const productiveCards = machineCards.filter((card) => card.plannedPieces > 0 || card.producedPieces > 0);
@@ -2050,6 +2124,12 @@ export default function Painel({
               <button type="button" className="machine-modal-close" onClick={() => setSelectedMachineId(null)} aria-label="Fechar detalhes da máquina">×</button>
             </div>
 
+            <div className="machine-detail-actions">
+              <button type="button" onClick={() => openCavitiesModal(selectedMachine)}>
+                Cavidades
+              </button>
+            </div>
+
             <div className="machine-detail-popover">
               <div className="popover-topline">
                 <div>
@@ -2107,6 +2187,42 @@ export default function Painel({
                 <div><span>Produzindo</span><strong>{formatDurationShort(selectedMachine.producingSeconds)}</strong></div>
                 <div><span>Parada</span><strong>{formatDurationShort(selectedMachine.stopSeconds)}</strong></div>
                 <div><span>Setup</span><strong>{formatDurationShort(selectedMachine.setupSeconds)}</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cavitiesModalMachine && (
+        <div
+          className="machine-detail-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Cavidades da máquina ${cavitiesModalMachine.displayName}`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setCavitiesModalMachineId(null);
+          }}
+        >
+          <div className="machine-cavities-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="machine-detail-modal-top">
+              <strong>Cavidades • {cavitiesModalMachine.displayName}</strong>
+              <button type="button" className="machine-modal-close" onClick={() => setCavitiesModalMachineId(null)} aria-label="Fechar cavidades">×</button>
+            </div>
+            <div className="machine-cavities-body">
+              <label htmlFor="machine-cavities-input">Cavidades abertas no momento</label>
+              <input
+                id="machine-cavities-input"
+                value={cavitiesInput}
+                onChange={(event) => setCavitiesInput(event.target.value.replace(/[^0-9]/g, ""))}
+                inputMode="numeric"
+                autoFocus
+              />
+              <p>Cadastrado no item: {cavitiesModalMachine.itemCavities || "-"} • Em uso: {cavitiesModalMachine.cavities || "-"}</p>
+              <div className="machine-cavities-actions">
+                <button type="button" onClick={() => setCavitiesModalMachineId(null)} disabled={savingCavities}>Cancelar</button>
+                <button type="button" onClick={saveCavitiesModal} disabled={savingCavities || !cavitiesInput.trim()}>
+                  {savingCavities ? "Salvando..." : "Confirmar"}
+                </button>
               </div>
             </div>
           </div>

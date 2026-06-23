@@ -242,7 +242,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
   }, [canAccessList, canCreateOrder, canManageCatalog, canManageUsers, canViewDashboard, canViewRastreio, hasGestaoAccess])
 
   const mobileTabItems = useMemo(() => {
-    const preferredOrder = ['painel', 'lista', 'nova', 'usuarios']
+    const preferredOrder = ['painel', 'lista', 'nova', 'rastreio']
     const byId = new Map(tabItems.map((item) => [item.id, item]))
     const preferred = preferredOrder
       .map((id) => byId.get(id))
@@ -527,7 +527,14 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
         .eq('active', true)
         .order('machine_code', { ascending: true })
 
-      let { data, error } = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, ciclo_cadastrado_seconds')
+      const machineSensorColumns = 'id, company_id, machine_code, machine_name, route_slug, active, apontamento_tipo, esp32_id, sensor_status, sensor_last_pulse_at, sensor_last_heartbeat_at, sensor_last_cycle_seconds, sensor_cycle_count, sensor_auto_stopped, sensor_auto_stop_at, ciclo_cadastrado_seconds'
+      let { data, error } = await selectMachines(`${machineSensorColumns}, cavities`)
+
+      if (error) {
+        const fallback = await selectMachines(machineSensorColumns)
+        data = fallback.data
+        error = fallback.error
+      }
 
       if (error) {
         const fallback = await selectMachines('id, company_id, machine_code, machine_name, route_slug, active')
@@ -550,6 +557,15 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
     loadTenantMachines()
     return () => { cancelled = true }
   }, [authChecked, authUser, hasAccess, tenantAccessChecked, tenantCompanyId])
+
+  const handleMachineMetaUpdate = useCallback((machineCode, updates) => {
+    const normalizedCode = String(machineCode || '').trim().toUpperCase()
+    if (!normalizedCode || !updates) return
+    setTenantMachines((prev) => (prev || []).map((machine) => {
+      const code = String(machine?.machine_code || '').trim().toUpperCase()
+      return code === normalizedCode ? { ...machine, ...updates } : machine
+    }))
+  }, [])
 
   useEffect(() => {
     async function loadPriorities() {
@@ -885,6 +901,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
           machineMeta={resolvedMachine}
           itemTechByCode={itemTechByCode}
           clientId={tenantCompanyId}
+          onMachineMetaUpdate={handleMachineMetaUpdate}
           tick={tick}
           paradas={stops}
           onStatusChange={handleStatusChange}
@@ -1001,6 +1018,7 @@ function TenantApp({ tenantCompany = null, tenantSubdomainKey = null }){
             machinePriorities={machinePriorities}
             tenantMachines={tenantMachines}
             clientId={tenantCompanyId}
+            onMachineMetaUpdate={handleMachineMetaUpdate}
             readOnly={isTvOnly}
           />
       )
