@@ -12,6 +12,7 @@ import {
 
 const HEARTBEAT_WINDOW_MS = 60_000
 const HEARTBEAT_LIMIT_PER_WINDOW = 120
+const AUTO_STOP_CYCLE_MULTIPLIER = 6
 const heartbeatBuckets = new Map()
 
 function nowIso() {
@@ -28,14 +29,14 @@ function shouldMarkAutoStop(lastPulseAt, cicloCadastradoSeconds) {
   const baseCycle = Number(cicloCadastradoSeconds || 0)
   if (!(baseCycle > 0) || !lastPulseAt) return false
   const elapsedSeconds = (Date.now() - new Date(lastPulseAt).getTime()) / 1000
-  return elapsedSeconds >= (baseCycle * 4)
+  return elapsedSeconds >= (baseCycle * AUTO_STOP_CYCLE_MULTIPLIER)
 }
 
 function getAutoStopAt(lastPulseAt, cicloCadastradoSeconds) {
   const baseCycle = Number(cicloCadastradoSeconds || 0)
   const lastPulseMs = lastPulseAt ? new Date(lastPulseAt).getTime() : 0
   if (!(baseCycle > 0) || !lastPulseMs) return null
-  return new Date(lastPulseMs + (baseCycle * 4 * 1000)).toISOString()
+  return new Date(lastPulseMs + (baseCycle * AUTO_STOP_CYCLE_MULTIPLIER * 1000)).toISOString()
 }
 
 function canAcceptHeartbeatRate(key) {

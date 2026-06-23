@@ -4,13 +4,15 @@ import { supabase } from "../lib/supabaseClient";
 import Etiqueta from "../components/Etiqueta";
 import FichaTecnicaModal from "../components/FichaTecnicaModal";
 import { getTurnoAtual, statusClass } from "../lib/utils";
+import { getShiftWindowAt } from "../lib/shifts";
 import { toBrazilTime } from "../lib/timezone";
 import { DateTime } from "luxon";
 import "../styles/Pet01.css";
 import { REFUGO_MOTIVOS } from "../domain/constants";
 import { computeMachineSensorStatus, runningCycleTone, sensorStatusLabel } from "../lib/sensorRuntime";
+import { getSupabaseErrorMessage, saveMachineCavities } from "../lib/machineCavities";
 
-const AUTO_STOP_CYCLE_MULTIPLIER = 3;
+const AUTO_STOP_CYCLE_MULTIPLIER = 6;
 
 export default function Pet01({
   registroGrupos,
@@ -361,10 +363,14 @@ const [currentShift, setCurrentShift] = useState(() => {
     const pendingStop = paradaAberta && !String(paradaAberta.reason || '').trim()
       ? paradaAberta
       : null
-    if (!pendingStop) return
-    if (autoStopPromptedOrderId === ativa.id) return
+    const hasReason = String(paradaAberta?.reason || ativa?.reason || '').trim()
+    const hasPendingAutoStop = pendingStop
+      || Boolean(machineMeta?.sensor_auto_stopped)
+      || Boolean(String(machineMeta?.sensor_auto_stop_at || '').trim())
+      || Boolean(ativa?.interrupted_at && !hasReason)
+    if (!hasPendingAutoStop || hasReason) return
 
-    const stopAtIso = pendingStop.started_at
+    const stopAtIso = pendingStop?.started_at || machineMeta?.sensor_auto_stop_at || ativa?.interrupted_at || new Date().toISOString()
     const stopAt = DateTime.fromISO(String(stopAtIso), { zone: 'utc' }).setZone('America/Sao_Paulo')
     const timestamp = stopAt.isValid ? stopAt : DateTime.now().setZone('America/Sao_Paulo')
 
@@ -379,7 +385,7 @@ const [currentShift, setCurrentShift] = useState(() => {
       __initApplied: true,
     })
     setAutoStopPromptedOrderId(ativa.id)
-  }, [ativa, activeStatus, autoStopPromptedOrderId, machineMeta?.apontamento_tipo, paradaAberta, setStopModal])
+  }, [ativa, activeStatus, machineMeta?.apontamento_tipo, machineMeta?.sensor_auto_stop_at, machineMeta?.sensor_auto_stopped, paradaAberta, setStopModal])
 
   const formatInt = useCallback((n) => {
     const num = Number(n) || 0;
@@ -393,39 +399,11 @@ const [currentShift, setCurrentShift] = useState(() => {
     return parseInt(digitsOnly, 10);
   }, []);
 
-  // Resolve janelas de turno considerando o dia e cruzamento de meia-noite
-  const buildShiftIntervals = useCallback((nowBr, dayOffset = 0) => {
-    const jsDay = (nowBr.weekday % 7 + dayOffset + 7) % 7; // 0 = domingo
-    const base = nowBr.plus({ days: dayOffset }).startOf("day");
-    const intervals = [];
-    const pushInterval = (hIni, mIni, hFim, mFim, shiftKey) => {
-      let start = base.set({ hour: hIni, minute: mIni, second: 0, millisecond: 0 });
-      let end = base.set({ hour: hFim, minute: mFim, second: 0, millisecond: 0 });
-      if (end <= start) end = end.plus({ days: 1 });
-      intervals.push({ shiftKey, start, end });
-    };
-
-    if (jsDay >= 1 && jsDay <= 5) { // segunda a sexta
-      pushInterval(5, 15, 13, 45, "1");
-      pushInterval(13, 45, 22, 15, "2");
-      pushInterval(22, 15, 5, 15, "3");
-    } else if (jsDay === 6) { // sábado
-      pushInterval(5, 15, 9, 15, "1");
-      pushInterval(9, 15, 13, 15, "2");
-    } else if (jsDay === 0) { // domingo
-      pushInterval(23, 15, 5, 15, "3");
-    }
-
-    return intervals;
-  }, []);
-
   const resolveCurrentShiftWindow = useCallback(() => {
-    const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-    const intervals = [...buildShiftIntervals(nowBr, -1), ...buildShiftIntervals(nowBr, 0)];
-    const match = intervals.find((it) => nowBr >= it.start && nowBr < it.end);
+    const match = getShiftWindowAt();
     if (!match) return null;
     return { shiftKey: match.shiftKey, start: match.start, end: match.end };
-  }, [buildShiftIntervals]);
+  }, []);
 
   const fetchRefugoTurno = useCallback(async () => {
     const windowInfo = resolveCurrentShiftWindow();
@@ -439,7 +417,7 @@ const [currentShift, setCurrentShift] = useState(() => {
     setShiftScrap((prev) => ({ ...prev, loading: true, shiftKey: windowInfo.shiftKey }));
 
     try {
-      const [bipRes, scrapRes, manualRes] = await Promise.all([
+      const [bipRes, scrapRes, manualRes, sensorCyclesRes] = await Promise.all([
         withClient(supabase
           .from("production_scans")
           .select("order_id, machine_id, created_at")
@@ -454,19 +432,27 @@ const [currentShift, setCurrentShift] = useState(() => {
           .lt("created_at", endIso)),
         withClient(supabase
           .from("injection_production_entries")
-          .select("order_id, good_qty, machine_id, created_at")
+          .select("order_id, good_qty, machine_id, created_at, source")
           .eq("machine_id", machineId)
           .gte("created_at", startIso)
           .lt("created_at", endIso)),
+        withClient(supabase
+          .from("machine_sensor_order_cycles")
+          .select("order_id, machine_id, produced_quantity, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at")
+          .eq("machine_id", machineId)
+          .gte("last_pulse_at", startIso)
+          .lt("first_pulse_at", endIso)),
       ]);
 
       if (bipRes.error) throw bipRes.error;
       if (scrapRes.error) throw scrapRes.error;
       if (manualRes.error) throw manualRes.error;
+      if (sensorCyclesRes.error) throw sensorCyclesRes.error;
 
       const scans = bipRes.data || [];
       const scraps = scrapRes.data || [];
       const manual = manualRes.data || [];
+      const sensorCycles = sensorCyclesRes.data || [];
 
       const orderIds = new Set();
       scans.forEach((s) => { if (s.order_id != null) orderIds.add(String(s.order_id)); });
@@ -487,7 +473,24 @@ const [currentShift, setCurrentShift] = useState(() => {
         const std = parsePiecesPerBox(ordersMap[String(s.order_id)]?.standard);
         goodPieces += std;
       });
-      manual.forEach((m) => { goodPieces += Number(m.good_qty) || 0; });
+      const hasSensorCycles = sensorCycles.length > 0;
+      manual.forEach((m) => {
+        if (hasSensorCycles && String(m?.source || '').toLowerCase() === 'sensor') return;
+        goodPieces += Number(m.good_qty) || 0;
+      });
+      sensorCycles.forEach((entry) => {
+        const cycleTimestamps = Array.isArray(entry?.cycle_timestamps) ? entry.cycle_timestamps : [];
+        if (!cycleTimestamps.length) return;
+        const qtyPerCycle = Number(entry?.produced_quantity || 0) / Math.max(1, cycleTimestamps.length);
+        cycleTimestamps.forEach((timestamp) => {
+          const cycleMs = DateTime.fromISO(String(timestamp)).toMillis();
+          if (!Number.isFinite(cycleMs)) return;
+          if (cycleMs >= windowInfo.start.toMillis() && cycleMs < windowInfo.end.toMillis()) {
+            goodPieces += qtyPerCycle;
+          }
+        });
+      });
+      goodPieces = Math.round(goodPieces);
 
       const scrapPieces = scraps.reduce((acc, r) => acc + (Number(r.qty) || 0), 0);
       const total = goodPieces + scrapPieces;
@@ -625,16 +628,7 @@ const [currentShift, setCurrentShift] = useState(() => {
 
     setSavingCavities(true)
     try {
-      let query = supabase.from('machines').update({ cavities: value })
-      if (machineMeta?.id) {
-        query = query.eq('id', machineMeta.id)
-      } else {
-        query = query.eq('machine_code', machineId)
-        if (clientId) query = query.eq('company_id', clientId)
-      }
-
-      const { error } = await query
-      if (error) throw error
+      await saveMachineCavities({ machineId, machineRecordId: machineMeta?.id, clientId, value })
 
       setSensorRuntime((prev) => ({ ...(prev || {}), cavities: value }))
       onMachineMetaUpdate && onMachineMetaUpdate(machineId, { cavities: value })
@@ -642,7 +636,7 @@ const [currentShift, setCurrentShift] = useState(() => {
       showToast('Cavidades atualizadas.', 'ok')
     } catch (err) {
       console.error('Erro ao salvar cavidades abertas:', err)
-      showToast('Falha ao salvar cavidades.', 'err')
+      showToast(`Falha ao salvar cavidades: ${getSupabaseErrorMessage(err)}`, 'err', 5200)
     } finally {
       setSavingCavities(false)
     }

@@ -54,10 +54,12 @@ function roundCycle(value) {
   return Number(num.toFixed(3))
 }
 
+const AUTO_STOP_CYCLE_MULTIPLIER = 6
+
 function getAutoStopAt(lastPulseMs, cicloCadastradoSeconds) {
   const baseCycle = Number(cicloCadastradoSeconds || 0)
   if (!(baseCycle > 0) || !lastPulseMs) return null
-  return new Date(lastPulseMs + (baseCycle * 4 * 1000)).toISOString()
+  return new Date(lastPulseMs + (baseCycle * AUTO_STOP_CYCLE_MULTIPLIER * 1000)).toISOString()
 }
 
 function brDateParts(date = new Date()) {
@@ -370,7 +372,7 @@ export default async function handler(req, res) {
 
   const cicloCadastrado = Number(machine.ciclo_cadastrado_seconds || 0)
   const isAutoStopped = cicloCadastrado > 0 && previousPulseMs > 0
-    ? ((nowMs - previousPulseMs) / 1000) >= (cicloCadastrado * 4)
+    ? ((nowMs - previousPulseMs) / 1000) >= (cicloCadastrado * AUTO_STOP_CYCLE_MULTIPLIER)
     : false
   const autoStopAt = isAutoStopped ? getAutoStopAt(previousPulseMs, cicloCadastrado) : null
 

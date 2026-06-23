@@ -6,6 +6,7 @@ import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
 import { ACTIVE_TURNOS, getShiftWindowAt } from "../lib/shifts";
 import { fetchAllPages } from "../lib/supabasePagination";
+import { getSupabaseErrorMessage, saveMachineCavities } from "../lib/machineCavities";
 
 function extractItemCodeFromOrderProduct(product) {
   if (!product) return null;
@@ -1789,16 +1790,7 @@ export default function Painel({
 
     setSavingCavities(true);
     try {
-      let query = supabase.from("machines").update({ cavities: value });
-      if (machine.machineRecordId) {
-        query = query.eq("id", machine.machineRecordId);
-      } else {
-        query = query.eq("machine_code", machine.id);
-        if (clientId) query = query.eq("company_id", clientId);
-      }
-
-      const { error } = await query;
-      if (error) throw error;
+      await saveMachineCavities({ machineId: machine.id, machineRecordId: machine.machineRecordId, clientId, value });
 
       setSensorRuntimeByMachine((prev) => ({
         ...prev,
@@ -1812,7 +1804,7 @@ export default function Painel({
       setCavitiesModalMachineId(null);
     } catch (error) {
       console.error("Falha ao salvar cavidades abertas:", error);
-      window.alert("Falha ao salvar cavidades abertas.");
+      window.alert(`Falha ao salvar cavidades abertas: ${getSupabaseErrorMessage(error)}`);
     } finally {
       setSavingCavities(false);
     }

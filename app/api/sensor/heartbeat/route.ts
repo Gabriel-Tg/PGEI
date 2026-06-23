@@ -56,7 +56,7 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-const AUTO_STOP_CYCLE_MULTIPLIER = 3;
+const AUTO_STOP_CYCLE_MULTIPLIER = 6;
 
 function getAutoStopAt(lastPulseAt: unknown, cicloCadastradoSeconds: unknown): string | null {
   const baseCycle = Number(cicloCadastradoSeconds || 0);
