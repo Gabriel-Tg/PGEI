@@ -174,6 +174,32 @@ function sumClippedSeconds(rows, { machine, startMs, endMs, startField = "starte
   }, 0);
 }
 
+function sumStopSecondsInWindow(rows, startMs, endMs) {
+  if (!(Number.isFinite(startMs) && Number.isFinite(endMs)) || endMs <= startMs) return 0;
+  return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+    const startedMs = DateTime.fromISO(String(row?.started_at || "")).toMillis();
+    if (!Number.isFinite(startedMs)) return acc;
+    const rawEndMs = row?.resumed_at ? DateTime.fromISO(String(row.resumed_at)).toMillis() : endMs;
+    const finishedMs = Number.isFinite(rawEndMs) ? rawEndMs : endMs;
+    const clippedStart = Math.max(startMs, startedMs);
+    const clippedEnd = Math.min(endMs, finishedMs);
+    if (clippedEnd <= clippedStart) return acc;
+    return acc + Math.floor((clippedEnd - clippedStart) / 1000);
+  }, 0);
+}
+
+function clampPercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, num));
+}
+
+function positivePercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, num);
+}
+
 function buildSensorCycleEntries(cycleRows, rangeStart, rangeEnd) {
   const entries = [];
   (Array.isArray(cycleRows) ? cycleRows : []).forEach((row) => {
@@ -681,7 +707,7 @@ export default function Painel({
 
       let machinesQuery = supabase
         .from("machines")
-        .select("machine_code, machine_name, sensor_status, sensor_last_pulse_at, sensor_last_cycle_seconds, sensor_avg_cycle_seconds, sensor_cycle_count, sensor_last_heartbeat_at, sensor_auto_stopped, sensor_auto_stop_at")
+        .select("machine_code, machine_name, sensor_status, sensor_last_pulse_at, sensor_last_cycle_seconds, sensor_cycle_count, sensor_last_heartbeat_at, sensor_auto_stopped, sensor_auto_stop_at")
         .in("machine_code", sensorMachines);
 
       if (clientId) {
@@ -795,7 +821,7 @@ export default function Painel({
 
       let stopsQuery = supabase
         .from("machine_stops")
-        .select("id, machine_id, reason, started_at, resumed_at")
+        .select("id, machine_id, order_id, reason, started_at, resumed_at")
         .lte("started_at", endIso)
         .or(`resumed_at.gte.${startIso},resumed_at.is.null`);
 
@@ -807,7 +833,7 @@ export default function Painel({
 
       let scrapQuery = supabase
         .from("scrap_logs")
-        .select("id, qty, reason, machine_id, created_at, order:orders(id, product)")
+        .select("id, qty, reason, machine_id, order_id, created_at, order:orders(id, product)")
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
@@ -953,6 +979,21 @@ export default function Painel({
       const activeEntryByOrder = {};
       const activePulseByOrder = {};
       const activeCavityByOrder = {};
+      const activeScrapByOrder = {};
+      const activeStopRowsByOrder = {};
+
+      scraps.forEach((row) => {
+        const key = String(row?.order_id || row?.order?.id || "");
+        if (!key || !activeOrderIds.includes(key)) return;
+        activeScrapByOrder[key] = (activeScrapByOrder[key] || 0) + Number(row?.qty || 0);
+      });
+
+      stops.forEach((row) => {
+        const key = String(row?.order_id || "");
+        if (!key || !activeOrderIds.includes(key)) return;
+        if (!activeStopRowsByOrder[key]) activeStopRowsByOrder[key] = [];
+        activeStopRowsByOrder[key].push(row);
+      });
 
       if (activeOrderIds.length) {
         let activeScansQuery = supabase
@@ -1032,6 +1073,8 @@ export default function Painel({
           apontamentoTipo,
           pulses: Number(activePulseByOrder[orderId] || 0),
           cavitiesUsed: Number(activeCavityByOrder[orderId] || 0),
+          scrapPieces: Number(activeScrapByOrder[orderId] || 0),
+          stopRows: activeStopRowsByOrder[orderId] || [],
         };
       }).filter((row) => isOrderOngoingStatus(row.status));
 
@@ -1300,13 +1343,6 @@ export default function Painel({
                 ? (pulseMs - previousPulseMs) / 1000
                 : Number(current.sensor_last_cycle_seconds || baseMeta.sensor_last_cycle_seconds || 0);
               const cycleCount = Number(current.sensor_cycle_count || baseMeta.sensor_cycle_count || 0) + 1;
-              const avgBefore = Number(current.sensor_avg_cycle_seconds || baseMeta.sensor_avg_cycle_seconds || 0);
-              const avgCycle = previousCycle > 0
-                ? (avgBefore > 0 && cycleCount > 1
-                    ? ((avgBefore * (cycleCount - 1)) + previousCycle) / cycleCount
-                    : previousCycle)
-                : avgBefore;
-
               return {
                 ...prev,
                 [machine]: {
@@ -1315,7 +1351,6 @@ export default function Painel({
                   sensor_last_event_id: sensorEventId || current.sensor_last_event_id || null,
                   sensor_last_pulse_at: pulseAt,
                   sensor_last_cycle_seconds: previousCycle,
-                  sensor_avg_cycle_seconds: avgCycle,
                   sensor_cycle_count: cycleCount,
                   sensor_status: "recebendo_pulsos",
                 },
@@ -1357,13 +1392,6 @@ export default function Painel({
                 ? (pulseMs - previousPulseMs) / 1000
                 : Number(current.sensor_last_cycle_seconds || baseMeta.sensor_last_cycle_seconds || 0);
               const cycleCount = Number(current.sensor_cycle_count || baseMeta.sensor_cycle_count || 0) + 1;
-              const avgBefore = Number(current.sensor_avg_cycle_seconds || baseMeta.sensor_avg_cycle_seconds || 0);
-              const avgCycle = previousCycle > 0
-                ? (avgBefore > 0 && cycleCount > 1
-                    ? ((avgBefore * (cycleCount - 1)) + previousCycle) / cycleCount
-                    : previousCycle)
-                : avgBefore;
-
               return {
                 ...prev,
                 [machine]: {
@@ -1372,7 +1400,6 @@ export default function Painel({
                   sensor_last_event_id: sensorEventId || current.sensor_last_event_id || null,
                   sensor_last_pulse_at: pulseAt,
                   sensor_last_cycle_seconds: previousCycle,
-                  sensor_avg_cycle_seconds: avgCycle,
                   sensor_cycle_count: cycleCount,
                   sensor_status: "recebendo_pulsos",
                 },
@@ -1597,6 +1624,7 @@ export default function Painel({
       const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
       const itemTech = itemCode ? itemTechByCode[itemCode] : null;
       const machineMeta = machineMetaById[machine] || {};
+      const pointingMode = String(activeOrder?.apontamentoTipo || machineTypeById[machine] || "manual").toLowerCase();
       const machineName = String(machineMeta?.machine_name || "").trim();
       const currentStop = openStopsByMachine[machine] || null;
       const reason = currentStop?.reason || ativa?.reason || "";
@@ -1622,25 +1650,40 @@ export default function Painel({
 
       const startedAt = ativa?.restarted_at || ativa?.started_at || null;
       const startedMs = startedAt ? DateTime.fromISO(String(startedAt)).toMillis() : NaN;
-      const elapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, (liveNowMs - startedMs) / 1000) : 0;
       const cycleStandard = Number(itemTech?.cycleSeconds || 0);
-      const cavities = Number(activeOrder?.cavitiesUsed || itemTech?.cavities || 0);
+      const cavities = Number(itemTech?.cavities || activeOrder?.cavitiesUsed || 0);
       const lastPulseAt = machineMeta?.sensor_last_pulse_at || null;
       const lastPulseMs = lastPulseAt ? DateTime.fromISO(String(lastPulseAt)).toMillis() : NaN;
+      const oeeNowMs = pointingMode === "sensor" && Number.isFinite(lastPulseMs) && (!Number.isFinite(startedMs) || lastPulseMs >= startedMs)
+        ? lastPulseMs
+        : liveNowMs;
+      const liveElapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, (liveNowMs - startedMs) / 1000) : 0;
+      const oeeElapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, (oeeNowMs - startedMs) / 1000) : 0;
       const currentCycle = tone === "producing" && Number.isFinite(lastPulseMs)
         ? Math.max(0, (liveNowMs - lastPulseMs) / 1000)
         : 0;
       const previousCycle = Number(machineMeta?.sensor_last_cycle_seconds || 0);
-      const avgCycle = Number(machineMeta?.sensor_avg_cycle_seconds || 0);
-      const calculatedCycle = producedPieces > 0 && cavities > 0 && elapsedSeconds > 0
-        ? (elapsedSeconds * cavities) / producedPieces
+      const calculatedCycle = producedPieces > 0 && cavities > 0 && liveElapsedSeconds > 0
+        ? (liveElapsedSeconds * cavities) / producedPieces
         : 0;
-      const realCycle = currentCycle > 0 ? currentCycle : previousCycle || avgCycle || calculatedCycle;
+      const realCycle = currentCycle > 0 ? currentCycle : previousCycle || calculatedCycle;
       const cycleEfficiency = realCycle > 0 && cycleStandard > 0 ? (cycleStandard / realCycle) * 100 : 0;
-      const theoreticalPieces = cycleStandard > 0 && cavities > 0 && elapsedSeconds > 0
-        ? (elapsedSeconds / cycleStandard) * cavities
+      const stoppedSecondsForOee = sumStopSecondsInWindow(activeOrder?.stopRows || [], startedMs, oeeNowMs);
+      const availableSeconds = oeeElapsedSeconds;
+      const productiveSecondsForOee = Math.max(0, availableSeconds - stoppedSecondsForOee);
+      const theoreticalPieces = cycleStandard > 0 && cavities > 0 && productiveSecondsForOee > 0
+        ? (productiveSecondsForOee / cycleStandard) * cavities
         : 0;
-      const oee = theoreticalPieces > 0 ? Math.min(140, (producedPieces / theoreticalPieces) * 100) : 0;
+      const liveStoppedSeconds = sumStopSecondsInWindow(activeOrder?.stopRows || [], startedMs, liveNowMs);
+      const liveProductiveSeconds = Math.max(0, liveElapsedSeconds - liveStoppedSeconds);
+      const liveTheoreticalPieces = cycleStandard > 0 && cavities > 0 && liveProductiveSeconds > 0
+        ? (liveProductiveSeconds / cycleStandard) * cavities
+        : 0;
+      const scrapPieces = Number(activeOrder?.scrapPieces || 0);
+      const availability = availableSeconds > 0 ? clampPercent((productiveSecondsForOee / availableSeconds) * 100) : 0;
+      const performance = theoreticalPieces > 0 ? positivePercent((producedPieces / theoreticalPieces) * 100) : 0;
+      const quality = producedPieces + scrapPieces > 0 ? clampPercent((producedPieces / (producedPieces + scrapPieces)) * 100) : 0;
+      const oee = (availability * performance * quality) / 10000;
       const etaSeconds = cycleStandard > 0 && cavities > 0 && remainingPieces > 0
         ? (remainingPieces / (3600 / cycleStandard * cavities)) * 3600
         : 0;
@@ -1649,13 +1692,15 @@ export default function Painel({
         ? getElapsedSeconds(currentStop?.started_at || ativa?.interrupted_at)
         : 0;
       const setupSeconds = tone === "setup" ? getElapsedSeconds(currentStop?.started_at || ativa?.interrupted_at) : 0;
-      const producingSeconds = tone === "producing" ? elapsedSeconds : 0;
+      const producingSeconds = tone === "producing" ? liveProductiveSeconds : 0;
+      const cardTone = tone === "producing" && oee < 80 ? "low-oee" : tone;
 
       return {
         id: machine,
         displayName: machine,
         machineLabel: machineName && machineName.toUpperCase() !== machine ? machineName : machine,
         tone,
+        cardTone,
         statusLabel,
         statusNote: status === "BAIXA_EFICIENCIA" ? "Baixa eficiência" : reason,
         orderNumber: ativa?.code || ativa?.op_code || activeOrder?.order || "-",
@@ -1674,9 +1719,11 @@ export default function Painel({
         realCycle,
         currentCycle,
         previousCycle,
-        avgCycle,
         isCycleLate: cycleStandard > 0 && currentCycle > cycleStandard,
         cycleEfficiency,
+        availability,
+        performance,
+        quality,
         partWeightG: Number(itemTech?.partWeightG || 0),
         channelWeightG: 0,
         cavities,
@@ -1688,11 +1735,11 @@ export default function Painel({
         piecesPerPack: Number(itemTech?.standard || 0),
         palletization: "-",
         etaSeconds,
-        metaPiecesNow: Math.round(theoreticalPieces || 0),
+        metaPiecesNow: Math.round(liveTheoreticalPieces || 0),
         producingSeconds,
         stopSeconds,
         setupSeconds,
-        pointingMode: getApontamentoLabel(activeOrder?.apontamentoTipo || machineTypeById[machine]),
+        pointingMode: getApontamentoLabel(pointingMode),
       };
     });
   }, [filteredMachineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs]);
@@ -1946,7 +1993,7 @@ export default function Painel({
         <div className="machine-card-grid">
           {machineCards.map((machine) => (
             <article
-              className={`machine-monitor-card tone-${machine.tone}`}
+              className={`machine-monitor-card tone-${machine.cardTone || machine.tone}`}
               key={machine.id}
               tabIndex={0}
               role="button"
@@ -1988,7 +2035,7 @@ export default function Painel({
             if (event.target === event.currentTarget) setSelectedMachineId(null);
           }}
         >
-          <div className={`machine-detail-modal tone-${selectedMachine.tone}`} onMouseDown={(event) => event.stopPropagation()}>
+          <div className={`machine-detail-modal tone-${selectedMachine.cardTone || selectedMachine.tone}`} onMouseDown={(event) => event.stopPropagation()}>
             <div className="machine-detail-modal-top">
               <select
                 className="machine-modal-select"
@@ -2031,8 +2078,10 @@ export default function Painel({
                 <div><span>Ciclo padrão</span><strong>{formatSeconds(selectedMachine.cycleStandard)}</strong></div>
                 <div className={selectedMachine.isCycleLate ? "metric-alert" : ""}><span>Ciclo real</span><strong>{formatSeconds(selectedMachine.realCycle)}</strong></div>
                 <div><span>Ciclo anterior</span><strong>{formatSeconds(selectedMachine.previousCycle)}</strong></div>
-                <div><span>Média ciclo</span><strong>{formatSeconds(selectedMachine.avgCycle)}</strong></div>
                 <div><span>Eficiência ciclo</span><strong>{formatPercent(selectedMachine.cycleEfficiency)}</strong></div>
+                <div><span>Disponibilidade</span><strong>{formatPercent(selectedMachine.availability)}</strong></div>
+                <div><span>Desempenho</span><strong>{formatPercent(selectedMachine.performance)}</strong></div>
+                <div><span>Qualidade</span><strong>{formatPercent(selectedMachine.quality)}</strong></div>
                 <div><span>Peso peça</span><strong>{selectedMachine.partWeightG > 0 ? `${formatDecimal(selectedMachine.partWeightG, 2)}g` : "-"}</strong></div>
                 <div><span>Peso canal</span><strong>{selectedMachine.channelWeightG > 0 ? `${formatDecimal(selectedMachine.channelWeightG, 2)}g` : "-"}</strong></div>
                 <div><span>Cavidades</span><strong>{selectedMachine.cavities || "-"}</strong></div>

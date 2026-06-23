@@ -407,6 +407,7 @@
 
 .machine-monitor-card.tone-stopped { --status-rgb: 255, 91, 110; --status-strong: #ff6f88; }
 .machine-monitor-card.tone-standby { --status-rgb: 244, 188, 49; --status-strong: #f4bc31; }
+.machine-monitor-card.tone-low-oee { --status-rgb: 244, 188, 49; --status-strong: #f4bc31; }
 .machine-monitor-card.tone-setup { --status-rgb: 52, 171, 255; --status-strong: #5bc7ff; }
 .machine-monitor-card.tone-maintenance { --status-rgb: 166, 104, 255; --status-strong: #a668ff; }
 
@@ -518,6 +519,7 @@
 
 .machine-detail-modal.tone-stopped { --status-rgb: 255, 91, 110; --status-strong: #ff6f88; }
 .machine-detail-modal.tone-standby { --status-rgb: 244, 188, 49; --status-strong: #f4bc31; }
+.machine-detail-modal.tone-low-oee { --status-rgb: 244, 188, 49; --status-strong: #f4bc31; }
 .machine-detail-modal.tone-setup { --status-rgb: 52, 171, 255; --status-strong: #5bc7ff; }
 .machine-detail-modal.tone-maintenance { --status-rgb: 166, 104, 255; --status-strong: #a668ff; }
 

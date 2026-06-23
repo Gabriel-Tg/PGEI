@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import '../styles/machine-card.css'
 
-export default function MachineCard({ machineId, status = 'offline', oee = 0, realCycle = 0, averageCycle = 0, stopsToday = 0, scrapRate = 0 }) {
+export default function MachineCard({ machineId, status = 'offline', oee = 0, realCycle = 0, stopsToday = 0, scrapRate = 0 }) {
   const statusInfo = useMemo(() => {
     const statusMap = {
       producing: {
@@ -84,11 +84,6 @@ export default function MachineCard({ machineId, status = 'offline', oee = 0, re
         <div className="info-row">
           <span className="label">Ciclo Real:</span>
           <span className="value">{formatCycle(realCycle)}</span>
-        </div>
-
-        <div className="info-row">
-          <span className="label">Ciclo Médio:</span>
-          <span className="value">{formatCycle(averageCycle)}</span>
         </div>
 
         {/* Downtime and Scrap */}

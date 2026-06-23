@@ -146,12 +146,6 @@ const [currentShift, setCurrentShift] = useState(() => {
     return `${num.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })}s`
   }, [])
 
-  const formatCycleValue = useCallback((value) => {
-    const num = Number(value)
-    if (!Number.isFinite(num) || num <= 0) return '—'
-    return `${num.toFixed(3)}s`
-  }, [])
-
   const mergeSensorPulseRuntime = useCallback((pulseAt, sensorEventId = null) => {
     if (!pulseAt) return
     setSensorLastPulseAt(pulseAt)
@@ -166,24 +160,17 @@ const [currentShift, setCurrentShift] = useState(() => {
         ? (pulseMs - previousPulseMs) / 1000
         : Number(current.sensor_last_cycle_seconds || machineMeta?.sensor_last_cycle_seconds || 0)
       const cycleCount = Number(current.sensor_cycle_count || machineMeta?.sensor_cycle_count || 0) + 1
-      const avgBefore = Number(current.sensor_avg_cycle_seconds || machineMeta?.sensor_avg_cycle_seconds || 0)
-      const avgCycle = previousCycle > 0
-        ? (avgBefore > 0 && cycleCount > 1
-            ? ((avgBefore * (cycleCount - 1)) + previousCycle) / cycleCount
-            : previousCycle)
-        : avgBefore
 
       return {
         ...current,
         sensor_last_event_id: sensorEventId || current.sensor_last_event_id || null,
         sensor_last_pulse_at: pulseAt,
         sensor_last_cycle_seconds: previousCycle,
-        sensor_avg_cycle_seconds: avgCycle,
         sensor_cycle_count: cycleCount,
         sensor_status: 'recebendo_pulsos',
       }
     })
-  }, [machineMeta?.sensor_avg_cycle_seconds, machineMeta?.sensor_cycle_count, machineMeta?.sensor_last_cycle_seconds, machineMeta?.sensor_last_pulse_at])
+  }, [machineMeta?.sensor_cycle_count, machineMeta?.sensor_last_cycle_seconds, machineMeta?.sensor_last_pulse_at])
 
   const activeItemCode = useMemo(() => String(ativa?.product || '').split('-')[0]?.trim() || '', [ativa?.product])
   const activeItemTech = activeItemCode ? itemTechByCode?.[activeItemCode] : null
@@ -196,8 +183,7 @@ const [currentShift, setCurrentShift] = useState(() => {
     ? Math.max(0, (liveNowMs - lastPulseMs) / 1000)
     : 0
   const previousCycleSeconds = Number(runtimeMeta?.sensor_last_cycle_seconds || 0)
-  const avgCycleSeconds = Number(runtimeMeta?.sensor_avg_cycle_seconds || 0)
-  const displayedRealCycleSeconds = runningCycleSeconds > 0 ? runningCycleSeconds : previousCycleSeconds || avgCycleSeconds
+  const displayedRealCycleSeconds = runningCycleSeconds > 0 ? runningCycleSeconds : previousCycleSeconds
   const runningCycleClass = runningCycleTone(runningCycleSeconds, configuredCycleSeconds)
   const sensorStatus = computeMachineSensorStatus(runtimeMeta, liveNowMs)
   const sensorStatusText = sensorStatusLabel(sensorStatus)
@@ -224,7 +210,7 @@ const [currentShift, setCurrentShift] = useState(() => {
   useEffect(() => {
     setSensorLastPulseAt(machineMeta?.sensor_last_pulse_at || null)
     setSensorRuntime((prev) => ({ ...(prev || {}), ...(machineMeta || {}) }))
-  }, [machineMeta?.sensor_last_pulse_at, machineMeta?.sensor_last_heartbeat_at, machineMeta?.sensor_status, machineMeta?.sensor_auto_stopped, machineMeta?.sensor_auto_stop_at])
+  }, [machineMeta])
 
   useEffect(() => {
     if (machineMeta?.apontamento_tipo !== 'sensor') return undefined
@@ -246,6 +232,24 @@ const [currentShift, setCurrentShift] = useState(() => {
           if (String(row.company_id || '') !== String(clientId)) return
           if (String(row.machine_id || '').toUpperCase() !== machineId) return
           mergeSensorPulseRuntime(row.created_at || new Date().toISOString(), row.id ? String(row.id) : null)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'machines' },
+        (payload) => {
+          const row = payload?.new
+          if (!row) return
+          if (String(row.company_id || '') !== String(clientId)) return
+          const updatedMachineId = String(row.machine_code || row.machine_id || '').trim().toUpperCase()
+          if (updatedMachineId !== machineId) return
+
+          setSensorLastPulseAt(row.sensor_last_pulse_at || null)
+          setSensorRuntime((prev) => ({
+            ...(prev || {}),
+            ...row,
+            machine_code: updatedMachineId,
+          }))
         }
       )
       .subscribe()
@@ -913,16 +917,12 @@ if (typeof window !== "undefined") {
               </div>
             </div>
             <div>
-              <div className="pet01-sensor-label">Ciclo cadastrado</div>
-              <div className="pet01-sensor-value">{configuredCycleSeconds ? `${configuredCycleSeconds}s` : '—'}</div>
+              <div className="pet01-sensor-label">Ciclo anterior</div>
+              <div className="pet01-sensor-value">{formatCycleSeconds(previousCycleSeconds, 1)}</div>
             </div>
             <div>
               <div className="pet01-sensor-label">Ciclo real</div>
               <div className={`pet01-sensor-value pet01-cycle-timer ${runningCycleClass}`}>{formatCycleSeconds(displayedRealCycleSeconds, 1)}</div>
-            </div>
-            <div>
-              <div className="pet01-sensor-label">Ciclo médio</div>
-              <div className="pet01-sensor-value">{formatCycleValue(avgCycleSeconds)}</div>
             </div>
           </div>
         )}
