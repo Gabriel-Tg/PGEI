@@ -6,7 +6,7 @@ import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
 import Modal from '../components/Modal'
 import { MAQUINAS } from '../domain/constants'
-import { statusClass } from '../lib/utils'
+import { parseBrNumber, statusClass } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 import { DateTime } from 'luxon';
 
@@ -38,12 +38,7 @@ export default function Lista({
     const raw = String(value).trim()
     if (!raw) return 0
 
-    const normalized = raw
-      .replace(/\.(?=\d{3}(\D|$))/g, '')
-      .replace(',', '.')
-      .replace(/[^\d.-]/g, '')
-
-    const num = Number(normalized)
+    const num = parseBrNumber(raw)
     return Number.isFinite(num) ? num : 0
   }
 
@@ -183,7 +178,7 @@ await supabase.rpc('reorder_machine_queue', {
           const opCode = ativa?.code || ativa?.o?.code || ativa?.op_code || ""
           // lidas / saldo: usar mesma lógica do Painel
           const lidas = Number(ativa?.scanned_count || 0)
-          const saldo = ativa ? Math.max(0, (Number(ativa.boxes) || 0) - lidas) : 0
+          const saldo = ativa ? Math.max(0, toNumber(ativa.boxes) - lidas) : 0
 
           const productCode = String(ativa?.product || '').split('-')[0]?.trim()
           const itemTech = productCode ? itemTechByCode[productCode] : null

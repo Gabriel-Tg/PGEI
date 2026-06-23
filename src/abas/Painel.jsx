@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabaseClient";
 import { ACTIVE_TURNOS, getShiftWindowAt } from "../lib/shifts";
 import { fetchAllPages } from "../lib/supabasePagination";
 import { getSupabaseErrorMessage, saveMachineCavities } from "../lib/machineCavities";
+import { parseBrNumber } from "../lib/utils";
 
 function extractItemCodeFromOrderProduct(product) {
   if (!product) return null;
@@ -57,16 +58,14 @@ function getElapsedSeconds(dateLike, fallbackSeconds = 0) {
 }
 
 function parsePiecesPerBox(value) {
-  const digits = String(value ?? "").replace(/[^0-9]/g, "");
-  if (!digits) return 0;
-  return Number.parseInt(digits, 10) || 0;
+  return parseBrNumber(value) || 0;
 }
 
 function getOrderPlannedPieces(order) {
-  const boxes = Number(order?.boxes || 0);
+  const boxes = parseBrNumber(order?.boxes) || 0;
   const piecesPerBox = parsePiecesPerBox(order?.standard);
   if (boxes > 0 && piecesPerBox > 0) return boxes * piecesPerBox;
-  const plannedQty = Number(order?.qty || 0);
+  const plannedQty = parseBrNumber(order?.qty) || 0;
   if (plannedQty > 0) return plannedQty;
   return 0;
 }
@@ -2179,8 +2178,8 @@ export default function Painel({
               <div className="popover-block-title">Embalagem</div>
               <div className="popover-grid three-cols">
                 <div><span>Tipo</span><strong>{selectedMachine.packagingType}</strong></div>
-                <div><span>Peças/caixa</span><strong>{selectedMachine.piecesPerBox || "-"}</strong></div>
-                <div><span>Peças/pacote</span><strong>{selectedMachine.piecesPerPack || "-"}</strong></div>
+                <div><span>Peças/caixa</span><strong>{selectedMachine.piecesPerBox ? formatCompactNumber(selectedMachine.piecesPerBox) : "-"}</strong></div>
+                <div><span>Peças/pacote</span><strong>{selectedMachine.piecesPerPack ? formatCompactNumber(selectedMachine.piecesPerPack) : "-"}</strong></div>
                 <div><span>Caixas produzidas</span><strong>{formatCompactNumber(selectedMachine.producedBoxes)}</strong></div>
                 <div><span>Caixas restantes</span><strong>{formatCompactNumber(selectedMachine.remainingBoxes)}</strong></div>
                 <div><span>Paletização</span><strong>{selectedMachine.palletization}</strong></div>

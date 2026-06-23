@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Etiqueta from "../components/Etiqueta";
 import { MAQUINAS } from "../domain/constants";
-import { statusClass } from "../lib/utils";
+import { parseBrNumber, statusClass } from "../lib/utils";
 import { supabase } from "../lib/supabaseClient";
 import "../styles/PainelTV.css";
 
@@ -31,7 +31,7 @@ function ItemResumo({
 
   const opCode = ordem?.code || ordem?.o?.code || ordem?.op_code || "-";
   const lidas = Number(ordem?.scanned_count || 0);
-  const saldo = Math.max(0, (Number(ordem?.boxes) || 0) - lidas);
+  const saldo = Math.max(0, (parseBrNumber(ordem?.boxes) || 0) - lidas);
 
   return (
     <div className="tv-item-wrap">

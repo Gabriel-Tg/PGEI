@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { fmtDateTime, fmtDuracao } from '../lib/utils'
+import { fmtDateTime, fmtDuracao, formatQuantity, parseBrNumber } from '../lib/utils'
 import { getShiftWindowAt } from '../lib/shifts'
 import '../styles/rastreio.css'
 
 const formatPieces = (val) => {
-  const nRaw = Number(val)
+  const nRaw = parseBrNumber(val)
   const n = Number.isFinite(nRaw) ? nRaw : 0
   // Se a origem vier em milhares (ex.: 1,26) converte para unidades.
   const scaled = n > 0 && n < 10 ? n * 1000 : n
@@ -540,7 +540,7 @@ export default function Rastreio({ externalSearchRequest = null }) {
                 </div>
                 <div className="rastreio-card">
                   <span>Caixas previstas</span>
-                  <strong>{order.boxes || 'N/A'}</strong>
+                  <strong>{formatQuantity(order.boxes, { fallback: 'N/A' })}</strong>
                 </div>
                 <div className="rastreio-card">
                   <span>Peças/caixa (padrão)</span>

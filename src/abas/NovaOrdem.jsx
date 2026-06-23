@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
 import { MAQUINAS } from '../domain/constants'
 import Modal from '../components/Modal'
+import { formatQuantity, parseBrNumber } from '../lib/utils'
 
 export default function NovaOrdem({ form, setForm, criarOrdem, setTab, machineIds = MAQUINAS }) {
   // ====== Busca de itens ligada ao campo "Produto" ======
@@ -21,8 +22,12 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, machineId
   const creatingOrderRef = useRef(false)
 
   const parseNonNegNumber = (value) => {
-    const num = Number(String(value || '').replace(',', '.').trim())
+    const num = parseBrNumber(value)
     return Number.isFinite(num) && num >= 0 ? num : null
+  }
+
+  const formatFormQuantity = (field, maximumFractionDigits = 2) => {
+    setForm(f => ({ ...f, [field]: formatQuantity(f[field], { maximumFractionDigits }) }))
   }
 
   const buildEmbalagemNote = (notes, embalagem) => {
@@ -389,7 +394,7 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, machineId
           </div>
 
           {/* Restante dos campos */}
-          <div><div className="label">Quantidade</div><input className="input" value={form.qty} onChange={e=>{
+          <div><div className="label">Quantidade</div><input className="input" value={form.qty} onBlur={() => formatFormQuantity('qty', 0)} onChange={e=>{
               const qtyValue = e.target.value
               setForm(f=>{
                 const next = { ...f, qty: qtyValue }
@@ -401,8 +406,8 @@ export default function NovaOrdem({ form, setForm, criarOrdem, setTab, machineId
                 return next
               })
             }}/></div>
-          <div><div className="label">Volumes</div><input className="input" value={form.boxes} onChange={e=>setForm(f=>({...f, boxes:e.target.value}))}/></div>
-          <div><div className="label">Padrão</div><input className="input" value={form.standard} onChange={e=>{
+          <div><div className="label">Volumes</div><input className="input" value={form.boxes} onBlur={() => formatFormQuantity('boxes', 2)} onChange={e=>setForm(f=>({...f, boxes:e.target.value}))}/></div>
+          <div><div className="label">Padrão</div><input className="input" value={form.standard} onBlur={() => formatFormQuantity('standard', 0)} onChange={e=>{
               const standardValue = e.target.value
               setForm(f=>{
                 const next = { ...f, standard: standardValue }

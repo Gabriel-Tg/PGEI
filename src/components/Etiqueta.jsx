@@ -1,4 +1,5 @@
 // src/components/Etiqueta.jsx
+import { formatQuantity, parseBrNumber } from '../lib/utils'
 
 export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaixas, compactPills = false }) {
   if (!o) return null
@@ -11,7 +12,7 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
   const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-')
 
   const toNum = (value) => {
-    const num = Number(value)
+    const num = parseBrNumber(value)
     return Number.isFinite(num) ? num : 0
   }
 
@@ -76,9 +77,9 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
           {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
           {o.product && <div><b>Produto:</b> {o.product}</div>}
           {o.color && <div><b>Cor:</b> {o.color}</div>}
-          {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
-          {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
-          {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
+          {o.qty && <div><b>Qtd:</b> {formatQuantity(o.qty)}</div>}
+          {o.boxes && <div><b>Volumes:</b> {formatQuantity(o.boxes)}</div>}
+          {o.standard && <div><b>Padrão:</b> {formatQuantity(o.standard)}</div>}
           {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
           {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
           {o.notes && <div className="muted">{o.notes}</div>}
@@ -97,11 +98,11 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
-      {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
+      {o.qty && <div><b>Qtd:</b> {formatQuantity(o.qty)}</div>}
 
-      {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
+      {o.boxes && <div><b>Volumes:</b> {formatQuantity(o.boxes)}</div>}
 
-      {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
+      {o.standard && <div><b>Padrão:</b> {formatQuantity(o.standard)}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
 
       {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}
@@ -122,11 +123,11 @@ export default function Etiqueta({ o, variant = 'painel', saldoCaixas, lidasCaix
       {o.customer && <div><b>Cliente:</b> {o.customer}</div>}
       {o.product && <div><b>Produto:</b> {o.product}</div>}
       {o.color && <div><b>Cor:</b> {o.color}</div>}
-      {o.qty && <div><b>Qtd:</b> {o.qty}</div>}
+      {o.qty && <div><b>Qtd:</b> {formatQuantity(o.qty)}</div>}
 
-      {o.boxes && <div><b>Volumes:</b> {o.boxes}</div>}
+      {o.boxes && <div><b>Volumes:</b> {formatQuantity(o.boxes)}</div>}
 
-      {o.standard && <div><b>Padrão:</b> {o.standard}</div>}
+      {o.standard && <div><b>Padrão:</b> {formatQuantity(o.standard)}</div>}
       {o.due_date && <div><b>Prazo:</b> {fmtDate(o.due_date)}</div>}
 
       {temObsLowEff && <div><b>Baixa Eficiência:</b> {o.loweff_notes}</div>}

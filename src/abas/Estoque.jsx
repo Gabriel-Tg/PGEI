@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DateTime } from 'luxon'
 import { supabase } from '../lib/supabaseClient'
-import { fmtDateTime, getTurnoAtual } from '../lib/utils'
+import { fmtDateTime, getTurnoAtual, parseBrNumber } from '../lib/utils'
 import { getProductImageCandidates } from '../lib/productImageMap'
 import Modal from '../components/Modal'
 import '../styles/estoque.css'
@@ -27,9 +27,7 @@ const toPositiveNumber = (value) => {
 }
 
 const parsePiecesPerBox = (value) => {
-  if (value == null) return 0
-  const digitsOnly = String(value).replace(/[^0-9]/g, '')
-  return digitsOnly ? Number.parseInt(digitsOnly, 10) : 0
+  return parseBrNumber(value) || 0
 }
 
 const parseScannedBoxLabel = (value) => {

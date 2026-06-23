@@ -27,6 +27,34 @@ export function fmtDateTime(ts) {
   } catch { return ts }
 }
 
+export function parseBrNumber(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+
+  const raw = String(value).trim()
+  if (!raw) return null
+
+  const normalized = raw.includes(',')
+    ? raw.replace(/\./g, '').replace(',', '.')
+    : /^-?\d{1,3}(\.\d{3})+$/.test(raw)
+      ? raw.replace(/\./g, '')
+      : raw
+
+  const num = Number(normalized)
+  return Number.isFinite(num) ? num : null
+}
+
+export function formatQuantity(value, options = {}) {
+  const { fallback = '', maximumFractionDigits = 2 } = options
+  const num = parseBrNumber(value)
+  if (num == null) return value == null || value === '' ? fallback : String(value)
+
+  return num.toLocaleString('pt-BR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  })
+}
+
 export function formatHHMMSS(totalSeconds) {
   const sec = Math.max(0, Math.floor(totalSeconds || 0))
   const h = String(Math.floor(sec / 3600)).padStart(2, '0')

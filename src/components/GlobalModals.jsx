@@ -3,6 +3,7 @@ import React, { useEffect } from 'react'
 import Modal from '../components/Modal'
 import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { DateTime } from 'luxon'
+import { formatQuantity } from '../lib/utils'
 
 function safeDate(val){
   if (val && /^\d{4}-\d{2}-\d{2}$/.test(String(val))) return String(val)
@@ -15,6 +16,10 @@ function safeTime(val){
 
 function resolveModalOrder(modal) {
   return modal?.ordem || modal?.order || null
+}
+
+function formatEditedQuantity(setEditando, field, maximumFractionDigits = 2) {
+  setEditando(v => v ? ({ ...v, [field]: formatQuantity(v[field], { maximumFractionDigits }) }) : v)
 }
 
 export default function GlobalModals({
@@ -137,9 +142,9 @@ export default function GlobalModals({
               <div><div className="label">Cliente</div><input className="input" value={editando.customer||''} onChange={e=>setEditando(v=>({...v, customer:e.target.value}))}/></div>
               <div><div className="label">Produto</div><input className="input" value={editando.product||''} onChange={e=>setEditando(v=>({...v, product:e.target.value}))}/></div>
               <div><div className="label">Cor</div><input className="input" value={editando.color||''} onChange={e=>setEditando(v=>({...v, color:e.target.value}))}/></div>
-              <div><div className="label">Quantidade</div><input className="input" value={editando.qty||''} onChange={e=>setEditando(v=>({...v, qty:e.target.value}))}/></div>
-              <div><div className="label">Volumes</div><input className="input" value={editando.boxes||''} onChange={e=>setEditando(v=>({...v, boxes:e.target.value}))}/></div>
-              <div><div className="label">Padrão</div><input className="input" value={editando.standard||''} onChange={e=>setEditando(v=>({...v, standard:e.target.value}))}/></div>
+              <div><div className="label">Quantidade</div><input className="input" value={editando.qty||''} onBlur={()=>formatEditedQuantity(setEditando, 'qty', 0)} onChange={e=>setEditando(v=>({...v, qty:e.target.value}))}/></div>
+              <div><div className="label">Volumes</div><input className="input" value={editando.boxes||''} onBlur={()=>formatEditedQuantity(setEditando, 'boxes', 2)} onChange={e=>setEditando(v=>({...v, boxes:e.target.value}))}/></div>
+              <div><div className="label">Padrão</div><input className="input" value={editando.standard||''} onBlur={()=>formatEditedQuantity(setEditando, 'standard', 0)} onChange={e=>setEditando(v=>({...v, standard:e.target.value}))}/></div>
               <div><div className="label">Prazo de Entrega</div><input type="date" className="input" value={editando.due_date||''} onChange={e=>setEditando(v=>({...v, due_date:e.target.value}))}/></div>
               <div><div className="label">Observações</div><input className="input" value={editando.notes||''} onChange={e=>setEditando(v=>({...v, notes:e.target.value}))}/></div>
             </div>
