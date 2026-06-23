@@ -5,16 +5,14 @@ import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortabl
 import FilaSortableItem from '../components/FilaSortableItem'
 import Etiqueta from '../components/Etiqueta'
 import Modal from '../components/Modal'
-import { MAQUINAS, STATUS } from '../domain/constants'
-import { statusClass, jaIniciou } from '../lib/utils'
+import { MAQUINAS } from '../domain/constants'
+import { statusClass } from '../lib/utils'
 import { supabase } from '../lib/supabaseClient.js' // ✅ ESM correto
 import { DateTime } from 'luxon';
 
 export default function Lista({
   ativosPorMaquina,
   sensors,
-  onStatusChange,
-  setStartModal,
   setEditando,
   setFinalizando,
   enviarParaFila,     // agora vamos chamar com { operador, data, hora }
@@ -234,57 +232,12 @@ await supabase.rpc('reorder_machine_queue', {
                     )}
                     <div className="sep"></div>
 
-                    <div className="grid2">
-                      <div>
-                        <div className="label">Situação (só painel)</div>
-                        <select
-                          className="select"
-                          value={ativa.status}
-                          onChange={e => onStatusChange(ativa, e.target.value)}
-                          disabled={ativa.status === 'AGUARDANDO'}
-                        >
-                          {STATUS
-                            .filter(s => (jaIniciou(ativa) ? s !== 'AGUARDANDO' : true))
-                            .map(s => (
-                              <option key={s} value={s}>
-                                {s==='AGUARDANDO'?'Aguardando'
-                                  : s==='PRODUZINDO'?'Produzindo'
-                                  : s==='BAIXA_EFICIENCIA'?'Baixa Eficiência'
-                                  : 'Parada'}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-
-                      <div className="flex" style={{ justifyContent:'flex-end', gap:8 }}>
-                        {ativa.status === 'AGUARDANDO' ? (
-                          <>
-                            <button className="btn" onClick={()=>{
-                              const nowBr = DateTime.now().setZone("America/Sao_Paulo");
-                              setStartModal({
-                                ordem: ativa,
-                                operador: "",
-                                data: nowBr.toISODate(), 
-                                hora: nowBr.toFormat("HH:mm"),
-                              })
-                            }}>Iniciar Produção</button>
-                            {canEditActiveOrder && (
-                              <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
-                            )}
-                            {/* 🚚 agora abre modal de confirmação */}
-                            <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
-                          </>
-                        ) : (
-                          <>
-                            <button className="btn" onClick={() => setFinalizando(ativa)}>Finalizar</button>
-                            {canEditActiveOrder && (
-                              <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
-                            )}
-                            {/* 🚚 agora abre modal de confirmação */}
-                            <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
-                          </>
-                        )}
-                      </div>
+                    <div className="flex painel-card-actions" style={{ justifyContent:'flex-end', gap:8 }}>
+                      <button className="btn" onClick={() => setFinalizando(ativa)}>Finalizar</button>
+                      {canEditActiveOrder && (
+                        <button className="btn" onClick={() => setEditando(ativa)}>Editar</button>
+                      )}
+                      <button className="btn" onClick={() => abrirModalInterromper(ativa)}>Enviar para fila</button>
                     </div>
                   </div>
                 ) : (

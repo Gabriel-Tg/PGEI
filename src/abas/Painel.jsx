@@ -1901,31 +1901,43 @@ export default function Painel({
   const topStopReasons = useMemo(() => (overview.stopReasons || []).slice(0, 5), [overview.stopReasons]);
   const topScrapReasons = useMemo(() => (overview.scrapReasons || []).slice(0, 5), [overview.scrapReasons]);
 
-  function handleProductionChartPointer(event) {
-    if (!productionChart.points.length) return;
+  function getProductionChartPointerX(event) {
     const rect = event.currentTarget.getBoundingClientRect();
     const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
     const relativeX = Math.min(Math.max(0, clientX - rect.left), rect.width);
-    const plotRatio = Math.min(1, Math.max(0, relativeX / Math.max(1, rect.width)));
-    const bucketIndex = Math.min(productionChart.points.length - 1, Math.max(0, Math.round(plotRatio * (productionChart.points.length - 1))));
-    const point = productionChart.points[bucketIndex];
+    const chartX = (relativeX / Math.max(1, rect.width)) * productionChart.width;
+    return Math.min(
+      productionChart.width - productionChart.right,
+      Math.max(productionChart.left, chartX)
+    );
+  }
+
+  function getProductionChartPlotPercent(event) {
+    const chartX = getProductionChartPointerX(event);
+    return ((chartX - productionChart.left) / Math.max(1, productionChart.plotWidth)) * 100;
+  }
+
+  function handleProductionChartPointer(event) {
+    if (!productionChart.points.length) return;
+    const chartX = getProductionChartPointerX(event);
+    const point = productionChart.points.reduce((nearest, candidate) => {
+      if (!nearest) return candidate;
+      return Math.abs(candidate.x - chartX) < Math.abs(nearest.x - chartX) ? candidate : nearest;
+    }, null);
+    if (!point) return;
     setBarTooltip({ ...point, cursorPercent: (point.x / productionChart.width) * 100 });
   }
 
   function handleProductionChartPointerDown(event) {
     if (scopedProductionBuckets.length < 3) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
-    const startPercent = Math.min(100, Math.max(0, ((clientX - rect.left) / Math.max(1, rect.width)) * 100));
+    const startPercent = Math.min(100, Math.max(0, getProductionChartPlotPercent(event)));
     setChartDrag({ startPercent, endPercent: startPercent });
   }
 
   function handleProductionChartDrag(event) {
     handleProductionChartPointer(event);
     if (!chartDrag) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
-    const endPercent = Math.min(100, Math.max(0, ((clientX - rect.left) / Math.max(1, rect.width)) * 100));
+    const endPercent = Math.min(100, Math.max(0, getProductionChartPlotPercent(event)));
     setChartDrag((prev) => prev ? { ...prev, endPercent } : prev);
   }
 
