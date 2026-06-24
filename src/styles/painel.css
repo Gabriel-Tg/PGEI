@@ -860,6 +860,10 @@
   box-shadow: 0 0 10px rgba(255, 207, 117, 0.42);
 }
 
+.production-chart-meta .legend-stop {
+  background: linear-gradient(180deg, #ff7a89, #c62d42);
+}
+
 .production-chart-meta strong {
   margin-left: auto;
   color: #eef6ff;
@@ -1007,6 +1011,7 @@
 .production-column {
   fill: url(#productionBarGradient);
   opacity: 0.86;
+  cursor: pointer;
   filter: drop-shadow(0 0 7px rgba(34, 199, 255, 0.18));
   transform-box: fill-box;
   transform-origin: bottom center;
@@ -1022,6 +1027,23 @@
 .production-column.is-active {
   opacity: 1;
   filter: drop-shadow(0 0 14px rgba(34, 199, 255, 0.52)) drop-shadow(0 12px 22px rgba(38, 109, 255, 0.22));
+  transform: translateY(-8px) scaleY(1.03);
+}
+
+.production-stop-column {
+  fill: url(#productionStopGradient);
+  opacity: 0.88;
+  filter: drop-shadow(0 0 7px rgba(255, 83, 105, 0.18));
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: barColumnIn 0.62s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: opacity 0.2s ease, filter 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+}
+
+.production-stop-column.is-active {
+  opacity: 1;
+  filter: drop-shadow(0 0 14px rgba(255, 83, 105, 0.52)) drop-shadow(0 12px 22px rgba(216, 39, 67, 0.22));
   transform: translateY(-8px) scaleY(1.03);
 }
 
@@ -1143,6 +1165,380 @@
   font-size: 0.66rem;
   font-weight: 950;
   text-transform: uppercase;
+}
+
+.hourly-production-report {
+  display: grid;
+  gap: 14px;
+  min-height: 360px;
+}
+
+.hourly-report-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.hourly-report-head > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.hourly-report-head span {
+  color: #68bfff;
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hourly-report-head strong {
+  color: #f8fcff;
+  font-size: clamp(1.08rem, 1.7vw, 1.5rem);
+}
+
+.hourly-machine-filter {
+  display: grid;
+  gap: 5px;
+  min-width: 250px;
+}
+
+.hourly-machine-filter span {
+  color: #8fa6c6;
+  font-size: 0.64rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hourly-machine-nav {
+  display: grid;
+  grid-template-columns: 34px minmax(150px, 1fr) 34px;
+  gap: 6px;
+  align-items: center;
+}
+
+.hourly-machine-filter select,
+.hourly-machine-nav button {
+  min-height: 34px;
+  border: 1px solid rgba(121, 170, 236, 0.22);
+  border-radius: 9px;
+  background: rgba(7, 20, 39, 0.72);
+  color: #e8f4ff;
+  font-weight: 850;
+  outline: none;
+}
+
+.hourly-machine-filter select {
+  padding: 0 10px;
+}
+
+.hourly-machine-nav button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  font-size: 1.24rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.hourly-machine-nav button:not(:disabled):hover {
+  border-color: rgba(104, 219, 255, 0.48);
+  color: #ffffff;
+  background: rgba(26, 92, 151, 0.44);
+}
+
+.hourly-machine-nav button:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.hourly-report-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(96px, 1fr));
+  gap: 8px;
+  flex: 1 1 620px;
+}
+
+.hourly-report-kpis p,
+.hourly-section p {
+  margin: 0;
+}
+
+.hourly-report-kpis p {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid rgba(104, 163, 237, 0.16);
+  border-radius: 10px;
+  background: rgba(7, 22, 43, 0.64);
+}
+
+.hourly-report-kpis b,
+.hourly-report-kpis em {
+  font-style: normal;
+}
+
+.hourly-report-kpis b {
+  color: #8fa6c6;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+}
+
+.hourly-report-kpis em {
+  color: #f4fbff;
+  font-size: 0.94rem;
+  font-weight: 950;
+}
+
+.hourly-area-wrap {
+  position: relative;
+  min-height: 226px;
+  padding: 8px 0 18px;
+  border: 1px solid rgba(92, 151, 228, 0.12);
+  border-radius: 12px;
+  background: rgba(4, 13, 27, 0.34);
+  overflow: hidden;
+}
+
+.hourly-chart-empty {
+  position: absolute;
+  inset: 8px 0 18px;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  color: #8fa6c6;
+  font-size: 0.82rem;
+  font-weight: 900;
+  background: rgba(4, 13, 27, 0.52);
+  pointer-events: none;
+}
+
+.hourly-area-chart {
+  width: 100%;
+  height: 198px;
+  display: block;
+}
+
+.hourly-stop-band {
+  fill: rgba(255, 89, 110, 0.2);
+  stroke: rgba(255, 124, 142, 0.34);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.hourly-stop-band-cover {
+  fill: rgba(177, 32, 51, 0.88);
+  stroke: rgba(255, 142, 157, 0.64);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.hourly-production-area {
+  fill: url(#hourlyAreaGradient);
+  stroke: #55ddff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 10px rgba(70, 218, 255, 0.22));
+}
+
+.hourly-cycle-guide line {
+  stroke: rgba(134, 162, 198, 0.12);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.hourly-cycle-guide text {
+  fill: rgba(155, 177, 207, 0.72);
+  font-size: 10px;
+  font-weight: 850;
+  text-anchor: end;
+}
+
+.hourly-cycle-area {
+  stroke: none;
+  opacity: 0.34;
+}
+
+.hourly-cycle-area.is-ok {
+  fill: rgba(66, 228, 145, 0.44);
+}
+
+.hourly-cycle-area.is-over {
+  fill: rgba(247, 201, 72, 0.42);
+}
+
+.hourly-cycle-line {
+  fill: none;
+  stroke-width: 2.8;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  vector-effect: non-scaling-stroke;
+}
+
+.hourly-cycle-line.is-ok {
+  stroke: #42e491;
+  filter: drop-shadow(0 0 8px rgba(66, 228, 145, 0.36));
+}
+
+.hourly-cycle-line.is-over {
+  stroke: #f7c948;
+  filter: drop-shadow(0 0 8px rgba(247, 201, 72, 0.34));
+}
+
+.hourly-cycle-dot {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 10;
+  vector-effect: non-scaling-stroke;
+  cursor: crosshair;
+}
+
+.hourly-cycle-tooltip {
+  position: absolute;
+  z-index: 12;
+  display: block;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid rgba(188, 232, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(4, 13, 27, 0.92);
+  color: #eaf7ff;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.28);
+  transform: translate(-50%, calc(-100% - 10px));
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.hourly-cycle-tooltip strong,
+.hourly-cycle-tooltip span,
+.hourly-cycle-tooltip small {
+  font-style: normal;
+  line-height: 1.15;
+}
+
+.hourly-cycle-tooltip strong {
+  color: #f8fcff;
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+.hourly-goal-line {
+  fill: none;
+  stroke: #f7c948;
+  stroke-width: 2;
+  stroke-dasharray: 8 8;
+  vector-effect: non-scaling-stroke;
+}
+
+.hourly-bin-axis {
+  position: absolute;
+  left: 42px;
+  right: 14px;
+  bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  color: #7890af;
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
+.hourly-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.75fr);
+  gap: 12px;
+}
+
+.hourly-section {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid rgba(104, 163, 237, 0.14);
+  border-radius: 12px;
+  background: rgba(6, 19, 38, 0.54);
+}
+
+.hourly-section h4 {
+  margin: 0;
+  color: #f7fbff;
+  font-size: 0.84rem;
+}
+
+.hourly-section p {
+  display: grid;
+  grid-template-columns: minmax(68px, 0.34fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  color: #d9e8fa;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.hourly-section p b,
+.hourly-section p em {
+  color: #8da4c4;
+  font-style: normal;
+}
+
+.hourly-empty {
+  display: block !important;
+  color: #849ab9 !important;
+}
+
+.hourly-timeline-list {
+  display: grid;
+  gap: 10px;
+}
+
+.hourly-machine-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.hourly-machine-label {
+  display: grid;
+  gap: 2px;
+}
+
+.hourly-machine-label strong {
+  color: #f6fbff;
+  font-size: 0.8rem;
+}
+
+.hourly-machine-label span {
+  color: #8ba4c4;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.hourly-timeline-track {
+  position: relative;
+  height: 22px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(10, 29, 55, 0.74);
+  border: 1px solid rgba(113, 169, 236, 0.14);
+}
+
+.hourly-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+}
+
+.hourly-segment.is-production {
+  background: linear-gradient(90deg, rgba(45, 196, 255, 0.72), rgba(37, 111, 255, 0.64));
+}
+
+.hourly-segment.is-stop {
+  background: repeating-linear-gradient(45deg, rgba(255, 83, 105, 0.88), rgba(255, 83, 105, 0.88) 8px, rgba(174, 34, 53, 0.88) 8px, rgba(174, 34, 53, 0.88) 16px);
 }
 
 .goal-line-chart {

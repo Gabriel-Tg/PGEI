@@ -50,6 +50,27 @@ function formatDurationShort(totalSeconds) {
   return `${minutes}min`;
 }
 
+function formatClock(value) {
+  const dt = DateTime.fromISO(String(value || "")).setZone("America/Sao_Paulo");
+  return dt.isValid ? dt.toFormat("HH:mm") : "--:--";
+}
+
+function getIsoMs(value) {
+  const ms = DateTime.fromISO(String(value || "")).toMillis();
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function clipIntervalMs(startValue, endValue, rangeStartMs, rangeEndMs, fallbackEndMs = Date.now()) {
+  const startMs = getIsoMs(startValue);
+  if (!Number.isFinite(startMs)) return null;
+  const rawEndMs = endValue ? getIsoMs(endValue) : fallbackEndMs;
+  const endMs = Number.isFinite(rawEndMs) ? rawEndMs : fallbackEndMs;
+  const clippedStart = Math.max(rangeStartMs, startMs);
+  const clippedEnd = Math.min(rangeEndMs, endMs);
+  if (clippedEnd <= clippedStart) return null;
+  return { startMs: clippedStart, endMs: clippedEnd };
+}
+
 function getElapsedSeconds(dateLike, fallbackSeconds = 0) {
   if (!dateLike) return fallbackSeconds;
   const started = DateTime.fromISO(String(dateLike));
@@ -436,6 +457,33 @@ function buildHourlyStopSeries(stops, rangeStart, rangeEnd) {
   return seconds;
 }
 
+function buildMachineTimelineSegments(stops, machine, rangeStartMs, rangeEndMs) {
+  const machineKey = String(machine || "").trim().toUpperCase();
+  const stopIntervals = (Array.isArray(stops) ? stops : [])
+    .filter((stop) => String(stop?.machine_id || "").trim().toUpperCase() === machineKey)
+    .map((stop) => {
+      const interval = clipIntervalMs(stop?.started_at, stop?.resumed_at, rangeStartMs, rangeEndMs);
+      if (!interval) return null;
+      return { ...interval, type: "stop", reason: String(stop?.reason || "Parada").trim() || "Parada" };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.startMs - b.startMs);
+
+  const segments = [];
+  let cursor = rangeStartMs;
+  stopIntervals.forEach((stop) => {
+    if (stop.startMs > cursor) segments.push({ type: "production", startMs: cursor, endMs: stop.startMs });
+    segments.push(stop);
+    cursor = Math.max(cursor, stop.endMs);
+  });
+  if (cursor < rangeEndMs) segments.push({ type: "production", startMs: cursor, endMs: rangeEndMs });
+  return segments;
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, source, machineIds, itemTechByCode }) {
   const safeLabels = Array.isArray(labels) ? labels : [];
   const periodStartMs = periodStart.toMillis();
@@ -520,8 +568,10 @@ export default function Painel({
   const [sensorRuntimeByMachine, setSensorRuntimeByMachine] = useState({});
   const machineMetaByIdRef = useRef({});
   const [barTooltip, setBarTooltip] = useState(null);
-  const [chartZoom, setChartZoom] = useState(null);
-  const [chartDrag, setChartDrag] = useState(null);
+  const [selectedProductionBucketId, setSelectedProductionBucketId] = useState(null);
+  const [hourlyCycleTooltip, setHourlyCycleTooltip] = useState(null);
+  const [hourlyMachineFilter, setHourlyMachineFilter] = useState("__NONE__");
+  const preserveHourlyMachineOnBucketChangeRef = useRef(false);
   const [selectedMachineId, setSelectedMachineId] = useState(null);
   const [cavitiesModalMachineId, setCavitiesModalMachineId] = useState(null);
   const [cavitiesInput, setCavitiesInput] = useState("");
@@ -544,12 +594,17 @@ export default function Painel({
     trendGoal: Array(25).fill(0),
     trendRealPieces: Array(25).fill(0),
     trendGoalPieces: Array(25).fill(0),
+    trendStopSeconds: Array(24).fill(0),
     shiftOutput: ACTIVE_TURNOS.map((turno) => ({ ...turno, boxes: 0, pieces: 0, pulses: 0, active: false })),
     scrapPieces: 0,
     scrapPct: 0,
     scrapWeightKg: 0,
     scrapReasons: [],
     ongoingOrders: [],
+    productionEvents: [],
+    stopEvents: [],
+    scrapEvents: [],
+    operatorEvents: [],
     periodLabel: "Hoje",
     periodStartIso: null,
     periodEndIso: null,
@@ -867,7 +922,7 @@ export default function Painel({
 
       let scansQuery = supabase
         .from("production_scans")
-        .select("id, created_at, machine_id, order_id, scanned_box, qty_pieces, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+        .select("id, created_at, machine_id, order_id, scanned_box, qty_pieces, op_code, code, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_by, restarted_by)")
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
@@ -889,11 +944,18 @@ export default function Painel({
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
+      let operatorQuery = supabase
+        .from("shift_responsibles")
+        .select("id, machine_id, shift, operator, responsible, responsavel, effective_date, created_at")
+        .lte("created_at", endIso)
+        .gte("created_at", period.start.minus({ days: 1 }).toUTC().toISO());
+
       if (clientId) {
         scansQuery = scansQuery.eq("company_id", clientId);
         stopsQuery = stopsQuery.eq("company_id", clientId);
         lowEffQuery = lowEffQuery.eq("company_id", clientId);
         scrapQuery = scrapQuery.eq("company_id", clientId);
+        operatorQuery = operatorQuery.eq("company_id", clientId);
       }
 
       if (filteredMachineIds.length > 0 && filteredMachineIds.length < machineIds.length) {
@@ -901,14 +963,15 @@ export default function Painel({
         stopsQuery = stopsQuery.in("machine_id", filteredMachineIds);
         lowEffQuery = lowEffQuery.in("machine_id", filteredMachineIds);
         scrapQuery = scrapQuery.in("machine_id", filteredMachineIds);
+        operatorQuery = operatorQuery.in("machine_id", filteredMachineIds);
       }
 
-      const [scansRes, entriesRes, sensorCyclesRes, stopsRes, lowEffRes, scrapRes] = await Promise.all([
+      const [scansRes, entriesRes, sensorCyclesRes, stopsRes, lowEffRes, scrapRes, operatorRes] = await Promise.all([
         scansQuery,
         fetchAllPages(() => {
           let query = supabase
             .from("injection_production_entries")
-            .select("id, created_at, updated_at, sensor_last_pulse_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+            .select("id, created_at, updated_at, sensor_last_pulse_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_by, restarted_by)")
             .gte("created_at", startIso)
             .lte("created_at", endIso);
 
@@ -921,7 +984,7 @@ export default function Painel({
         fetchAllPages(() => {
           let query = supabase
             .from("machine_sensor_order_cycles")
-            .select("id, machine_id, order_id, produced_quantity, pulse_count, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id)")
+            .select("id, machine_id, order_id, produced_quantity, pulse_count, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_by, restarted_by)")
             .lte("first_pulse_at", endIso)
             .gte("last_pulse_at", startIso);
 
@@ -934,6 +997,7 @@ export default function Painel({
         stopsQuery,
         lowEffQuery,
         scrapQuery,
+        operatorQuery,
       ]);
       if (cancelled) return;
 
@@ -945,6 +1009,15 @@ export default function Painel({
       const stops = (stopsRes?.data || []).filter((row) => matchesShiftFilter(row?.started_at, shiftFilter));
       const lowEff = (lowEffRes?.data || []).filter((row) => matchesShiftFilter(row?.started_at, shiftFilter));
       const scraps = (scrapRes?.data || []).filter((row) => matchesShiftFilter(row?.created_at, shiftFilter));
+      const operatorEvents = (operatorRes?.data || [])
+        .map((row) => ({
+          id: row?.id,
+          machine_id: row?.machine_id,
+          shift: row?.shift,
+          operator: String(row?.operator || row?.responsible || row?.responsavel || "").trim(),
+          created_at: row?.created_at,
+        }))
+        .filter((row) => row.operator && row.created_at);
 
       const producedBoxesFromScans = scans.length;
       const producedPiecesFromScans = scans.reduce((acc, scan) => acc + Number(scan?.qty_pieces || 0), 0);
@@ -1159,6 +1232,9 @@ export default function Painel({
         }));
 
       const trendBase = buildTrendSeries(scans, entriesForTimeline, periodFilter, period.start, period.end);
+      const trendStopSeconds = isDailyTrendPeriod(periodFilter)
+        ? []
+        : buildHourlyStopSeries(stops, period.start, period.end);
       const shiftOutput = buildShiftOutput(scans, entriesForTimeline);
       const dynamicGoal = buildDynamicGoalSeries({
         periodKey: periodFilter,
@@ -1171,6 +1247,32 @@ export default function Painel({
       });
       const trendGoal = dynamicGoal.goalBoxes;
       const trendGoalPieces = dynamicGoal.goalPieces;
+      const productionEvents = [
+        ...scans.map((row) => ({
+          id: row?.id,
+          created_at: row?.created_at,
+          machine_id: row?.machine_id,
+          order_id: row?.order_id,
+          orderCode: row?.order?.code || row?.op_code || "-",
+          product: row?.order?.product || row?.code || "-",
+          pieces: Number(row?.qty_pieces || 0),
+          cycles: 1,
+          operator: row?.order?.restarted_by || row?.order?.started_by || "",
+          source: "bipagem",
+        })),
+        ...entriesForTimeline.map((row) => ({
+          id: row?.id,
+          created_at: getEffectiveProductionTimestamp(row),
+          machine_id: row?.machine_id,
+          order_id: row?.order_id,
+          orderCode: row?.order?.code || "-",
+          product: row?.order?.product || row?.product || "-",
+          pieces: Number(row?.good_qty || 0),
+          cycles: Number(row?.pulse_count || 0) || 1,
+          operator: row?.order?.restarted_by || row?.order?.started_by || "",
+          source: String(row?.source || "sensor"),
+        })),
+      ];
 
       setPeriodData({
         producedTotal,
@@ -1190,12 +1292,17 @@ export default function Painel({
         trendGoal,
         trendRealPieces: trendBase.trendPieces,
         trendGoalPieces,
+        trendStopSeconds,
         shiftOutput,
         scrapPieces,
         scrapPct,
         scrapWeightKg,
         scrapReasons,
         ongoingOrders,
+        productionEvents,
+        stopEvents: stops,
+        scrapEvents: scraps,
+        operatorEvents,
         periodLabel: period.label,
         periodStartIso: period.start.toISO(),
         periodEndIso: period.end.toISO(),
@@ -1550,6 +1657,7 @@ export default function Painel({
       trendGoal: periodData.trendGoal || [],
       trendRealPieces: periodData.trendRealPieces || [],
       trendGoalPieces: periodData.trendGoalPieces || [],
+      trendStopSeconds: periodData.trendStopSeconds || [],
       shiftOutput: periodData.shiftOutput || [],
       scrapPieces: Number(periodData.scrapPieces || 0),
       scrapPct: Number(periodData.scrapPct || 0),
@@ -1879,42 +1987,52 @@ export default function Painel({
   const productionBuckets = useMemo(() => {
     const realValues = overview.trendRealPieces || [];
     const goalValues = overview.trendGoalPieces || [];
+    const stopValues = overview.trendStopSeconds || [];
+    const showStopStack = !isDailyTrendPeriod(periodFilter) && machineFilter !== "__ALL__";
     const labels = overview.trendLabels || [];
     const rawBuckets = labels.map((label, index) => {
       const production = getBucketDelta(realValues, index);
       const goal = getBucketDelta(goalValues, index);
+      const stopSeconds = showStopStack && index > 0 ? Number(stopValues[index - 1] || 0) : 0;
+      const stopLoss = goal > 0 ? (stopSeconds / 3600) * goal : 0;
       const efficiency = goal > 0 ? (production / goal) * 100 : 0;
       const previousLabel = labels[index - 1];
-      const displayLabel = periodFilter === "today" && previousLabel
+      const displayLabel = !isDailyTrendPeriod(periodFilter) && previousLabel
         ? `${previousLabel} às ${label}`
         : label;
+      const periodStart = periodData.periodStartIso ? DateTime.fromISO(String(periodData.periodStartIso)).setZone("America/Sao_Paulo") : null;
+      const bucketStart = periodStart?.isValid && !isDailyTrendPeriod(periodFilter)
+        ? periodStart.plus({ hours: Math.max(0, index - 1) })
+        : null;
+      const bucketEnd = periodStart?.isValid && !isDailyTrendPeriod(periodFilter)
+        ? periodStart.plus({ hours: index })
+        : null;
       return {
         id: `${label}-${index}`,
+        bucketIndex: index,
         label: displayLabel,
         production,
         goal,
+        stopSeconds,
+        stopLoss,
         efficiency,
+        startIso: bucketStart?.isValid ? bucketStart.toISO() : null,
+        endIso: bucketEnd?.isValid ? bucketEnd.toISO() : null,
       };
     });
-    const buckets = periodFilter === "today" ? rawBuckets.slice(1) : rawBuckets;
-    const maxValue = Math.max(1, ...buckets.map((bucket) => Math.max(bucket.production, bucket.goal)));
+    const buckets = !isDailyTrendPeriod(periodFilter) ? rawBuckets.slice(1) : rawBuckets;
+    const maxValue = Math.max(1, ...buckets.map((bucket) => Math.max(bucket.production + bucket.stopLoss, bucket.goal)));
     return buckets.map((bucket) => ({
       ...bucket,
       height: Math.max(12, Math.round((bucket.production / maxValue) * 100)),
+      stopHeight: Math.max(bucket.stopLoss > 0 ? 3 : 0, Math.round((bucket.stopLoss / maxValue) * 100)),
       goalHeight: Math.max(0, Math.round((bucket.goal / maxValue) * 100)),
     }));
-  }, [overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, periodFilter]);
+  }, [machineFilter, overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, overview.trendStopSeconds, periodFilter, periodData.periodStartIso]);
 
   const scopedProductionBuckets = useMemo(() => {
-    let buckets = productionBuckets;
-    if (chartZoom && buckets.length > 1) {
-      const start = Math.max(0, Math.min(chartZoom.start, buckets.length - 1));
-      const end = Math.max(start, Math.min(chartZoom.end, buckets.length - 1));
-      buckets = buckets.slice(start, end + 1);
-    }
-
-    return buckets.length ? buckets : productionBuckets;
-  }, [chartZoom, productionBuckets]);
+    return productionBuckets.length ? productionBuckets : [];
+  }, [productionBuckets]);
 
   const productionChart = useMemo(() => {
     const width = 1400;
@@ -1925,7 +2043,7 @@ export default function Painel({
     const left = 82;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
-    const maxValue = Math.max(1, ...scopedProductionBuckets.map((bucket) => Math.max(bucket.production, bucket.goal)));
+    const maxValue = Math.max(1, ...scopedProductionBuckets.map((bucket) => Math.max(bucket.production + bucket.stopLoss, bucket.goal)));
     const bucketWidth = scopedProductionBuckets.length > 0 ? plotWidth / scopedProductionBuckets.length : plotWidth;
     const barWidth = Math.max(8, Math.min(34, bucketWidth * 0.48));
     const scaleX = (index) => left + (bucketWidth * index) + (bucketWidth / 2);
@@ -1935,13 +2053,55 @@ export default function Painel({
       index,
       x: scaleX(index),
       yProduction: scaleY(bucket.production),
+      yStack: scaleY(bucket.production + bucket.stopLoss),
       yGoal: scaleY(bucket.goal),
       barX: scaleX(index) - (barWidth / 2),
       barY: scaleY(bucket.production),
       barWidth,
       barHeight: Math.max(bucket.production > 0 ? 3 : 1, (Number(bucket.production || 0) / maxValue) * plotHeight),
+      stopBarY: scaleY(bucket.production + bucket.stopLoss),
+      stopBarHeight: bucket.stopLoss > 0 ? Math.max(3, (Number(bucket.stopLoss || 0) / maxValue) * plotHeight) : 0,
       status: bucket.efficiency >= 100 ? "above" : bucket.efficiency >= 90 ? "near" : "below",
     }));
+    const roundedRectPath = ({ x, y, width, height, radius = 7, roundTop = true, roundBottom = true }) => {
+      const safeHeight = Math.max(0, Number(height || 0));
+      const safeWidth = Math.max(0, Number(width || 0));
+      const r = Math.min(Number(radius || 0), safeWidth / 2, safeHeight / 2);
+      if (!(safeHeight > 0 && safeWidth > 0)) return "";
+      const top = roundTop ? r : 0;
+      const bottom = roundBottom ? r : 0;
+      return [
+        `M ${x + top} ${y}`,
+        `H ${x + safeWidth - top}`,
+        top ? `Q ${x + safeWidth} ${y} ${x + safeWidth} ${y + top}` : `L ${x + safeWidth} ${y}`,
+        `V ${y + safeHeight - bottom}`,
+        bottom ? `Q ${x + safeWidth} ${y + safeHeight} ${x + safeWidth - bottom} ${y + safeHeight}` : `L ${x + safeWidth} ${y + safeHeight}`,
+        `H ${x + bottom}`,
+        bottom ? `Q ${x} ${y + safeHeight} ${x} ${y + safeHeight - bottom}` : `L ${x} ${y + safeHeight}`,
+        `V ${y + top}`,
+        top ? `Q ${x} ${y} ${x + top} ${y}` : `L ${x} ${y}`,
+        "Z",
+      ].join(" ");
+    };
+    points.forEach((point) => {
+      const isStacked = point.stopBarHeight > 0;
+      point.productionPath = roundedRectPath({
+        x: point.barX,
+        y: point.barY,
+        width: point.barWidth,
+        height: point.barHeight,
+        roundTop: !isStacked,
+        roundBottom: true,
+      });
+      point.stopPath = isStacked ? roundedRectPath({
+        x: point.barX,
+        y: point.stopBarY,
+        width: point.barWidth,
+        height: point.stopBarHeight,
+        roundTop: true,
+        roundBottom: false,
+      }) : "";
+    });
     const goalLine = points.map((point) => `${point.x},${point.yGoal}`).join(" ");
     const guideValues = [0.25, 0.5, 0.75, 1].map((ratio) => ({
       y: top + plotHeight - (plotHeight * ratio),
@@ -1965,11 +2125,6 @@ export default function Painel({
     );
   }
 
-  function getProductionChartPlotPercent(event) {
-    const chartX = getProductionChartPointerX(event);
-    return ((chartX - productionChart.left) / Math.max(1, productionChart.plotWidth)) * 100;
-  }
-
   function handleProductionChartPointer(event) {
     if (!productionChart.points.length) return;
     const chartX = getProductionChartPointerX(event);
@@ -1981,33 +2136,236 @@ export default function Painel({
     setBarTooltip({ ...point, cursorPercent: (point.x / productionChart.width) * 100 });
   }
 
-  function handleProductionChartPointerDown(event) {
-    if (scopedProductionBuckets.length < 3) return;
-    const startPercent = Math.min(100, Math.max(0, getProductionChartPlotPercent(event)));
-    setChartDrag({ startPercent, endPercent: startPercent });
-  }
-
   function handleProductionChartDrag(event) {
     handleProductionChartPointer(event);
-    if (!chartDrag) return;
-    const endPercent = Math.min(100, Math.max(0, getProductionChartPlotPercent(event)));
-    setChartDrag((prev) => prev ? { ...prev, endPercent } : prev);
   }
 
-  function handleProductionChartPointerUp() {
-    if (!chartDrag || scopedProductionBuckets.length < 3) {
-      setChartDrag(null);
+  const selectedProductionBucket = useMemo(() => {
+    if (!selectedProductionBucketId) return null;
+    return productionBuckets.find((bucket) => bucket.id === selectedProductionBucketId) || null;
+  }, [productionBuckets, selectedProductionBucketId]);
+
+  const selectedProductionBucketIndex = useMemo(() => {
+    if (!selectedProductionBucketId) return -1;
+    return productionBuckets.findIndex((bucket) => bucket.id === selectedProductionBucketId);
+  }, [productionBuckets, selectedProductionBucketId]);
+
+  useEffect(() => {
+    if (preserveHourlyMachineOnBucketChangeRef.current) {
+      preserveHourlyMachineOnBucketChangeRef.current = false;
+    } else {
+      setHourlyMachineFilter("__NONE__");
+    }
+    setHourlyCycleTooltip(null);
+  }, [selectedProductionBucketId]);
+
+  function navigateHourlyBucket(direction) {
+    if (selectedProductionBucketIndex < 0) return;
+    const nextIndex = selectedProductionBucketIndex + direction;
+    if (nextIndex < 0 || nextIndex >= productionBuckets.length) return;
+    preserveHourlyMachineOnBucketChangeRef.current = true;
+    setHourlyCycleTooltip(null);
+    setSelectedProductionBucketId(productionBuckets[nextIndex].id);
+  }
+
+  const hourlyProductionReport = useMemo(() => {
+    if (!selectedProductionBucket?.startIso || !selectedProductionBucket?.endIso) return null;
+    const start = DateTime.fromISO(String(selectedProductionBucket.startIso)).setZone("America/Sao_Paulo");
+    const end = DateTime.fromISO(String(selectedProductionBucket.endIso)).setZone("America/Sao_Paulo");
+    if (!start.isValid || !end.isValid || end <= start) return null;
+
+    const startMs = start.toMillis();
+    const endMs = end.toMillis();
+    const productionEvents = (periodData.productionEvents || [])
+      .filter((row) => {
+        const ms = getIsoMs(row?.created_at);
+        return Number.isFinite(ms) && ms >= startMs && ms < endMs;
+      })
+      .sort((a, b) => getIsoMs(a.created_at) - getIsoMs(b.created_at));
+    const stopEvents = (periodData.stopEvents || [])
+      .map((stop) => {
+        const interval = clipIntervalMs(stop?.started_at, stop?.resumed_at, startMs, endMs);
+        if (!interval) return null;
+        return { ...stop, ...interval };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.startMs - b.startMs);
+    const scrapEvents = (periodData.scrapEvents || [])
+      .filter((row) => {
+        const ms = getIsoMs(row?.created_at);
+        return Number.isFinite(ms) && ms >= startMs && ms < endMs;
+      });
+    const machines = uniqueNonEmpty([
+      ...productionEvents.map((row) => row.machine_id),
+      ...stopEvents.map((row) => row.machine_id),
+    ]);
+    const selectedHourlyMachine = machines.includes(hourlyMachineFilter) ? hourlyMachineFilter : "__NONE__";
+    const chartMachines = selectedHourlyMachine === "__NONE__" ? [] : [selectedHourlyMachine];
+    const totalProduction = productionEvents.reduce((acc, row) => acc + Number(row?.pieces || 0), 0);
+    const totalCycles = productionEvents.reduce((acc, row) => acc + Number(row?.cycles || 0), 0);
+    const totalScrap = scrapEvents.reduce((acc, row) => acc + Number(row?.qty || 0), 0);
+    const stopSeconds = stopEvents.reduce((acc, stop) => acc + Math.max(0, (stop.endMs - stop.startMs) / 1000), 0);
+    const goal = Number(selectedProductionBucket.goal || 0);
+    const goalPerBin = goal / 12;
+    const chartWidth = 720;
+    const chartHeight = 180;
+    const chartTop = 16;
+    const chartLeft = 38;
+    const chartRight = 14;
+    const plotHeight = 136;
+    const plotWidth = chartWidth - chartLeft - chartRight;
+    const stopOverlapsInterval = (machine, fromMs, toMs) => stopEvents.some((stop) => {
+      if (String(stop?.machine_id || "").trim().toUpperCase() !== String(machine || "").trim().toUpperCase()) return false;
+      return Math.min(toMs, stop.endMs) > Math.max(fromMs, stop.startMs);
+    });
+    const targetCycleValues = [];
+    const cyclePointsByMachine = chartMachines.map((machine) => {
+      const rows = productionEvents
+        .filter((row) => String(row?.machine_id || "").trim().toUpperCase() === machine)
+        .map((row) => ({ ...row, ms: getIsoMs(row?.created_at) }))
+        .filter((row) => Number.isFinite(row.ms))
+        .sort((a, b) => a.ms - b.ms);
+      let previous = null;
+      return rows.map((row) => {
+        const itemCode = extractItemCodeFromOrderProduct(row?.product);
+        const targetCycleSeconds = itemCode ? Number(itemTechByCode?.[itemCode]?.cycleSeconds || 0) : 0;
+        if (targetCycleSeconds > 0) targetCycleValues.push(targetCycleSeconds);
+        const cycles = Math.max(1, Number(row?.cycles || 1));
+        const fromMs = previous?.ms;
+        previous = row;
+        if (!Number.isFinite(fromMs) || row.ms <= fromMs || stopOverlapsInterval(machine, fromMs, row.ms)) return null;
+        const cycleSeconds = (row.ms - fromMs) / 1000 / cycles;
+        if (!(cycleSeconds > 0)) return null;
+        return {
+          id: `${row.id || row.order_id}-${row.ms}`,
+          machine,
+          orderCode: row.orderCode || "-",
+          product: row.product || "-",
+          time: DateTime.fromMillis(row.ms).setZone("America/Sao_Paulo").toISO(),
+          ms: row.ms,
+          pieces: Number(row?.pieces || 0),
+          cycles,
+          cycleSeconds,
+          targetCycleSeconds,
+        };
+      }).filter(Boolean);
+    });
+    const cyclePoints = cyclePointsByMachine.flat();
+    const targetCycleSeconds = targetCycleValues.length
+      ? targetCycleValues.reduce((acc, value) => acc + value, 0) / targetCycleValues.length
+      : 0;
+    const maxCycleValue = Math.max(1, targetCycleSeconds, ...cyclePoints.map((point) => Number(point.cycleSeconds || 0))) * 1.15;
+    const scaleX = (ms) => chartLeft + ((ms - startMs) / Math.max(1, endMs - startMs)) * plotWidth;
+    const scaleY = (value) => chartTop + plotHeight - (Number(value || 0) / maxCycleValue) * plotHeight;
+    const baselineY = chartTop + plotHeight;
+    const cycleSegments = cyclePointsByMachine.flatMap((points, machineIndex) => points.slice(1).map((point, index) => {
+      const previous = points[index];
+      const x1 = scaleX(previous.ms);
+      const y1 = scaleY(previous.cycleSeconds);
+      const x2 = scaleX(point.ms);
+      const y2 = scaleY(point.cycleSeconds);
+      const line = `M ${x1} ${y1} L ${x2} ${y2}`;
+      const area = `M ${x1} ${baselineY} L ${x1} ${y1} L ${x2} ${y2} L ${x2} ${baselineY} Z`;
+      const isOver = Number(point.targetCycleSeconds || 0) > 0 && Number(point.cycleSeconds || 0) > Number(point.targetCycleSeconds || 0);
+      return {
+        id: `cycle-segment-${machineIndex}-${index}`,
+        path: line,
+        area,
+        tone: isOver ? "over" : "ok",
+      };
+    }));
+    const cyclePointDots = cyclePoints.map((point) => ({
+      ...point,
+      x: scaleX(point.ms),
+      y: scaleY(point.cycleSeconds),
+    }));
+    const targetCycleLine = targetCycleSeconds > 0
+      ? `${chartLeft},${scaleY(targetCycleSeconds)} ${chartLeft + plotWidth},${scaleY(targetCycleSeconds)}`
+      : "";
+    const cycleGuides = [0.33, 0.66, 1].map((ratio) => ({
+      y: scaleY(maxCycleValue * ratio),
+      label: maxCycleValue * ratio,
+    }));
+    const stopBands = stopEvents.map((stop) => ({
+      id: stop.id,
+      x: chartLeft + ((stop.startMs - startMs) / Math.max(1, endMs - startMs)) * plotWidth,
+      width: Math.max(2, ((stop.endMs - stop.startMs) / Math.max(1, endMs - startMs)) * plotWidth),
+    }));
+    const timelineRows = machines.map((machine) => ({
+      machine,
+      production: productionEvents.filter((row) => String(row?.machine_id || "").trim().toUpperCase() === machine).reduce((acc, row) => acc + Number(row?.pieces || 0), 0),
+      segments: buildMachineTimelineSegments(stopEvents, machine, startMs, endMs).map((segment) => ({
+        ...segment,
+        left: ((segment.startMs - startMs) / Math.max(1, endMs - startMs)) * 100,
+        width: ((segment.endMs - segment.startMs) / Math.max(1, endMs - startMs)) * 100,
+      })),
+    }));
+    const scrapByReason = Object.values(scrapEvents.reduce((acc, row) => {
+      const reason = String(row?.reason || "Outro").trim() || "Outro";
+      if (!acc[reason]) acc[reason] = { reason, qty: 0, count: 0 };
+      acc[reason].qty += Number(row?.qty || 0);
+      acc[reason].count += 1;
+      return acc;
+    }, {})).sort((a, b) => Number(b.qty || 0) - Number(a.qty || 0));
+    const operatorRows = (periodData.operatorEvents || [])
+      .map((row) => ({ ...row, ms: getIsoMs(row?.created_at) }))
+      .filter((row) => Number.isFinite(row.ms))
+      .sort((a, b) => a.ms - b.ms);
+    const operatorTimeline = machines.flatMap((machine) => {
+      const machineEvents = operatorRows.filter((row) => String(row?.machine_id || "").trim().toUpperCase() === machine);
+      const currentAtStart = [...machineEvents].reverse().find((row) => row.ms <= startMs);
+      const changes = machineEvents.filter((row) => row.ms > startMs && row.ms < endMs);
+      const fallbackOperators = uniqueNonEmpty(productionEvents
+        .filter((row) => String(row?.machine_id || "").trim().toUpperCase() === machine)
+        .map((row) => row.operator));
+      const rows = [];
+      if (currentAtStart) rows.push({ machine, operator: currentAtStart.operator, time: start.toISO(), type: "inicio" });
+      changes.forEach((row) => rows.push({ machine, operator: row.operator, time: row.created_at, type: "troca" }));
+      if (!rows.length) fallbackOperators.forEach((operator) => rows.push({ machine, operator, time: start.toISO(), type: "ordem" }));
+      return rows;
+    });
+
+    return {
+      label: `${start.toFormat("HH:mm")} às ${end.toFormat("HH:mm")}`,
+      totalProduction,
+      totalCycles,
+      totalScrap,
+      goal,
+      efficiency: goal > 0 ? (totalProduction / goal) * 100 : 0,
+      stopSeconds,
+      stopEvents,
+      scrapByReason,
+      timelineRows,
+      operatorTimeline,
+      machines,
+      selectedHourlyMachine,
+      bins: Array.from({ length: 12 }, (_, index) => ({
+        id: `${selectedProductionBucket.id}-bin-${index}`,
+        label: DateTime.fromMillis(startMs + index * 5 * 60 * 1000).setZone("America/Sao_Paulo").toFormat("HH:mm"),
+      })),
+      chart: { width: chartWidth, height: chartHeight, cycleSegments, cyclePointDots, targetCycleLine, cycleGuides, stopBands },
+    };
+  }, [hourlyMachineFilter, itemTechByCode, periodData.operatorEvents, periodData.productionEvents, periodData.scrapEvents, periodData.stopEvents, selectedProductionBucket]);
+
+  function handleHourlyCyclePointer(event) {
+    const points = hourlyProductionReport?.chart?.cyclePointDots || [];
+    if (!points.length) {
+      setHourlyCycleTooltip(null);
       return;
     }
-    const minPercent = Math.min(chartDrag.startPercent, chartDrag.endPercent);
-    const maxPercent = Math.max(chartDrag.startPercent, chartDrag.endPercent);
-    if (maxPercent - minPercent >= 8) {
-      const sourceLength = scopedProductionBuckets.length;
-      const start = Math.max(0, Math.floor((minPercent / 100) * (sourceLength - 1)));
-      const end = Math.min(sourceLength - 1, Math.ceil((maxPercent / 100) * (sourceLength - 1)));
-      if (end > start) setChartZoom({ start, end });
-    }
-    setChartDrag(null);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
+    const chartX = ((clientX - rect.left) / Math.max(1, rect.width)) * hourlyProductionReport.chart.width;
+    const nearest = points.reduce((best, point) => {
+      if (!best) return point;
+      return Math.abs(point.x - chartX) < Math.abs(best.x - chartX) ? point : best;
+    }, null);
+    if (!nearest) return;
+    setHourlyCycleTooltip({
+      ...nearest,
+      leftPercent: (nearest.x / hourlyProductionReport.chart.width) * 100,
+      topPercent: (nearest.y / hourlyProductionReport.chart.height) * 100,
+    });
   }
 
   const selectedMachine = useMemo(
@@ -2042,7 +2400,7 @@ export default function Painel({
           <select
             className="monitor-period-select"
             value={periodFilter}
-            onChange={(event) => { setPeriodFilter(event.target.value); setChartZoom(null); }}
+            onChange={(event) => { setPeriodFilter(event.target.value); setSelectedProductionBucketId(null); }}
             aria-label="Filtrar período do dashboard"
           >
             <option value="today">Hoje</option>
@@ -2053,14 +2411,14 @@ export default function Painel({
           </select>
           {periodFilter === "custom" && (
             <>
-              <input className="monitor-date-input" type="date" value={customPeriodStart} onChange={(event) => { setCustomPeriodStart(event.target.value); setChartZoom(null); }} aria-label="Data inicial" />
-              <input className="monitor-date-input" type="date" value={customPeriodEnd} onChange={(event) => { setCustomPeriodEnd(event.target.value); setChartZoom(null); }} aria-label="Data final" />
+              <input className="monitor-date-input" type="date" value={customPeriodStart} onChange={(event) => { setCustomPeriodStart(event.target.value); setSelectedProductionBucketId(null); }} aria-label="Data inicial" />
+              <input className="monitor-date-input" type="date" value={customPeriodEnd} onChange={(event) => { setCustomPeriodEnd(event.target.value); setSelectedProductionBucketId(null); }} aria-label="Data final" />
             </>
           )}
           <select
             className="monitor-filter-select"
             value={sectorFilter}
-            onChange={(event) => { setSectorFilter(event.target.value); setMachineFilter("__ALL__"); setChartZoom(null); }}
+            onChange={(event) => { setSectorFilter(event.target.value); setMachineFilter("__ALL__"); setSelectedProductionBucketId(null); }}
             aria-label="Filtrar setor do dashboard"
           >
             <option value="__ALL__">Todos os setores</option>
@@ -2071,7 +2429,7 @@ export default function Painel({
           <select
             className="monitor-filter-select"
             value={machineFilter}
-            onChange={(event) => { setMachineFilter(event.target.value); setChartZoom(null); }}
+            onChange={(event) => { setMachineFilter(event.target.value); setSelectedProductionBucketId(null); }}
             aria-label="Filtrar máquina do dashboard"
           >
             <option value="__ALL__">Todas as máquinas</option>
@@ -2082,7 +2440,7 @@ export default function Painel({
           <select
             className="monitor-filter-select"
             value={shiftFilter}
-            onChange={(event) => { setShiftFilter(event.target.value); setChartZoom(null); }}
+            onChange={(event) => { setShiftFilter(event.target.value); setSelectedProductionBucketId(null); }}
             aria-label="Filtrar turno do dashboard"
           >
             <option value="__ALL__">Todos os turnos</option>
@@ -2102,7 +2460,7 @@ export default function Painel({
         <article className="monitor-kpi-card">
           <span>PRODUÇÃO</span>
           <strong>{formatCompactNumber(liveKpis.production)}</strong>
-          <small className="positive">{overview.periodLabel} • dados reais</small>
+          <small className="positive">{overview.periodLabel}</small>
         </article>
         <article className="monitor-kpi-card is-emphasis">
           <span>REFUGO</span>
@@ -2291,16 +2649,147 @@ export default function Painel({
           <header className="monitor-section-header">
             <h3>{isDailyTrendPeriod(periodFilter) ? "Produção por Dia x Meta" : "Produção por Hora x Meta"}</h3>
             <div className="production-chart-actions">
-              {chartZoom && <button type="button" onClick={() => setChartZoom(null)}>Reset zoom</button>}
+              {selectedProductionBucket && <button type="button" onClick={() => { setSelectedProductionBucketId(null); setHourlyMachineFilter("__NONE__"); }}>Voltar ao gráfico</button>}
               <span>{overview.periodLabel}</span>
             </div>
           </header>
           <div className="production-chart-meta">
-            <span><i className="legend-real" />Produção</span>
-            <span><i className="legend-goal" />Meta</span>
-            <strong>{formatCompactNumber(scopedProductionBuckets.reduce((acc, bar) => acc + bar.production, 0))} peças</strong>
+            <span><i className="legend-real" />{hourlyProductionReport ? "Ciclo registrado" : "Produção"}</span>
+            <span><i className="legend-goal" />{hourlyProductionReport ? "Ciclo padrão" : "Meta"}</span>
+            <span><i className="legend-stop" />Parada</span>
+            <strong>{hourlyProductionReport ? `${formatCompactNumber(hourlyProductionReport.totalCycles)} ciclos` : `${formatCompactNumber(scopedProductionBuckets.reduce((acc, bar) => acc + bar.production, 0))} peças`}</strong>
           </div>
           <div className="production-chart-frame">
+            {hourlyProductionReport ? (
+              <div className="hourly-production-report">
+                <div className="hourly-report-head">
+                  <div>
+                    <span>Relatório horário</span>
+                    <strong>{hourlyProductionReport.label}</strong>
+                  </div>
+                  <label className="hourly-machine-filter">
+                    <span>Máquina do gráfico</span>
+                    <div className="hourly-machine-nav">
+                      <button type="button" onClick={() => navigateHourlyBucket(-1)} disabled={selectedProductionBucketIndex <= 0} aria-label="Hora anterior">‹</button>
+                      <select value={hourlyProductionReport.selectedHourlyMachine} onChange={(event) => { setHourlyMachineFilter(event.target.value); setHourlyCycleTooltip(null); }}>
+                        <option value="__NONE__">Máquina</option>
+                        {hourlyProductionReport.machines.map((machine) => (
+                          <option value={machine} key={machine}>{machine}</option>
+                        ))}
+                      </select>
+                      <button type="button" onClick={() => navigateHourlyBucket(1)} disabled={selectedProductionBucketIndex < 0 || selectedProductionBucketIndex >= productionBuckets.length - 1} aria-label="Próxima hora">›</button>
+                    </div>
+                  </label>
+                  <div className="hourly-report-kpis">
+                    <p><b>Produção</b><em>{formatCompactNumber(hourlyProductionReport.totalProduction)} pç</em></p>
+                    <p><b>Meta</b><em>{formatCompactNumber(hourlyProductionReport.goal)} pç</em></p>
+                    <p><b>Eficiência</b><em>{formatPercent(hourlyProductionReport.efficiency, 0)}</em></p>
+                    <p><b>Refugo</b><em>{formatCompactNumber(hourlyProductionReport.totalScrap)} pç</em></p>
+                    <p><b>Parada</b><em>{formatDurationShort(hourlyProductionReport.stopSeconds)}</em></p>
+                  </div>
+                </div>
+
+                <div className="hourly-area-wrap">
+                  {hourlyProductionReport.selectedHourlyMachine === "__NONE__" && (
+                    <div className="hourly-chart-empty">Selecione uma máquina para visualizar os ciclos.</div>
+                  )}
+                  <svg
+                    className="hourly-area-chart"
+                    viewBox={`0 0 ${hourlyProductionReport.chart.width} ${hourlyProductionReport.chart.height}`}
+                    preserveAspectRatio="none"
+                    aria-label={`Tempo de ciclo das ${hourlyProductionReport.label}`}
+                    role="img"
+                    onMouseMove={handleHourlyCyclePointer}
+                    onPointerMove={handleHourlyCyclePointer}
+                    onTouchMove={handleHourlyCyclePointer}
+                    onMouseLeave={() => setHourlyCycleTooltip(null)}
+                    onPointerLeave={() => setHourlyCycleTooltip(null)}
+                  >
+                    <defs>
+                      <linearGradient id="hourlyAreaGradient" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor="#56dcff" stopOpacity="0.66" />
+                        <stop offset="100%" stopColor="#1d64d8" stopOpacity="0.08" />
+                      </linearGradient>
+                    </defs>
+                    {hourlyProductionReport.chart.cycleGuides.map((guide) => (
+                      <g className="hourly-cycle-guide" key={guide.y}>
+                        <line x1="38" x2={hourlyProductionReport.chart.width - 14} y1={guide.y} y2={guide.y} />
+                      </g>
+                    ))}
+                    {hourlyProductionReport.chart.stopBands.map((band) => (
+                      <rect key={band.id} className="hourly-stop-band" x={band.x} y="16" width={band.width} height="136" />
+                    ))}
+                    {hourlyProductionReport.chart.cycleSegments.map((segment) => (
+                      <path key={`${segment.id}-area`} className={`hourly-cycle-area is-${segment.tone}`} d={segment.area} />
+                    ))}
+                    {hourlyProductionReport.chart.targetCycleLine && <polyline className="hourly-goal-line" points={hourlyProductionReport.chart.targetCycleLine} />}
+                    {hourlyProductionReport.chart.cycleSegments.map((segment) => (
+                      <path key={segment.id} className={`hourly-cycle-line is-${segment.tone}`} d={segment.path} />
+                    ))}
+                    {hourlyProductionReport.chart.cyclePointDots.map((point) => (
+                      <circle key={point.id} className="hourly-cycle-dot" cx={point.x} cy={point.y} r="4.5" />
+                    ))}
+                    {hourlyProductionReport.chart.stopBands.map((band) => (
+                      <rect key={`${band.id}-cover`} className="hourly-stop-band-cover" x={band.x} y="16" width={band.width} height="136" />
+                    ))}
+                  </svg>
+                  {hourlyCycleTooltip && (
+                    <div className="hourly-cycle-tooltip" style={{ left: `${hourlyCycleTooltip.leftPercent}%`, top: `${hourlyCycleTooltip.topPercent}%` }}>
+                      <strong>{formatSeconds(hourlyCycleTooltip.cycleSeconds)}</strong>
+                    </div>
+                  )}
+                  <div className="hourly-bin-axis">
+                    {hourlyProductionReport.bins.map((bin, index) => <span key={bin.id}>{index % 2 === 0 ? bin.label : ""}</span>)}
+                  </div>
+                </div>
+
+                <div className="hourly-report-grid">
+                  <div className="hourly-section wide">
+                    <h4>Produção e paradas por máquina</h4>
+                    <div className="hourly-timeline-list">
+                      {hourlyProductionReport.timelineRows.length === 0 ? (
+                        <p className="hourly-empty">Sem produção ou parada registrada nessa hora.</p>
+                      ) : hourlyProductionReport.timelineRows.map((row) => (
+                        <div className="hourly-machine-row" key={row.machine}>
+                          <div className="hourly-machine-label"><strong>{row.machine}</strong><span>{formatCompactNumber(row.production)} pç</span></div>
+                          <div className="hourly-timeline-track">
+                            {row.segments.map((segment, index) => (
+                              <span
+                                key={`${row.machine}-${segment.type}-${index}`}
+                                className={`hourly-segment ${segment.type === "stop" ? "is-stop" : "is-production"}`}
+                                style={{ left: `${segment.left}%`, width: `${segment.width}%` }}
+                                title={`${segment.type === "stop" ? segment.reason : "Produção"}: ${formatClock(DateTime.fromMillis(segment.startMs).toISO())} às ${formatClock(DateTime.fromMillis(segment.endMs).toISO())}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="hourly-section">
+                    <h4>Operadores</h4>
+                    {hourlyProductionReport.operatorTimeline.length === 0 ? <p className="hourly-empty">Sem operador informado.</p> : hourlyProductionReport.operatorTimeline.map((row, index) => (
+                      <p key={`${row.machine}-${row.operator}-${index}`}><b>{formatClock(row.time)}</b><span>{row.machine} • {row.operator}</span><em>{row.type === "troca" ? "troca" : "início"}</em></p>
+                    ))}
+                  </div>
+
+                  <div className="hourly-section">
+                    <h4>Refugo</h4>
+                    {hourlyProductionReport.scrapByReason.length === 0 ? <p className="hourly-empty">Sem refugo nessa hora.</p> : hourlyProductionReport.scrapByReason.map((row) => (
+                      <p key={row.reason}><b>{row.reason}</b><span>{formatCompactNumber(row.qty)} pç</span><em>{row.count} reg.</em></p>
+                    ))}
+                  </div>
+
+                  <div className="hourly-section wide">
+                    <h4>Ocorrências de parada</h4>
+                    {hourlyProductionReport.stopEvents.length === 0 ? <p className="hourly-empty">Sem parada nessa hora.</p> : hourlyProductionReport.stopEvents.map((stop) => (
+                      <p key={stop.id}><b>{stop.machine_id}</b><span>{formatClock(DateTime.fromMillis(stop.startMs).toISO())} às {formatClock(DateTime.fromMillis(stop.endMs).toISO())} • {stop.reason || "Parada"}</span><em>{formatDurationShort((stop.endMs - stop.startMs) / 1000)}</em></p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
             <div
               className="production-chart-plot line-chart-plot"
               role="img"
@@ -2309,11 +2798,8 @@ export default function Painel({
               onMouseMove={handleProductionChartDrag}
               onMouseLeave={() => setBarTooltip(null)}
               onPointerEnter={handleProductionChartPointer}
-              onPointerDown={handleProductionChartPointerDown}
               onPointerMove={handleProductionChartDrag}
-              onPointerUp={handleProductionChartPointerUp}
-              onPointerCancel={() => setChartDrag(null)}
-              onPointerLeave={() => { setBarTooltip(null); setChartDrag(null); }}
+              onPointerLeave={() => setBarTooltip(null)}
               onTouchMove={handleProductionChartDrag}
             >
               <svg className="production-area-chart production-bar-chart" viewBox={`0 0 ${productionChart.width} ${productionChart.height}`} preserveAspectRatio="none" aria-hidden="true">
@@ -2322,6 +2808,11 @@ export default function Painel({
                     <stop offset="0%" stopColor="#7ee8ff" stopOpacity="0.96" />
                     <stop offset="48%" stopColor="#22c7ff" stopOpacity="0.86" />
                     <stop offset="100%" stopColor="#266dff" stopOpacity="0.72" />
+                  </linearGradient>
+                  <linearGradient id="productionStopGradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#ff9aa8" stopOpacity="0.96" />
+                    <stop offset="42%" stopColor="#ff5c72" stopOpacity="0.88" />
+                    <stop offset="100%" stopColor="#d82743" stopOpacity="0.78" />
                   </linearGradient>
                 </defs>
                 {productionChart.guideValues.map((guide) => (
@@ -2332,14 +2823,28 @@ export default function Painel({
                 ))}
                 {productionChart.goalLine && <polyline className="production-goal-line" points={productionChart.goalLine} />}
                 {productionChart.points.map((point) => (
-                  <rect
+                  <path
                     className={`production-column${barTooltip?.id === point.id ? " is-active" : ""}${point.production <= 0 ? " is-zero" : ""}`}
                     key={point.id}
-                    x={point.barX}
-                    y={point.barY}
-                    width={point.barWidth}
-                    height={point.barHeight}
-                    rx="7"
+                    d={point.productionPath}
+                    role="button"
+                    tabIndex="0"
+                    onClick={() => {
+                      if (!isDailyTrendPeriod(periodFilter)) setSelectedProductionBucketId(point.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if ((event.key === "Enter" || event.key === " ") && !isDailyTrendPeriod(periodFilter)) setSelectedProductionBucketId(point.id);
+                    }}
+                  />
+                ))}
+                {productionChart.points.map((point) => point.stopBarHeight > 0 && (
+                  <path
+                    className={`production-stop-column${barTooltip?.id === point.id ? " is-active" : ""}`}
+                    key={`${point.id}-stop`}
+                    d={point.stopPath}
+                    onClick={() => {
+                      if (!isDailyTrendPeriod(periodFilter)) setSelectedProductionBucketId(point.id);
+                    }}
                   />
                 ))}
                 {barTooltip && (
@@ -2353,27 +2858,9 @@ export default function Painel({
                   <span key={point.id}>{index % Math.ceil(Math.max(1, productionChart.points.length) / 6) === 0 ? point.label.split(" ")[0] : ""}</span>
                 ))}
               </div>
-              {barTooltip && <div className="point-tooltip" style={{ left: `${barTooltip.cursorPercent}%`, top: `${Math.max(12, (barTooltip.yProduction / productionChart.height) * 100)}%` }}>{formatCompactNumber(barTooltip.production)}</div>}
-              {chartDrag && (
-                <div
-                  className="chart-zoom-selection"
-                  style={{
-                    left: `${Math.min(chartDrag.startPercent, chartDrag.endPercent)}%`,
-                    width: `${Math.abs(chartDrag.endPercent - chartDrag.startPercent)}%`,
-                  }}
-                />
-              )}
-              <aside className={`production-hover-card status-${barTooltip?.status || "idle"}`}>
-                <span>{barTooltip ? barTooltip.label : "Passe o mouse no gráfico"}</span>
-                <strong>{barTooltip ? `${formatCompactNumber(barTooltip.production)} peças` : "Aguardando ponto"}</strong>
-                <div>
-                  <p><b>Meta esperada</b><em>{barTooltip ? `${formatCompactNumber(barTooltip.goal)} peças` : "-"}</em></p>
-                  <p><b>Diferença</b><em>{barTooltip ? `${barTooltip.production - barTooltip.goal >= 0 ? "+" : ""}${formatCompactNumber(barTooltip.production - barTooltip.goal)} peças` : "-"}</em></p>
-                  <p><b>Eficiência</b><em>{barTooltip ? formatPercent(barTooltip.efficiency, 0) : "-"}</em></p>
-                </div>
-                <small>{barTooltip?.status === "above" ? "Acima da meta" : barTooltip?.status === "near" ? "Dentro da meta" : barTooltip?.status === "below" ? "Abaixo da meta" : "Sem seleção"}</small>
-              </aside>
+              {barTooltip && <div className="point-tooltip" style={{ left: `${barTooltip.cursorPercent}%`, top: `${Math.max(12, (barTooltip.yStack / productionChart.height) * 100)}%` }}>{formatCompactNumber(barTooltip.production)} pç • {formatDurationShort(barTooltip.stopSeconds)}</div>}
             </div>
+            )}
           </div>
         </article>
 

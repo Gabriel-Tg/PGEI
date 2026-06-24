@@ -359,6 +359,7 @@ const [currentShift, setCurrentShift] = useState(() => {
   useEffect(() => {
     if (!ativa || !setStopModal || machineMeta?.apontamento_tipo !== 'sensor') return
     if (activeStatus !== 'PARADA') return
+    if (autoStopPromptedOrderId === ativa.id) return
 
     const pendingStop = paradaAberta && !String(paradaAberta.reason || '').trim()
       ? paradaAberta
@@ -385,7 +386,7 @@ const [currentShift, setCurrentShift] = useState(() => {
       __initApplied: true,
     })
     setAutoStopPromptedOrderId(ativa.id)
-  }, [ativa, activeStatus, machineMeta?.apontamento_tipo, machineMeta?.sensor_auto_stop_at, machineMeta?.sensor_auto_stopped, paradaAberta, setStopModal])
+  }, [ativa, activeStatus, autoStopPromptedOrderId, machineMeta?.apontamento_tipo, machineMeta?.sensor_auto_stop_at, machineMeta?.sensor_auto_stopped, paradaAberta, setStopModal])
 
   const formatInt = useCallback((n) => {
     const num = Number(n) || 0;
