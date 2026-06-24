@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MAQUINAS, STATUS } from "../domain/constants";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabaseClient";
-import { ACTIVE_TURNOS, getShiftWindowAt } from "../lib/shifts";
+import { ACTIVE_TURNOS, getShiftWindowAt, getShiftWindowsInRange } from "../lib/shifts";
 import { fetchAllPages } from "../lib/supabasePagination";
 import { getSupabaseErrorMessage, saveMachineCavities } from "../lib/machineCavities";
 import { parseBrNumber } from "../lib/utils";
@@ -188,6 +188,34 @@ function sumStopSecondsInWindow(rows, startMs, endMs) {
   }, 0);
 }
 
+function buildMetricWindows({ periodStartIso, periodEndIso, shiftFilter, sessionStartMs, endMs }) {
+  const periodStart = periodStartIso ? DateTime.fromISO(String(periodStartIso)).setZone("America/Sao_Paulo") : null;
+  const periodEnd = periodEndIso ? DateTime.fromISO(String(periodEndIso)).setZone("America/Sao_Paulo") : null;
+  const periodStartMs = periodStart?.isValid ? periodStart.toMillis() : NaN;
+  const periodEndMs = periodEnd?.isValid ? periodEnd.toMillis() : NaN;
+  if (!(Number.isFinite(periodStartMs) && Number.isFinite(periodEndMs) && periodEndMs > periodStartMs)) return [];
+
+  const baseWindows = shiftFilter && shiftFilter !== "__ALL__"
+    ? getShiftWindowsInRange(periodStart, periodEnd, { shiftKeys: [shiftFilter] })
+    : [[periodStartMs, periodEndMs]];
+
+  const capEndMs = Number.isFinite(endMs) ? Math.min(endMs, periodEndMs) : periodEndMs;
+  const capStartMs = Number.isFinite(sessionStartMs) ? Math.max(sessionStartMs, periodStartMs) : periodStartMs;
+
+  return baseWindows
+    .map(([start, end]) => [Math.max(Number(start), capStartMs), Math.min(Number(end), capEndMs)])
+    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start);
+}
+
+function sumMetricWindowSeconds(windows) {
+  return (Array.isArray(windows) ? windows : []).reduce((acc, [start, end]) => acc + Math.max(0, (end - start) / 1000), 0);
+}
+
+function sumStopSecondsInWindows(rows, windows) {
+  if (!Array.isArray(windows) || !windows.length) return 0;
+  return windows.reduce((total, [windowStart, windowEnd]) => total + sumStopSecondsInWindow(rows, windowStart, windowEnd), 0);
+}
+
 function clampPercent(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
@@ -198,6 +226,24 @@ function positivePercent(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
   return Math.max(0, num);
+}
+
+function buildMetricNote(title, formula, calculation) {
+  return { title, formula, calculation };
+}
+
+function MetricWithNote({ label, value, note }) {
+  return (
+    <div className="metric-note-item" tabIndex={0} aria-label={`${label}: ${note.calculation}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <span className="metric-note" role="tooltip">
+        <b>{note.title}</b>
+        <span>{note.formula}</span>
+        <em>{note.calculation}</em>
+      </span>
+    </div>
+  );
 }
 
 function buildSensorCycleEntries(cycleRows, rangeStart, rangeEnd) {
@@ -1002,43 +1048,16 @@ export default function Painel({
       });
 
       if (activeOrderIds.length) {
-        let activeScansQuery = supabase
-          .from("production_scans")
-          .select("order_id, qty_pieces")
-          .in("order_id", activeOrderIds)
-          .gte("created_at", startIso)
-          .lte("created_at", endIso);
-
-        if (clientId) {
-          activeScansQuery = activeScansQuery.eq("company_id", clientId);
-        }
-
-        const [activeScansRes, activeEntriesRes] = await Promise.all([
-          activeScansQuery,
-          fetchAllPages(() => {
-            let query = supabase
-              .from("injection_production_entries")
-              .select("order_id, good_qty, pulse_count, cavities_used")
-              .in("order_id", activeOrderIds)
-              .gte("created_at", startIso)
-              .lte("created_at", endIso);
-
-            if (clientId) query = query.eq("company_id", clientId);
-            return query;
-          }),
-        ]);
-        if (cancelled) return;
-
-        (activeScansRes?.data || []).forEach((row) => {
+        scans.forEach((row) => {
           const key = String(row?.order_id || "");
-          if (!key) return;
+          if (!key || !activeOrderIds.includes(key)) return;
           if (!activeScanByOrder[key]) activeScanByOrder[key] = { pieces: 0 };
           activeScanByOrder[key].pieces += Number(row?.qty_pieces || 0);
         });
 
-        (activeEntriesRes?.data || []).forEach((row) => {
+        entriesForTimeline.forEach((row) => {
           const key = String(row?.order_id || "");
-          if (!key) return;
+          if (!key || !activeOrderIds.includes(key)) return;
           activeEntryByOrder[key] = (activeEntryByOrder[key] || 0) + Number(row?.good_qty || 0);
           activePulseByOrder[key] = (activePulseByOrder[key] || 0) + Number(row?.pulse_count || 0);
           const cavities = Number(row?.cavities_used || 0);
@@ -1053,13 +1072,17 @@ export default function Painel({
         const stdPieces = parsePiecesPerBox(ativa?.standard);
         const scanPieces = Number(activeScanByOrder[orderId]?.pieces || 0);
         const entryPieces = Number(activeEntryByOrder[orderId] || 0);
-        const fallbackScannedPieces = stdPieces > 0
+        const totalSensorPieces = Number(ativa?.sensor_produced_pieces || 0);
+        const totalScannedPieces = stdPieces > 0
           ? Number(ativa?.scanned_count || 0) * stdPieces
           : Number(ativa?.scanned_count || 0);
 
-        const producedPieces = apontamentoTipo === "sensor"
+        const filteredProducedPieces = apontamentoTipo === "sensor"
           ? entryPieces
-          : Math.max(scanPieces, fallbackScannedPieces);
+          : scanPieces;
+        const producedPieces = apontamentoTipo === "sensor"
+          ? totalSensorPieces
+          : totalScannedPieces;
 
         const plannedBoxes = Number(ativa?.boxes || 0);
         const producedBoxes = stdPieces > 0
@@ -1078,6 +1101,7 @@ export default function Painel({
           plannedPieces,
           producedBoxes,
           producedPieces,
+          filteredProducedPieces,
           progress,
           status: ativa?.status || "AGUARDANDO",
           apontamentoTipo,
@@ -1488,7 +1512,7 @@ export default function Painel({
 
       const piecesPerBox = parsePiecesPerBox(ativa?.standard);
       const activeOrder = activeOrderMap.get(String(machine || "").toUpperCase()) || null;
-      const producedPieces = Number(activeOrder?.producedPieces || 0);
+      const producedPieces = Number(activeOrder?.filteredProducedPieces ?? activeOrder?.producedPieces ?? 0);
       const producedBoxes = piecesPerBox > 0
         ? producedPieces / piecesPerBox
         : Number(activeOrder?.producedBoxes || 0);
@@ -1550,8 +1574,7 @@ export default function Painel({
           const ativa = (source[machine] || [])[0] || null;
           if (String(row?.apontamentoTipo || "").toLowerCase() !== "sensor" || !ativa) return row;
 
-          const localPieces = Number(ativa?.sensor_produced_pieces || 0);
-          const producedPieces = Math.max(Number(row?.producedPieces || 0), localPieces);
+          const producedPieces = Number(row?.producedPieces || 0);
           const plannedPieces = Number(row?.plannedPieces || 0);
           return {
             ...row,
@@ -1631,8 +1654,6 @@ export default function Painel({
 
   const machineCards = useMemo(() => {
     const activeOrderMap = new Map((ongoingOrders || []).map((row) => [String(row.machine || "").toUpperCase(), row]));
-    const periodStartMs = periodData.periodStartIso ? DateTime.fromISO(String(periodData.periodStartIso)).toMillis() : NaN;
-    const periodEndMs = periodData.periodEndIso ? DateTime.fromISO(String(periodData.periodEndIso)).toMillis() : NaN;
 
     return filteredMachineIds.map((machineId) => {
       const machine = String(machineId || "").toUpperCase();
@@ -1660,6 +1681,7 @@ export default function Painel({
       const plannedPieces = Number(activeOrder?.plannedPieces || getOrderPlannedPieces(ativa) || 0);
       const piecesPerBox = parsePiecesPerBox(ativa?.standard);
       const producedPieces = Number(activeOrder?.producedPieces || 0);
+      const filteredProducedPieces = Number(activeOrder?.filteredProducedPieces ?? producedPieces);
       const producedBoxes = piecesPerBox > 0 ? Math.floor(producedPieces / piecesPerBox) : Number(activeOrder?.producedBoxes || ativa?.scanned_count || 0);
       const plannedBoxes = Number(ativa?.boxes || activeOrder?.plannedBoxes || 0);
       const progress = plannedPieces > 0 ? Math.min(100, Math.round((producedPieces / plannedPieces) * 100)) : 0;
@@ -1670,41 +1692,71 @@ export default function Painel({
       const cycleStandard = Number(itemTech?.cycleSeconds || 0);
       const itemCavities = Number(itemTech?.cavities || 0);
       const cavities = Number(machineMeta?.cavities || activeOrder?.cavitiesUsed || itemCavities || 0);
+      const theoreticalCavities = itemCavities;
       const lastPulseAt = machineMeta?.sensor_last_pulse_at || null;
       const lastPulseMs = lastPulseAt ? DateTime.fromISO(String(lastPulseAt)).toMillis() : NaN;
       const oeeNowMs = pointingMode === "sensor" && Number.isFinite(lastPulseMs) && (!Number.isFinite(startedMs) || lastPulseMs >= startedMs)
         ? lastPulseMs
         : liveNowMs;
-      const oeeWindowStartMs = Number.isFinite(periodStartMs) && Number.isFinite(startedMs) ? Math.max(startedMs, periodStartMs) : startedMs;
-      const liveWindowEndMs = Number.isFinite(periodEndMs) ? Math.min(liveNowMs, periodEndMs) : liveNowMs;
-      const oeeWindowEndMs = Number.isFinite(periodEndMs) ? Math.min(oeeNowMs, periodEndMs) : oeeNowMs;
-      const liveElapsedSeconds = Number.isFinite(oeeWindowStartMs) ? Math.max(0, (liveWindowEndMs - oeeWindowStartMs) / 1000) : 0;
-      const oeeElapsedSeconds = Number.isFinite(oeeWindowStartMs) ? Math.max(0, (oeeWindowEndMs - oeeWindowStartMs) / 1000) : 0;
+      const liveWindows = buildMetricWindows({
+        periodStartIso: periodData.periodStartIso,
+        periodEndIso: periodData.periodEndIso,
+        shiftFilter,
+        sessionStartMs: startedMs,
+        endMs: liveNowMs,
+      });
+      const oeeWindows = buildMetricWindows({
+        periodStartIso: periodData.periodStartIso,
+        periodEndIso: periodData.periodEndIso,
+        shiftFilter,
+        sessionStartMs: startedMs,
+        endMs: oeeNowMs,
+      });
+      const liveElapsedSeconds = sumMetricWindowSeconds(liveWindows);
+      const oeeElapsedSeconds = sumMetricWindowSeconds(oeeWindows);
       const currentCycle = tone === "producing" && Number.isFinite(lastPulseMs)
         ? Math.max(0, (liveNowMs - lastPulseMs) / 1000)
         : 0;
       const previousCycle = Number(machineMeta?.sensor_last_cycle_seconds || 0);
-      const calculatedCycle = producedPieces > 0 && cavities > 0 && liveElapsedSeconds > 0
-        ? (liveElapsedSeconds * cavities) / producedPieces
+      const calculatedCycle = filteredProducedPieces > 0 && cavities > 0 && liveElapsedSeconds > 0
+        ? (liveElapsedSeconds * cavities) / filteredProducedPieces
         : 0;
       const realCycle = currentCycle > 0 ? currentCycle : previousCycle || calculatedCycle;
       const cycleEfficiency = realCycle > 0 && cycleStandard > 0 ? (cycleStandard / realCycle) * 100 : 0;
-      const stoppedSecondsForOee = sumStopSecondsInWindow(activeOrder?.stopRows || [], oeeWindowStartMs, oeeWindowEndMs);
+      const stoppedSecondsForOee = sumStopSecondsInWindows(activeOrder?.stopRows || [], oeeWindows);
       const availableSeconds = oeeElapsedSeconds;
       const productiveSecondsForOee = Math.max(0, availableSeconds - stoppedSecondsForOee);
-      const theoreticalPieces = cycleStandard > 0 && cavities > 0 && productiveSecondsForOee > 0
-        ? (productiveSecondsForOee / cycleStandard) * cavities
+      const theoreticalPieces = cycleStandard > 0 && theoreticalCavities > 0 && productiveSecondsForOee > 0
+        ? (productiveSecondsForOee / cycleStandard) * theoreticalCavities
         : 0;
-      const liveStoppedSeconds = sumStopSecondsInWindow(activeOrder?.stopRows || [], oeeWindowStartMs, liveWindowEndMs);
+      const liveStoppedSeconds = sumStopSecondsInWindows(activeOrder?.stopRows || [], liveWindows);
       const liveProductiveSeconds = Math.max(0, liveElapsedSeconds - liveStoppedSeconds);
-      const liveTheoreticalPieces = cycleStandard > 0 && cavities > 0 && liveProductiveSeconds > 0
-        ? (liveProductiveSeconds / cycleStandard) * cavities
+      const liveTheoreticalPieces = cycleStandard > 0 && theoreticalCavities > 0 && liveProductiveSeconds > 0
+        ? (liveProductiveSeconds / cycleStandard) * theoreticalCavities
         : 0;
       const scrapPieces = Number(activeOrder?.scrapPieces || 0);
       const availability = availableSeconds > 0 ? clampPercent((productiveSecondsForOee / availableSeconds) * 100) : 0;
-      const performance = theoreticalPieces > 0 ? positivePercent((producedPieces / theoreticalPieces) * 100) : 0;
-      const quality = producedPieces + scrapPieces > 0 ? clampPercent((producedPieces / (producedPieces + scrapPieces)) * 100) : 0;
+      const performance = theoreticalPieces > 0 ? positivePercent((filteredProducedPieces / theoreticalPieces) * 100) : 0;
+      const quality = filteredProducedPieces + scrapPieces > 0 ? clampPercent((filteredProducedPieces / (filteredProducedPieces + scrapPieces)) * 100) : 0;
       const oee = (availability * performance * quality) / 10000;
+      const totalQualityPieces = filteredProducedPieces + scrapPieces;
+      const metricNotes = {
+        availability: buildMetricNote(
+          "Cálculo da disponibilidade",
+          "Tempo produtivo / Tempo disponível x 100",
+          `${formatDurationShort(productiveSecondsForOee)} / ${formatDurationShort(availableSeconds)} x 100 = ${formatDecimal(availability, 2)}%`
+        ),
+        performance: buildMetricNote(
+          "Cálculo do desempenho",
+          "Peças produzidas / produção teórica * 100",
+          `${formatCompactNumber(filteredProducedPieces)} / ${formatDecimal(theoreticalPieces, 2)} x 100 = ${formatDecimal(performance, 2)}%`
+        ),
+        quality: buildMetricNote(
+          "Cálculo da qualidade",
+          "Peças boas / Produção total x 100",
+          `${formatCompactNumber(filteredProducedPieces)} / ${formatCompactNumber(totalQualityPieces)} x 100 = ${formatDecimal(quality, 2)}%`
+        ),
+      };
       const etaSeconds = cycleStandard > 0 && cavities > 0 && remainingPieces > 0
         ? (remainingPieces / (3600 / cycleStandard * cavities)) * 3600
         : 0;
@@ -1730,6 +1782,7 @@ export default function Painel({
         customer: ativa?.customer || itemTech?.customer || "-",
         plannedPieces,
         producedPieces,
+        filteredProducedPieces,
         remainingPieces,
         plannedBoxes,
         producedBoxes,
@@ -1745,6 +1798,7 @@ export default function Painel({
         availability,
         performance,
         quality,
+        metricNotes,
         partWeightG: Number(itemTech?.partWeightG || 0),
         channelWeightG: 0,
         cavities,
@@ -1765,7 +1819,7 @@ export default function Painel({
         pointingMode: getApontamentoLabel(pointingMode),
       };
     });
-  }, [filteredMachineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs, periodData.periodStartIso, periodData.periodEndIso]);
+  }, [filteredMachineIds, source, ongoingOrders, itemTechByCode, machineMetaById, openStopsByMachine, currentShift, machineTypeById, liveNowMs, periodData.periodStartIso, periodData.periodEndIso, shiftFilter]);
 
   const cavitiesModalMachine = useMemo(() => {
     if (!cavitiesModalMachineId) return null;
@@ -2162,9 +2216,9 @@ export default function Painel({
                 <div className={selectedMachine.isCycleLate ? "metric-alert" : ""}><span>Ciclo real</span><strong>{formatSeconds(selectedMachine.realCycle)}</strong></div>
                 <div><span>Ciclo anterior</span><strong>{formatSeconds(selectedMachine.previousCycle)}</strong></div>
                 <div><span>Eficiência ciclo</span><strong>{formatPercent(selectedMachine.cycleEfficiency)}</strong></div>
-                <div><span>Disponibilidade</span><strong>{formatPercent(selectedMachine.availability)}</strong></div>
-                <div><span>Desempenho</span><strong>{formatPercent(selectedMachine.performance)}</strong></div>
-                <div><span>Qualidade</span><strong>{formatPercent(selectedMachine.quality)}</strong></div>
+                <MetricWithNote label="Disponibilidade" value={formatPercent(selectedMachine.availability)} note={selectedMachine.metricNotes.availability} />
+                <MetricWithNote label="Desempenho" value={formatPercent(selectedMachine.performance)} note={selectedMachine.metricNotes.performance} />
+                <MetricWithNote label="Qualidade" value={formatPercent(selectedMachine.quality)} note={selectedMachine.metricNotes.quality} />
                 <div><span>Peso peça</span><strong>{selectedMachine.partWeightG > 0 ? `${formatDecimal(selectedMachine.partWeightG, 2)}g` : "-"}</strong></div>
                 <div><span>Peso canal</span><strong>{selectedMachine.channelWeightG > 0 ? `${formatDecimal(selectedMachine.channelWeightG, 2)}g` : "-"}</strong></div>
                 <div><span>Cavidades</span><strong>{selectedMachine.cavities || "-"}</strong></div>
