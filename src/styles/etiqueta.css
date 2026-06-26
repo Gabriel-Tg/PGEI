@@ -28,9 +28,10 @@
 }
 /* Item da FILA marcado como "produção interrompida" */
 .fila-item.fila-interrompida {
-  background: linear-gradient(180deg, #ffe6b3 0%, #fff8e1 100%);
-  border: 1px solid rgba(255, 193, 7, 0.6);
-  box-shadow: 0 0 0 2px rgba(255, 215, 96, 0.15) inset;
+  border-color: #9a4a00;
+  box-shadow:
+    0 0 0 2px rgba(154, 74, 0, 0.72),
+    var(--shadow);
 }
 .stop-reason-below {
   text-align: center;

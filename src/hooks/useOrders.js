@@ -186,7 +186,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
       if (scansRefreshTimer) window.clearTimeout(scansRefreshTimer)
       scansRefreshTimer = window.setTimeout(() => {
         fetchOpenOrders()
-      }, 120)
+      }, 2000)
     }
 
     const chOrders = supabase.channel('orders-rt')

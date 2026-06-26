@@ -789,12 +789,21 @@ export default function Painel({
     periodEndIso: null,
   });
   const [periodRefreshNonce, setPeriodRefreshNonce] = useState(0);
+  const periodRefreshTimerRef = useRef(null);
   const source = useMemo(() => localAtivos || {}, [localAtivos]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setLiveNowMs(Date.now()), 100);
     return () => window.clearInterval(interval);
   }, []);
+
+  function schedulePeriodRefresh(delayMs = 120) {
+    if (periodRefreshTimerRef.current) window.clearTimeout(periodRefreshTimerRef.current);
+    periodRefreshTimerRef.current = window.setTimeout(() => {
+      periodRefreshTimerRef.current = null;
+      setPeriodRefreshNonce((prev) => prev + 1);
+    }, delayMs);
+  }
 
   const sectorOptions = useMemo(() => {
     const sectors = new Set();
@@ -920,12 +929,14 @@ export default function Painel({
     });
     return Array.from(codes);
   }, [localAtivos, filteredMachineIds]);
+  const activeItemCodesKey = activeItemCodes.join("|");
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadItemTech() {
-      if (!activeItemCodes.length) {
+      const codes = activeItemCodesKey ? activeItemCodesKey.split("|").filter(Boolean) : [];
+      if (!codes.length) {
         setItemTechByCode({});
         return;
       }
@@ -933,7 +944,7 @@ export default function Painel({
       let query = supabase
         .from("items")
         .select("code, description, color, cycle_seconds, cavities, padrao, embalagem, part_weight_g, unit_value, resin, unidade, cliente")
-        .in("code", activeItemCodes);
+        .in("code", codes);
 
       if (clientId) query = query.eq("company_id", clientId);
 
@@ -956,7 +967,7 @@ export default function Painel({
 
     loadItemTech();
     return () => { cancelled = true; };
-  }, [activeItemCodes, clientId]);
+  }, [activeItemCodesKey, clientId]);
 
   useEffect(() => {
     const getActiveSensorOrders = () => filteredMachineIds
@@ -979,7 +990,6 @@ export default function Painel({
       if (!activeSensorOrders.length) return;
 
       const sensorMachines = [...new Set(activeSensorOrders.map((item) => item.machine))];
-      const activeOrderIds = [...new Set(activeSensorOrders.map((item) => item.orderId))];
 
       let machinesQuery = supabase
         .from("machines")
@@ -990,18 +1000,7 @@ export default function Painel({
         machinesQuery = machinesQuery.eq("company_id", clientId);
       }
 
-      const [machinesRes, entriesRes] = await Promise.all([
-        machinesQuery,
-        fetchAllPages(() => {
-          let query = supabase
-            .from("injection_production_entries")
-            .select("order_id, good_qty, pulse_count, cavities_used")
-            .in("order_id", activeOrderIds);
-
-          if (clientId) query = query.eq("company_id", clientId);
-          return query;
-        }),
-      ]);
+      const machinesRes = await machinesQuery;
       if (cancelled) return;
 
       if (!machinesRes?.error) {
@@ -1022,64 +1021,10 @@ export default function Painel({
         console.warn("Falha ao sincronizar runtime dos sensores:", machinesRes.error);
       }
 
-      if (!entriesRes?.error) {
-        const totalsByOrder = {};
-        const cavitiesByOrder = Object.fromEntries(activeSensorOrders.map((item) => [item.orderId, Number(item.itemCavities || 0)]));
-        (entriesRes?.data || []).forEach((row) => {
-          const orderId = String(row?.order_id || "");
-          if (!orderId) return;
-          if (!totalsByOrder[orderId]) totalsByOrder[orderId] = { pieces: 0, pulses: 0, cavities: 0 };
-          const pulses = Number(row?.pulse_count || 0);
-          const cavities = Number(row?.cavities_used || 0);
-          const itemCavities = Number(cavitiesByOrder[orderId] || 0);
-          const effectiveCavities = getCavitiesWithinMold(cavities, itemCavities, itemCavities);
-          totalsByOrder[orderId].pieces += pulses > 0 && effectiveCavities > 0
-            ? pulses * effectiveCavities
-            : Number(row?.good_qty || 0);
-          totalsByOrder[orderId].pulses += pulses;
-          if (effectiveCavities > 0) totalsByOrder[orderId].cavities = effectiveCavities;
-        });
-
-        setLocalAtivos((prev) => {
-          if (!prev) return prev;
-          let changed = false;
-          const next = { ...prev };
-
-          activeSensorOrders.forEach(({ machine, orderId }) => {
-            const totals = totalsByOrder[orderId];
-            if (!totals || !Array.isArray(next[machine])) return;
-
-            next[machine] = next[machine].map((item) => {
-              if (!matchesOrder(item, orderId)) return item;
-              const currentPieces = Number(item?.sensor_produced_pieces || 0);
-              const currentPulses = Number(item?.sensor_pulse_count || 0);
-              const currentCavities = Number(item?.sensor_cavities_used || 0);
-              if (
-                currentPieces === totals.pieces &&
-                currentPulses === totals.pulses &&
-                currentCavities === totals.cavities
-              ) {
-                return item;
-              }
-              changed = true;
-              return {
-                ...item,
-                sensor_produced_pieces: totals.pieces,
-                sensor_pulse_count: totals.pulses,
-                sensor_cavities_used: totals.cavities || currentCavities,
-              };
-            });
-          });
-
-          return changed ? next : prev;
-        });
-      } else {
-        console.warn("Falha ao sincronizar produção dos sensores:", entriesRes.error);
-      }
     }
 
     syncSensorLiveState();
-    const interval = window.setInterval(syncSensorLiveState, 1000);
+    const interval = window.setInterval(syncSensorLiveState, 5000);
 
     return () => {
       cancelled = true;
@@ -1621,7 +1566,7 @@ export default function Painel({
               }
             }
 
-            setPeriodRefreshNonce((prev) => prev + 1);
+            schedulePeriodRefresh();
           } catch (err) {
             console.error("Erro no handler realtime scans:", err);
           }
@@ -1647,7 +1592,7 @@ export default function Painel({
             : Number(row.pulse_count || 0);
           const cavitiesUsed = Number(row.cavities_used || 0);
           if (!orderId || goodQty <= 0) {
-            setPeriodRefreshNonce((prev) => prev + 1);
+            schedulePeriodRefresh();
             return;
           }
 
@@ -1710,7 +1655,7 @@ export default function Painel({
             });
           }
 
-          setPeriodRefreshNonce((prev) => prev + 1);
+          schedulePeriodRefresh();
 
           if (typeof onScanned === "function") {
             try {
@@ -1758,7 +1703,7 @@ export default function Painel({
               };
             });
           }
-          setPeriodRefreshNonce((prev) => prev + 1);
+          schedulePeriodRefresh();
         }
       )
       .on(
@@ -1779,12 +1724,16 @@ export default function Painel({
               },
             }));
           }
-          setPeriodRefreshNonce((prev) => prev + 1);
+          schedulePeriodRefresh();
         }
       )
       .subscribe();
 
     return () => {
+      if (periodRefreshTimerRef.current) {
+        window.clearTimeout(periodRefreshTimerRef.current);
+        periodRefreshTimerRef.current = null;
+      }
       try {
         supabase.removeChannel(channel);
       } catch (err) {
