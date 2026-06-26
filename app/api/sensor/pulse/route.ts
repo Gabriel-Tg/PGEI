@@ -404,6 +404,7 @@ export async function POST(request: Request) {
     const shiftWindow = getCurrentShiftWindow(new Date());
     const shiftOperator = await findShiftOperator({ supabase, companyId, machineCode, shiftWindow });
     const receivedAt = nowIso();
+    let shouldResetCavitiesToMold = false;
 
     try {
       activeOrder = await resumeAutoStopIfNeeded(supabase, {
@@ -419,6 +420,7 @@ export async function POST(request: Request) {
     }
 
     if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'AGUARDANDO') {
+      shouldResetCavitiesToMold = true;
       const startPayload = {
         status: 'PRODUZINDO',
         started_at: receivedAt,
@@ -447,24 +449,30 @@ export async function POST(request: Request) {
 
     console.log('📦 O.P. ativa:', activeOrder?.code || 'nenhuma');
 
-    // Buscar cavidades
-    let cavitiesUsed = Number(machine.cavities || 0) > 0 ? Math.trunc(Number(machine.cavities)) : 1;
+    let itemCavities = 0;
     if (activeOrder?.product) {
       const productCode = parseProductCode(activeOrder.product);
       if (productCode) {
-        const { data: itemRows } = await supabase
+        const { data: itemRows, error: itemError } = await supabase
           .from('items')
           .select('cavities')
           .eq('company_id', companyId)
           .eq('code', productCode)
           .limit(1);
 
-        const cavities = Number((itemRows || [])[0]?.cavities || 0);
-        if (!(Number(machine.cavities || 0) > 0) && Number.isFinite(cavities) && cavities > 0) {
-          cavitiesUsed = Math.trunc(cavities);
+        if (itemError) {
+          console.error('Erro ao buscar cavidades do item:', itemError);
+          return jsonResponse({ error: itemError.message || 'Unable to load cavities from item' }, 500);
         }
+
+        const cavities = Number((itemRows || [])[0]?.cavities || 0);
+        if (Number.isFinite(cavities) && cavities > 0) itemCavities = Math.trunc(cavities);
       }
     }
+    const machineCavities = Number(machine.cavities || 0) > 0 ? Math.trunc(Number(machine.cavities)) : 0;
+    const cavitiesUsed = itemCavities > 0
+      ? (shouldResetCavitiesToMold ? itemCavities : Math.min(machineCavities || itemCavities, itemCavities))
+      : machineCavities || 1;
 
     const ignoreReason = !activeOrder ? 'NO_ACTIVE_ORDER' : null
     const isIgnoredEvent = !activeOrder
@@ -542,6 +550,7 @@ export async function POST(request: Request) {
 
     // Atualizar status da máquina
     const machinePayload: any = {
+      cavities: cavitiesUsed,
       sensor_status: 'recebendo_pulsos',
       sensor_last_pulse_at: receivedAt,
       sensor_auto_stopped: false,

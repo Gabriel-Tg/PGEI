@@ -100,6 +100,22 @@ function getOrderRatePiecesPerHour(order, itemTechByCode) {
   return (3600 / cycleSeconds) * cavities;
 }
 
+function mapItemTechRow(item) {
+  return {
+    description: item?.description || "",
+    color: item?.color || "",
+    cycleSeconds: Number(item?.cycle_seconds || 0),
+    cavities: Number(item?.cavities || 0),
+    standard: Number(item?.padrao || 0),
+    packaging: item?.embalagem || "",
+    partWeightG: Number(item?.part_weight_g || 0),
+    unitValue: Number(item?.unit_value || 0),
+    resin: item?.resin || "",
+    unit: item?.unidade || "",
+    customer: item?.cliente || "",
+  };
+}
+
 function isOrderOngoingStatus(status) {
   const normalized = String(status || "").toUpperCase();
   return Array.isArray(STATUS) && STATUS.includes(normalized);
@@ -249,6 +265,14 @@ function positivePercent(value) {
   return Math.max(0, num);
 }
 
+function getCavitiesWithinMold(openCavities, moldCavities, fallback = 0) {
+  const open = Number(openCavities || 0);
+  const mold = Number(moldCavities || 0);
+  const base = open > 0 ? open : Number(fallback || 0);
+  if (mold > 0) return Math.min(base > 0 ? base : mold, mold);
+  return base > 0 ? base : 0;
+}
+
 function buildMetricNote(title, formula, calculation) {
   return { title, formula, calculation };
 }
@@ -315,6 +339,25 @@ function mergeEntriesWithSensorCycles(entries, cycleEntries) {
     }),
     ...(Array.isArray(cycleEntries) ? cycleEntries : []),
   ];
+}
+
+function normalizeSensorEntriesByItemCavities(entries, itemTechByCode) {
+  return (Array.isArray(entries) ? entries : []).map((entry) => {
+    const isSensorEntry = String(entry?.source || "").toLowerCase() === "sensor" || Number(entry?.pulse_count || 0) > 0;
+    if (!isSensorEntry) return entry;
+
+    const itemCode = extractItemCodeFromOrderProduct(entry?.order?.product || entry?.product || entry?.code);
+    const itemCavities = itemCode ? Number(itemTechByCode?.[itemCode]?.cavities || 0) : 0;
+    const pulseCount = Number(entry?.pulse_count || 0);
+    if (!(itemCavities > 0 && pulseCount > 0)) return entry;
+    const effectiveCavities = getCavitiesWithinMold(entry?.cavities_used, itemCavities, itemCavities);
+
+    return {
+      ...entry,
+      good_qty: pulseCount * effectiveCavities,
+      cavities_used: effectiveCavities,
+    };
+  });
 }
 
 function buildTrendSeries(scans, entries, periodKey, rangeStart, rangeEnd) {
@@ -484,7 +527,118 @@ function uniqueNonEmpty(values) {
   return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
-function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, source, machineIds, itemTechByCode }) {
+function getGoalEventOrder(row) {
+  return row?.order || {
+    id: row?.order_id,
+    product: row?.product || row?.code,
+    standard: row?.standard,
+  };
+}
+
+function getGoalEventTimestamp(row) {
+  return getEffectiveProductionTimestamp(row) || row?.created_at;
+}
+
+function getOrderStartMs(order) {
+  const startedMs = DateTime.fromISO(String(order?.started_at || "")).toMillis();
+  const restartedMs = DateTime.fromISO(String(order?.restarted_at || "")).toMillis();
+  if (Number.isFinite(startedMs) && Number.isFinite(restartedMs)) return Math.max(startedMs, restartedMs);
+  if (Number.isFinite(restartedMs)) return restartedMs;
+  return Number.isFinite(startedMs) ? startedMs : NaN;
+}
+
+function getOrderEndMs(order) {
+  const finalizedMs = DateTime.fromISO(String(order?.finalized_at || "")).toMillis();
+  if (Number.isFinite(finalizedMs)) return finalizedMs;
+  const status = String(order?.status || "").toUpperCase();
+  if (status === "PRODUZINDO" || status === "BAIXA_EFICIENCIA") return NaN;
+  const interruptedMs = DateTime.fromISO(String(order?.interrupted_at || "")).toMillis();
+  return Number.isFinite(interruptedMs) ? interruptedMs : NaN;
+}
+
+function buildHistoricalGoalSegments({ scans, entries, periodStartMs, periodEndMs, itemTechByCode }) {
+  const rows = [
+    ...(Array.isArray(scans) ? scans : []),
+    ...(Array.isArray(entries) ? entries : []),
+  ]
+    .map((row) => {
+      const order = getGoalEventOrder(row);
+      const eventMs = DateTime.fromISO(String(getGoalEventTimestamp(row) || "")).toMillis();
+      const machine = String(row?.machine_id || order?.machine_id || "").trim().toUpperCase();
+      const itemCode = extractItemCodeFromOrderProduct(order?.product || row?.product || row?.code);
+      if (!machine || !itemCode || !Number.isFinite(eventMs)) return null;
+      return { row, order, eventMs, machine, itemCode };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.eventMs - b.eventMs);
+
+  const byMachine = new Map();
+  rows.forEach((event) => {
+    if (!byMachine.has(event.machine)) byMachine.set(event.machine, []);
+    byMachine.get(event.machine).push(event);
+  });
+
+  const segments = [];
+  byMachine.forEach((events) => {
+    let current = null;
+
+    events.forEach((event) => {
+      const orderKey = String(event.order?.id || event.row?.order_id || "");
+      const sameOrder = current && current.orderKey && current.orderKey === orderKey;
+      const sameItem = current && current.itemCode === event.itemCode;
+      if (current && (sameOrder || sameItem)) {
+        current.lastEventMs = event.eventMs;
+        const orderEndMs = getOrderEndMs(event.order);
+        if (Number.isFinite(orderEndMs)) current.endMs = Math.min(current.endMs || periodEndMs, orderEndMs);
+        return;
+      }
+
+      if (current) {
+        current.endMs = Math.min(current.endMs || periodEndMs, event.eventMs);
+        segments.push(current);
+      }
+
+      const orderStartMs = getOrderStartMs(event.order);
+      const orderEndMs = getOrderEndMs(event.order);
+      const startMs = current
+        ? event.eventMs
+        : Number.isFinite(orderStartMs)
+          ? orderStartMs
+          : periodStartMs;
+      current = {
+        machine: event.machine,
+        itemCode: event.itemCode,
+        orderKey,
+        startMs: Math.max(periodStartMs, startMs),
+        endMs: Number.isFinite(orderEndMs) ? Math.min(periodEndMs, orderEndMs) : periodEndMs,
+        lastEventMs: event.eventMs,
+        order: event.order,
+      };
+    });
+
+    if (current) segments.push(current);
+  });
+
+  return segments
+    .map((segment) => {
+      const ratePiecesPerHour = getOrderRatePiecesPerHour(segment.order, itemTechByCode);
+      const piecesPerBox = parsePiecesPerBox(segment.order?.standard);
+      const tech = segment.itemCode ? itemTechByCode?.[segment.itemCode] : null;
+      if (!(ratePiecesPerHour > 0) || segment.endMs <= segment.startMs) return null;
+      return {
+        ...segment,
+        ratePiecesPerHour,
+        piecesPerBox,
+        cycleSeconds: Number(tech?.cycleSeconds || 0),
+        cavities: Number(tech?.cavities || 0),
+        product: segment.order?.product || segment.itemCode,
+        itemLabel: `${segment.itemCode}${tech?.description ? ` - ${tech.description}` : ""}`,
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, source, machineIds, itemTechByCode, scans, entries }) {
   const safeLabels = Array.isArray(labels) ? labels : [];
   const periodStartMs = periodStart.toMillis();
   const periodEndMs = periodEnd.toMillis();
@@ -497,6 +651,30 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
 
   const goalBoxes = [];
   const goalPieces = [];
+  const historicalSegments = buildHistoricalGoalSegments({ scans, entries, periodStartMs, periodEndMs, itemTechByCode });
+
+  if (historicalSegments.length) {
+    pointsMs.forEach((pointMsRaw) => {
+      const pointMs = Math.min(Math.max(pointMsRaw, periodStartMs), periodEndMs);
+      let sumBoxes = 0;
+      let sumPieces = 0;
+
+      historicalSegments.forEach((segment) => {
+        const startMs = Math.max(segment.startMs, periodStartMs);
+        const endMs = Math.min(segment.endMs, pointMs);
+        if (endMs <= startMs) return;
+        const hours = (endMs - startMs) / 1000 / 60 / 60;
+        const pieces = hours * segment.ratePiecesPerHour;
+        sumPieces += pieces;
+        if (segment.piecesPerBox > 0) sumBoxes += pieces / segment.piecesPerBox;
+      });
+
+      goalBoxes.push(Math.round(sumBoxes));
+      goalPieces.push(Math.round(sumPieces));
+    });
+
+    return { goalBoxes, goalPieces, goalSegments: historicalSegments };
+  }
 
   pointsMs.forEach((pointMsRaw) => {
     const pointMs = Math.min(Math.max(pointMsRaw, periodStartMs), periodEndMs);
@@ -542,7 +720,7 @@ function buildDynamicGoalSeries({ periodKey, labels, periodStart, periodEnd, sou
     goalPieces.push(Math.round(sumPieces));
   });
 
-  return { goalBoxes, goalPieces };
+  return { goalBoxes, goalPieces, goalSegments: [] };
 }
 
 export default function Painel({
@@ -605,6 +783,7 @@ export default function Painel({
     stopEvents: [],
     scrapEvents: [],
     operatorEvents: [],
+    goalSegments: [],
     periodLabel: "Hoje",
     periodStartIso: null,
     periodEndIso: null,
@@ -770,19 +949,7 @@ export default function Painel({
       (data || []).forEach((item) => {
         const code = String(item?.code || "").trim();
         if (!code) return;
-        mapped[code] = {
-          description: item?.description || "",
-          color: item?.color || "",
-          cycleSeconds: Number(item?.cycle_seconds || 0),
-          cavities: Number(item?.cavities || 0),
-          standard: Number(item?.padrao || 0),
-          packaging: item?.embalagem || "",
-          partWeightG: Number(item?.part_weight_g || 0),
-          unitValue: Number(item?.unit_value || 0),
-          resin: item?.resin || "",
-          unit: item?.unidade || "",
-          customer: item?.cliente || "",
-        };
+        mapped[code] = mapItemTechRow(item);
       });
       setItemTechByCode(mapped);
     }
@@ -799,7 +966,9 @@ export default function Painel({
         const ativa = (source[machine] || [])[0] || null;
         const orderId = ativa?.id ? String(ativa.id) : "";
         if (apontamentoTipo !== "sensor" || !machine || !orderId) return null;
-        return { machine, orderId };
+        const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
+        const itemCavities = itemCode ? Number(itemTechByCode?.[itemCode]?.cavities || 0) : 0;
+        return { machine, orderId, itemCavities };
       })
       .filter(Boolean);
 
@@ -814,7 +983,7 @@ export default function Painel({
 
       let machinesQuery = supabase
         .from("machines")
-        .select("machine_code, machine_name, sensor_status, sensor_last_pulse_at, sensor_last_cycle_seconds, sensor_cycle_count, sensor_last_heartbeat_at, sensor_auto_stopped, sensor_auto_stop_at")
+        .select("machine_code, machine_name, cavities, sensor_status, sensor_last_pulse_at, sensor_last_cycle_seconds, sensor_cycle_count, sensor_last_heartbeat_at, sensor_auto_stopped, sensor_auto_stop_at")
         .in("machine_code", sensorMachines);
 
       if (clientId) {
@@ -855,14 +1024,20 @@ export default function Painel({
 
       if (!entriesRes?.error) {
         const totalsByOrder = {};
+        const cavitiesByOrder = Object.fromEntries(activeSensorOrders.map((item) => [item.orderId, Number(item.itemCavities || 0)]));
         (entriesRes?.data || []).forEach((row) => {
           const orderId = String(row?.order_id || "");
           if (!orderId) return;
           if (!totalsByOrder[orderId]) totalsByOrder[orderId] = { pieces: 0, pulses: 0, cavities: 0 };
-          totalsByOrder[orderId].pieces += Number(row?.good_qty || 0);
-          totalsByOrder[orderId].pulses += Number(row?.pulse_count || 0);
+          const pulses = Number(row?.pulse_count || 0);
           const cavities = Number(row?.cavities_used || 0);
-          if (cavities > 0) totalsByOrder[orderId].cavities = cavities;
+          const itemCavities = Number(cavitiesByOrder[orderId] || 0);
+          const effectiveCavities = getCavitiesWithinMold(cavities, itemCavities, itemCavities);
+          totalsByOrder[orderId].pieces += pulses > 0 && effectiveCavities > 0
+            ? pulses * effectiveCavities
+            : Number(row?.good_qty || 0);
+          totalsByOrder[orderId].pulses += pulses;
+          if (effectiveCavities > 0) totalsByOrder[orderId].cavities = effectiveCavities;
         });
 
         setLocalAtivos((prev) => {
@@ -910,7 +1085,7 @@ export default function Painel({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [clientId, filteredMachineIds, machineTypeById, source]);
+  }, [clientId, filteredMachineIds, itemTechByCode, machineTypeById, source]);
 
   useEffect(() => {
     let cancelled = false;
@@ -922,7 +1097,7 @@ export default function Painel({
 
       let scansQuery = supabase
         .from("production_scans")
-        .select("id, created_at, machine_id, order_id, scanned_box, qty_pieces, op_code, code, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_by, restarted_by)")
+        .select("id, created_at, machine_id, order_id, scanned_box, qty_pieces, op_code, code, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_at, restarted_at, interrupted_at, finalized_at, started_by, restarted_by)")
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
@@ -971,7 +1146,7 @@ export default function Painel({
         fetchAllPages(() => {
           let query = supabase
             .from("injection_production_entries")
-            .select("id, created_at, updated_at, sensor_last_pulse_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_by, restarted_by)")
+            .select("id, created_at, updated_at, sensor_last_pulse_at, machine_id, order_id, good_qty, pulse_count, cavities_used, source, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_at, restarted_at, interrupted_at, finalized_at, started_by, restarted_by)")
             .gte("created_at", startIso)
             .lte("created_at", endIso);
 
@@ -984,7 +1159,7 @@ export default function Painel({
         fetchAllPages(() => {
           let query = supabase
             .from("machine_sensor_order_cycles")
-            .select("id, machine_id, order_id, produced_quantity, pulse_count, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_by, restarted_by)")
+            .select("id, machine_id, order_id, produced_quantity, pulse_count, cavities_used, cycle_timestamps, first_pulse_at, last_pulse_at, order:orders(id, code, product, boxes, qty, standard, status, finalized, machine_id, started_at, restarted_at, interrupted_at, finalized_at, started_by, restarted_by)")
             .lte("first_pulse_at", endIso)
             .gte("last_pulse_at", startIso);
 
@@ -1004,7 +1179,7 @@ export default function Painel({
       const scans = (scansRes?.data || []).filter((row) => matchesShiftFilter(row?.created_at, shiftFilter));
       const entries = entriesRes?.data || [];
       const sensorCycleEntries = buildSensorCycleEntries(sensorCyclesRes?.data || [], period.start, period.end);
-      const entriesForTimeline = mergeEntriesWithSensorCycles(entries, sensorCycleEntries)
+      let entriesForTimeline = mergeEntriesWithSensorCycles(entries, sensorCycleEntries)
         .filter((row) => matchesShiftFilter(getEffectiveProductionTimestamp(row), shiftFilter));
       const stops = (stopsRes?.data || []).filter((row) => matchesShiftFilter(row?.started_at, shiftFilter));
       const lowEff = (lowEffRes?.data || []).filter((row) => matchesShiftFilter(row?.started_at, shiftFilter));
@@ -1018,6 +1193,31 @@ export default function Painel({
           created_at: row?.created_at,
         }))
         .filter((row) => row.operator && row.created_at);
+
+      const periodItemCodes = uniqueNonEmpty([
+        ...scans.map((row) => extractItemCodeFromOrderProduct(row?.order?.product || row?.code)),
+        ...entriesForTimeline.map((row) => extractItemCodeFromOrderProduct(row?.order?.product || row?.product || row?.code)),
+      ]);
+      const periodItemTechByCode = { ...itemTechByCode };
+      const missingPeriodItemCodes = periodItemCodes.filter((code) => !periodItemTechByCode[code]);
+      if (missingPeriodItemCodes.length) {
+        let periodItemsQuery = supabase
+          .from("items")
+          .select("code, description, color, cycle_seconds, cavities, padrao, embalagem, part_weight_g, unit_value, resin, unidade, cliente")
+          .in("code", missingPeriodItemCodes);
+        if (clientId) periodItemsQuery = periodItemsQuery.eq("company_id", clientId);
+        const { data: periodItems, error: periodItemsError } = await periodItemsQuery;
+        if (periodItemsError) {
+          console.warn("Falha ao carregar ciclo/cavidades historicos no painel:", periodItemsError);
+        }
+        (periodItems || []).forEach((item) => {
+          const code = String(item?.code || "").trim();
+          if (!code) return;
+          periodItemTechByCode[code] = mapItemTechRow(item);
+        });
+      }
+
+      entriesForTimeline = normalizeSensorEntriesByItemCavities(entriesForTimeline, periodItemTechByCode);
 
       const producedBoxesFromScans = scans.length;
       const producedPiecesFromScans = scans.reduce((acc, scan) => acc + Number(scan?.qty_pieces || 0), 0);
@@ -1243,7 +1443,9 @@ export default function Painel({
         periodEnd: period.end,
         source,
         machineIds: filteredMachineIds,
-        itemTechByCode,
+        itemTechByCode: periodItemTechByCode,
+        scans,
+        entries: entriesForTimeline,
       });
       const trendGoal = dynamicGoal.goalBoxes;
       const trendGoalPieces = dynamicGoal.goalPieces;
@@ -1303,6 +1505,7 @@ export default function Painel({
         stopEvents: stops,
         scrapEvents: scraps,
         operatorEvents,
+        goalSegments: dynamicGoal.goalSegments || [],
         periodLabel: period.label,
         periodStartIso: period.start.toISO(),
         periodEndIso: period.end.toISO(),
@@ -1457,11 +1660,17 @@ export default function Painel({
               copy[machine] = (copy[machine] || []).map((item) => {
                 if (matchesOrder(item, orderId)) {
                   found = true;
+                  const itemCode = extractItemCodeFromOrderProduct(item?.product);
+                  const itemCavities = itemCode ? Number(itemTechByCode?.[itemCode]?.cavities || 0) : 0;
+                  const effectiveCavities = getCavitiesWithinMold(cavitiesUsed, itemCavities, itemCavities);
+                  const effectiveGoodQty = pulseCount > 0 && effectiveCavities > 0
+                    ? pulseCount * effectiveCavities
+                    : goodQty;
                   return {
                     ...item,
-                    sensor_produced_pieces: Number(item?.sensor_produced_pieces || 0) + goodQty,
+                    sensor_produced_pieces: Number(item?.sensor_produced_pieces || 0) + effectiveGoodQty,
                     sensor_pulse_count: Number(item?.sensor_pulse_count || 0) + pulseCount,
-                    sensor_cavities_used: cavitiesUsed || Number(item?.sensor_cavities_used || 0),
+                    sensor_cavities_used: effectiveCavities || Number(item?.sensor_cavities_used || 0),
                   };
                 }
                 return item;
@@ -1582,7 +1791,7 @@ export default function Painel({
         console.warn("Falha ao remover canal realtime:", err);
       }
     };
-  }, [clientId, onScanned]);
+  }, [clientId, itemTechByCode, onScanned]);
 
   const overview = useMemo(() => {
     const nowMs = Date.now() + (Number(tick || 0) * 0);
@@ -1610,7 +1819,10 @@ export default function Painel({
       const itemCode = extractItemCodeFromOrderProduct(ativa?.product);
       const tech = itemCode ? itemTechByCode[itemCode] : null;
       const cycleSeconds = Number(tech?.cycleSeconds || 0);
-      const cavities = Number(tech?.cavities || 0);
+      const itemCavities = Number(tech?.cavities || 0);
+      const activeOrder = activeOrderMap.get(String(machine || "").toUpperCase()) || null;
+      const machineMeta = machineMetaById[String(machine || "").toUpperCase()] || {};
+      const cavities = getCavitiesWithinMold(machineMeta?.cavities || activeOrder?.cavitiesUsed, itemCavities, itemCavities);
       if (!(cycleSeconds > 0 && cavities > 0)) continue;
 
       const elapsedSeconds = Math.max(0, (cappedNowMs - windowStartMs) / 1000);
@@ -1618,7 +1830,6 @@ export default function Painel({
       const metaPiecesNow = (elapsedSeconds / 3600) * piecesPerHour;
 
       const piecesPerBox = parsePiecesPerBox(ativa?.standard);
-      const activeOrder = activeOrderMap.get(String(machine || "").toUpperCase()) || null;
       const producedPieces = Number(activeOrder?.filteredProducedPieces ?? activeOrder?.producedPieces ?? 0);
       const producedBoxes = piecesPerBox > 0
         ? producedPieces / piecesPerBox
@@ -1658,6 +1869,7 @@ export default function Painel({
       trendRealPieces: periodData.trendRealPieces || [],
       trendGoalPieces: periodData.trendGoalPieces || [],
       trendStopSeconds: periodData.trendStopSeconds || [],
+      goalSegments: periodData.goalSegments || [],
       shiftOutput: periodData.shiftOutput || [],
       scrapPieces: Number(periodData.scrapPieces || 0),
       scrapPct: Number(periodData.scrapPct || 0),
@@ -1666,7 +1878,7 @@ export default function Painel({
       trendLabels: periodData.trendLabels || [],
       periodLabel: periodData.periodLabel || "Hoje",
     };
-  }, [filteredMachineIds, periodData, source, itemTechByCode, tick]);
+  }, [filteredMachineIds, periodData, source, itemTechByCode, machineMetaById, tick]);
 
   function getBucketDelta(values, index) {
     const current = Number(values?.[index] || 0);
@@ -1795,12 +2007,12 @@ export default function Painel({
       const progress = plannedPieces > 0 ? Math.min(100, Math.round((producedPieces / plannedPieces) * 100)) : 0;
       const remainingPieces = Math.max(0, plannedPieces - producedPieces);
 
-      const startedAt = ativa?.restarted_at || ativa?.started_at || null;
+      const startedAt = ativa?.started_at || ativa?.restarted_at || null;
       const startedMs = startedAt ? DateTime.fromISO(String(startedAt)).toMillis() : NaN;
       const cycleStandard = Number(itemTech?.cycleSeconds || 0);
       const itemCavities = Number(itemTech?.cavities || 0);
-      const cavities = Number(machineMeta?.cavities || activeOrder?.cavitiesUsed || itemCavities || 0);
-      const theoreticalCavities = itemCavities;
+      const cavities = getCavitiesWithinMold(machineMeta?.cavities || activeOrder?.cavitiesUsed, itemCavities, itemCavities);
+      const theoreticalCavities = cavities;
       const lastPulseAt = machineMeta?.sensor_last_pulse_at || null;
       const lastPulseMs = lastPulseAt ? DateTime.fromISO(String(lastPulseAt)).toMillis() : NaN;
       const oeeNowMs = pointingMode === "sensor" && Number.isFinite(lastPulseMs) && (!Number.isFinite(startedMs) || lastPulseMs >= startedMs)
@@ -1951,7 +2163,7 @@ export default function Painel({
 
     setSavingCavities(true);
     try {
-      await saveMachineCavities({ machineId: machine.id, machineRecordId: machine.machineRecordId, clientId, value });
+      await saveMachineCavities({ machineId: machine.id, machineRecordId: machine.machineRecordId, clientId, value, maxCavities: machine.itemCavities });
 
       setSensorRuntimeByMachine((prev) => ({
         ...prev,
@@ -1988,6 +2200,7 @@ export default function Painel({
     const realValues = overview.trendRealPieces || [];
     const goalValues = overview.trendGoalPieces || [];
     const stopValues = overview.trendStopSeconds || [];
+    const goalSegments = overview.goalSegments || [];
     const showStopStack = !isDailyTrendPeriod(periodFilter) && machineFilter !== "__ALL__";
     const labels = overview.trendLabels || [];
     const rawBuckets = labels.map((label, index) => {
@@ -2007,6 +2220,24 @@ export default function Painel({
       const bucketEnd = periodStart?.isValid && !isDailyTrendPeriod(periodFilter)
         ? periodStart.plus({ hours: index })
         : null;
+      const bucketStartMs = bucketStart?.isValid ? bucketStart.toMillis() : NaN;
+      const bucketEndMs = bucketEnd?.isValid ? bucketEnd.toMillis() : NaN;
+      const itemSegments = Number.isFinite(bucketStartMs) && Number.isFinite(bucketEndMs)
+        ? goalSegments
+          .filter((segment) => Math.min(bucketEndMs, Number(segment.endMs || 0)) > Math.max(bucketStartMs, Number(segment.startMs || 0)))
+          .map((segment) => ({
+            machine: segment.machine,
+            itemCode: segment.itemCode,
+            itemLabel: segment.itemLabel || segment.itemCode || "-",
+            product: segment.product || segment.itemLabel || segment.itemCode || "-",
+            cycleSeconds: Number(segment.cycleSeconds || 0),
+            cavities: Number(segment.cavities || 0),
+            startMs: Number(segment.startMs || 0),
+            endMs: Number(segment.endMs || 0),
+          }))
+        : [];
+      const itemLabels = uniqueNonEmpty(itemSegments.map((segment) => segment.itemLabel));
+      const itemSummary = itemLabels.length ? itemLabels.join(" / ") : "";
       return {
         id: `${label}-${index}`,
         bucketIndex: index,
@@ -2018,6 +2249,8 @@ export default function Painel({
         efficiency,
         startIso: bucketStart?.isValid ? bucketStart.toISO() : null,
         endIso: bucketEnd?.isValid ? bucketEnd.toISO() : null,
+        itemSegments,
+        itemSummary,
       };
     });
     const buckets = !isDailyTrendPeriod(periodFilter) ? rawBuckets.slice(1) : rawBuckets;
@@ -2028,7 +2261,7 @@ export default function Painel({
       stopHeight: Math.max(bucket.stopLoss > 0 ? 3 : 0, Math.round((bucket.stopLoss / maxValue) * 100)),
       goalHeight: Math.max(0, Math.round((bucket.goal / maxValue) * 100)),
     }));
-  }, [machineFilter, overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, overview.trendStopSeconds, periodFilter, periodData.periodStartIso]);
+  }, [machineFilter, overview.goalSegments, overview.trendRealPieces, overview.trendGoalPieces, overview.trendLabels, overview.trendStopSeconds, periodFilter, periodData.periodStartIso]);
 
   const scopedProductionBuckets = useMemo(() => {
     return productionBuckets.length ? productionBuckets : [];
@@ -2195,12 +2428,76 @@ export default function Painel({
         const ms = getIsoMs(row?.created_at);
         return Number.isFinite(ms) && ms >= startMs && ms < endMs;
       });
+    const bucketItemSegments = (selectedProductionBucket.itemSegments || [])
+      .filter((segment) => Math.min(endMs, Number(segment.endMs || 0)) > Math.max(startMs, Number(segment.startMs || 0)))
+      .map((segment) => ({
+        ...segment,
+        startMs: Math.max(startMs, Number(segment.startMs || 0)),
+        endMs: Math.min(endMs, Number(segment.endMs || 0)),
+      }));
+    const productionItemSegmentsByMachine = new Map();
+    uniqueNonEmpty(productionEvents.map((row) => row.machine_id)).forEach((machine) => {
+      const machineRows = productionEvents
+        .filter((row) => String(row?.machine_id || "").trim().toUpperCase() === machine)
+        .map((row) => ({ ...row, ms: getIsoMs(row?.created_at) }))
+        .filter((row) => Number.isFinite(row.ms))
+        .sort((a, b) => a.ms - b.ms);
+      const segments = [];
+      let current = null;
+
+      machineRows.forEach((row) => {
+        const itemCode = extractItemCodeFromOrderProduct(row?.product);
+        if (!itemCode) return;
+        const tech = itemTechByCode?.[itemCode] || null;
+        if (current && current.itemCode === itemCode) {
+          current.endMs = Math.max(current.endMs, row.ms);
+          return;
+        }
+        if (current) {
+          current.endMs = Math.max(current.startMs + 1, row.ms);
+          segments.push(current);
+        }
+        current = {
+          machine,
+          itemCode,
+          itemLabel: `${itemCode}${tech?.description ? ` - ${tech.description}` : ""}`,
+          product: row?.product || itemCode,
+          cycleSeconds: Number(tech?.cycleSeconds || 0),
+          cavities: Number(tech?.cavities || 0),
+          startMs: segments.length ? row.ms : startMs,
+          endMs,
+        };
+      });
+
+      if (current) {
+        current.endMs = Math.max(current.startMs + 1, endMs);
+        segments.push(current);
+      }
+      if (segments.length) productionItemSegmentsByMachine.set(machine, segments);
+    });
     const machines = uniqueNonEmpty([
       ...productionEvents.map((row) => row.machine_id),
       ...stopEvents.map((row) => row.machine_id),
+      ...bucketItemSegments.map((row) => row.machine),
+      ...Array.from(productionItemSegmentsByMachine.keys()),
     ]);
     const selectedHourlyMachine = machines.includes(hourlyMachineFilter) ? hourlyMachineFilter : "__NONE__";
     const chartMachines = selectedHourlyMachine === "__NONE__" ? [] : [selectedHourlyMachine];
+    const resolvedBucketItemSegments = selectedHourlyMachine === "__NONE__"
+      ? []
+      : bucketItemSegments.filter((segment) => String(segment.machine || "").trim().toUpperCase() === selectedHourlyMachine);
+    const fallbackItemSegments = selectedHourlyMachine === "__NONE__"
+      ? []
+      : productionItemSegmentsByMachine.get(selectedHourlyMachine) || [];
+    const chartItemSegments = resolvedBucketItemSegments.length ? resolvedBucketItemSegments : fallbackItemSegments;
+    const itemChips = uniqueNonEmpty(chartItemSegments.map((segment) => segment.itemLabel))
+      .map((label) => {
+        const segment = chartItemSegments.find((item) => item.itemLabel === label) || {};
+        return {
+          label,
+          detail: `${formatSeconds(segment.cycleSeconds)} • ${Number(segment.cavities || 0) || "-"} cav.`,
+        };
+      });
     const totalProduction = productionEvents.reduce((acc, row) => acc + Number(row?.pieces || 0), 0);
     const totalCycles = productionEvents.reduce((acc, row) => acc + Number(row?.cycles || 0), 0);
     const totalScrap = scrapEvents.reduce((acc, row) => acc + Number(row?.qty || 0), 0);
@@ -2218,7 +2515,7 @@ export default function Painel({
       if (String(stop?.machine_id || "").trim().toUpperCase() !== String(machine || "").trim().toUpperCase()) return false;
       return Math.min(toMs, stop.endMs) > Math.max(fromMs, stop.startMs);
     });
-    const targetCycleValues = [];
+    const targetCycleValues = chartItemSegments.map((segment) => Number(segment.cycleSeconds || 0)).filter((value) => value > 0);
     const cyclePointsByMachine = chartMachines.map((machine) => {
       const rows = productionEvents
         .filter((row) => String(row?.machine_id || "").trim().toUpperCase() === machine)
@@ -2254,7 +2551,7 @@ export default function Painel({
     const targetCycleSeconds = targetCycleValues.length
       ? targetCycleValues.reduce((acc, value) => acc + value, 0) / targetCycleValues.length
       : 0;
-    const maxCycleValue = Math.max(1, targetCycleSeconds, ...cyclePoints.map((point) => Number(point.cycleSeconds || 0))) * 1.15;
+    const maxCycleValue = Math.max(1, targetCycleSeconds, ...targetCycleValues, ...cyclePoints.map((point) => Number(point.cycleSeconds || 0))) * 1.15;
     const scaleX = (ms) => chartLeft + ((ms - startMs) / Math.max(1, endMs - startMs)) * plotWidth;
     const scaleY = (value) => chartTop + plotHeight - (Number(value || 0) / maxCycleValue) * plotHeight;
     const baselineY = chartTop + plotHeight;
@@ -2282,6 +2579,16 @@ export default function Painel({
     const targetCycleLine = targetCycleSeconds > 0
       ? `${chartLeft},${scaleY(targetCycleSeconds)} ${chartLeft + plotWidth},${scaleY(targetCycleSeconds)}`
       : "";
+    const targetCycleSegments = chartItemSegments
+      .filter((segment) => Number(segment.cycleSeconds || 0) > 0)
+      .map((segment, index) => ({
+        id: `target-cycle-${selectedHourlyMachine}-${index}`,
+        x1: scaleX(segment.startMs),
+        x2: scaleX(segment.endMs),
+        y: scaleY(segment.cycleSeconds),
+        label: segment.itemLabel,
+        cycleSeconds: segment.cycleSeconds,
+      }));
     const cycleGuides = [0.33, 0.66, 1].map((ratio) => ({
       y: scaleY(maxCycleValue * ratio),
       label: maxCycleValue * ratio,
@@ -2337,13 +2644,14 @@ export default function Painel({
       scrapByReason,
       timelineRows,
       operatorTimeline,
+      itemChips,
       machines,
       selectedHourlyMachine,
       bins: Array.from({ length: 12 }, (_, index) => ({
         id: `${selectedProductionBucket.id}-bin-${index}`,
         label: DateTime.fromMillis(startMs + index * 5 * 60 * 1000).setZone("America/Sao_Paulo").toFormat("HH:mm"),
       })),
-      chart: { width: chartWidth, height: chartHeight, cycleSegments, cyclePointDots, targetCycleLine, cycleGuides, stopBands },
+      chart: { width: chartWidth, height: chartHeight, cycleSegments, cyclePointDots, targetCycleLine, targetCycleSegments, cycleGuides, stopBands },
     };
   }, [hourlyMachineFilter, itemTechByCode, periodData.operatorEvents, periodData.productionEvents, periodData.scrapEvents, periodData.stopEvents, selectedProductionBucket]);
 
@@ -2693,6 +3001,13 @@ export default function Painel({
                   {hourlyProductionReport.selectedHourlyMachine === "__NONE__" && (
                     <div className="hourly-chart-empty">Selecione uma máquina para visualizar os ciclos.</div>
                   )}
+                    {hourlyProductionReport.itemChips.length > 0 && hourlyProductionReport.selectedHourlyMachine !== "__NONE__" && (
+                      <div className="hourly-cycle-items" aria-label="Itens produzidos na hora">
+                        {hourlyProductionReport.itemChips.map((item) => (
+                          <span key={item.label}><b>{item.label}</b><em>{item.detail}</em></span>
+                        ))}
+                      </div>
+                    )}
                   <svg
                     className="hourly-area-chart"
                     viewBox={`0 0 ${hourlyProductionReport.chart.width} ${hourlyProductionReport.chart.height}`}
@@ -2722,7 +3037,11 @@ export default function Painel({
                     {hourlyProductionReport.chart.cycleSegments.map((segment) => (
                       <path key={`${segment.id}-area`} className={`hourly-cycle-area is-${segment.tone}`} d={segment.area} />
                     ))}
-                    {hourlyProductionReport.chart.targetCycleLine && <polyline className="hourly-goal-line" points={hourlyProductionReport.chart.targetCycleLine} />}
+                    {hourlyProductionReport.chart.targetCycleSegments.length > 0
+                      ? hourlyProductionReport.chart.targetCycleSegments.map((segment) => (
+                        <line key={segment.id} className="hourly-goal-line" x1={segment.x1} x2={segment.x2} y1={segment.y} y2={segment.y} />
+                      ))
+                      : hourlyProductionReport.chart.targetCycleLine && <polyline className="hourly-goal-line" points={hourlyProductionReport.chart.targetCycleLine} />}
                     {hourlyProductionReport.chart.cycleSegments.map((segment) => (
                       <path key={segment.id} className={`hourly-cycle-line is-${segment.tone}`} d={segment.path} />
                     ))}

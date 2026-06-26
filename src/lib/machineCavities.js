@@ -12,11 +12,15 @@ function isMissingRpc(error) {
   return code === '42883' || code === 'PGRST202' || message.includes('function') || message.includes('schema cache')
 }
 
-export async function saveMachineCavities({ machineId, machineRecordId, clientId, value }) {
+export async function saveMachineCavities({ machineId, machineRecordId, clientId, value, maxCavities = 0 }) {
   const machineCode = String(machineId || '').trim().toUpperCase()
   const cavities = Number.parseInt(String(value || '').replace(/[^0-9]/g, ''), 10)
   if (!machineCode || !Number.isFinite(cavities) || cavities <= 0) {
     throw new Error('Cavidades abertas inválidas.')
+  }
+  const max = Number.parseInt(String(maxCavities || '').replace(/[^0-9]/g, ''), 10)
+  if (Number.isFinite(max) && max > 0 && cavities > max) {
+    throw new Error(`Cavidades abertas não pode ser maior que o molde (${max}).`)
   }
 
   if (clientId) {

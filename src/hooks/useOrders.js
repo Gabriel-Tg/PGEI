@@ -5,6 +5,7 @@ import { MAQUINAS, MOTIVOS_PARADA } from '../domain/constants'
 import { localDateTimeToISO, jaIniciou } from '../lib/utils'
 import { mapOrder } from '../domain/entities'
 import { fetchAllPages } from '../lib/supabasePagination'
+import { saveMachineCavities } from '../lib/machineCavities'
 
 export default function useOrders(clientId = null, machineIds = MAQUINAS){
   const [orders, setOrders] = useState([])
@@ -16,11 +17,86 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
 
   const withClient = (query) => (clientId ? query.eq('company_id', clientId) : query)
 
+  function getOrderItemCode(order = {}) {
+    const product = String(order?.product || '').trim()
+    const code = product.split('-')[0]?.trim()
+    return code || null
+  }
+
+  async function getOrderMoldCavities(order) {
+    const itemCode = getOrderItemCode(order)
+    if (!itemCode) return 0
+
+    const res = await withClient(
+      supabase
+        .from('items')
+        .select('cavities')
+        .eq('code', itemCode)
+        .limit(1)
+    ).maybeSingle()
+
+    if (res.error) {
+      console.warn('Falha ao carregar cavidades do item:', res.error)
+      return 0
+    }
+    return Number(res.data?.cavities || 0)
+  }
+
+  async function resetMachineCavitiesForOrder(order) {
+    const machineId = String(order?.machine_id || '').trim().toUpperCase()
+    if (!machineId) return
+    const moldCavities = await getOrderMoldCavities(order)
+    if (!(moldCavities > 0)) return
+
+    try {
+      await saveMachineCavities({ machineId, clientId, value: moldCavities, maxCavities: moldCavities })
+    } catch (error) {
+      console.warn('Falha ao ajustar cavidades em uso para a O.P.:', error)
+    }
+  }
+
+  function getNextOpenOrderForMachine(machineId, ignoredOrderId) {
+    const machine = String(machineId || '').trim().toUpperCase()
+    return [...orders]
+      .filter((order) => {
+        if (String(order?.id || '') === String(ignoredOrderId || '')) return false
+        return !order?.finalized && String(order?.machine_id || '').trim().toUpperCase() === machine
+      })
+      .sort((a, b) => (Number(a?.pos ?? 999) - Number(b?.pos ?? 999)) || String(a?.created_at || '').localeCompare(String(b?.created_at || '')))[0] || null
+  }
+
   // basic fetchers
   async function hydrateSensorProduction(openOrders) {
     const rows = Array.isArray(openOrders) ? openOrders : []
     const orderIds = rows.map((o) => o?.id).filter(Boolean)
     if (!orderIds.length) return rows
+
+    const itemCodes = [...new Set(rows.map(getOrderItemCode).filter(Boolean))]
+    const cavitiesByItemCode = new Map()
+    if (itemCodes.length) {
+      const itemsRes = await withClient(
+        supabase
+          .from('items')
+          .select('code, cavities')
+          .in('code', itemCodes)
+      )
+      if (!itemsRes.error) {
+        ;(itemsRes.data || []).forEach((item) => {
+          const code = String(item?.code || '').trim()
+          const cavities = Number(item?.cavities || 0)
+          if (code && cavities > 0) cavitiesByItemCode.set(code, cavities)
+        })
+      } else {
+        console.warn('Falha ao carregar cavidades dos itens ativos:', itemsRes.error)
+      }
+    }
+
+    const cavitiesByOrderId = new Map()
+    rows.forEach((order) => {
+      const code = getOrderItemCode(order)
+      const cavities = code ? Number(cavitiesByItemCode.get(code) || 0) : 0
+      if (order?.id && cavities > 0) cavitiesByOrderId.set(String(order.id), cavities)
+    })
 
     const { data, error } = await fetchAllPages(() => {
       let query = supabase
@@ -40,10 +116,17 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
       const key = String(entry?.order_id || '')
       if (!key) return
       const current = totalsByOrder.get(key) || { pieces: 0, pulses: 0, cavities: 0 }
-      current.pieces += Number(entry?.good_qty || 0)
-      current.pulses += Number(entry?.pulse_count || 0)
+      const pulses = Number(entry?.pulse_count || 0)
+      const moldCavities = Number(cavitiesByOrderId.get(key) || 0)
       const cavities = Number(entry?.cavities_used || 0)
-      if (cavities > 0) current.cavities = cavities
+      const effectiveCavities = moldCavities > 0
+        ? Math.min(cavities > 0 ? cavities : moldCavities, moldCavities)
+        : cavities
+      current.pieces += pulses > 0 && effectiveCavities > 0
+        ? pulses * effectiveCavities
+        : Number(entry?.good_qty || 0)
+      current.pulses += pulses
+      if (effectiveCavities > 0) current.cavities = effectiveCavities
       totalsByOrder.set(key, current)
     })
 
@@ -318,6 +401,9 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
     const res = await supabase.from('orders').update(p).eq('id', order.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao finalizar: ' + res.error.message); if(before) setOrders(prev=>[before,...prev]); setFinalizedOrders(prev=>prev.filter(o=>o.id!==order.id)); return }
     if (res.data) upsertFinalizedLocal(res.data)
+
+    const nextOrder = getNextOpenOrderForMachine(order.machine_id, order.id)
+    if (nextOrder) await resetMachineCavitiesForOrder(nextOrder)
   }
 
   // === ENVIAR PARA FILA (só aparece na LISTA) =======================
@@ -359,6 +445,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
         status: 'AGUARDANDO'
       }).eq('id', nextPanelOrder.id)
       if (r.error) { alert('Erro ao promover item para o painel: ' + r.error.message); return }
+      await resetMachineCavitiesForOrder(nextPanelOrder)
     }
 
     // 3) reindexar fila 1..N
@@ -473,6 +560,7 @@ export default function useOrders(clientId = null, machineIds = MAQUINAS){
     const res = await supabase.from('orders').update(updatePayload).eq('id', order.id).select('*').maybeSingle()
     if (res.error) { alert('Erro ao iniciar: '+res.error.message); return }
     if (res.data) patchOrderLocal(res.data.id, res.data)
+    await resetMachineCavitiesForOrder(res.data || order)
   }
 
   // Evita registrar parada com horário que se sobrepõe a outra parada da mesma máquina

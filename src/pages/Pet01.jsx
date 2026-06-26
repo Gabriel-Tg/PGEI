@@ -181,7 +181,10 @@ const [currentShift, setCurrentShift] = useState(() => {
   const activeItemCode = useMemo(() => String(ativa?.product || '').split('-')[0]?.trim() || '', [ativa?.product])
   const activeItemTech = activeItemCode ? itemTechByCode?.[activeItemCode] : null
   const configuredCavities = Number(activeItemTech?.cavities || 0)
-  const activeCavities = Number(machineMeta?.cavities || configuredCavities || 0)
+  const machineCavities = Number(machineMeta?.cavities || 0)
+  const activeCavities = configuredCavities > 0
+    ? Math.min(machineCavities || configuredCavities, configuredCavities)
+    : machineCavities
   const runtimeMeta = sensorRuntime || machineMeta || {}
   const configuredCycleSeconds = Number(runtimeMeta?.ciclo_cadastrado_seconds || activeItemTech?.cycleSeconds || 0) || null
   const activeStatus = String(ativa?.status || '').toUpperCase()
@@ -629,7 +632,7 @@ const [currentShift, setCurrentShift] = useState(() => {
 
     setSavingCavities(true)
     try {
-      await saveMachineCavities({ machineId, machineRecordId: machineMeta?.id, clientId, value })
+      await saveMachineCavities({ machineId, machineRecordId: machineMeta?.id, clientId, value, maxCavities: configuredCavities })
 
       setSensorRuntime((prev) => ({ ...(prev || {}), cavities: value }))
       onMachineMetaUpdate && onMachineMetaUpdate(machineId, { cavities: value })

@@ -257,8 +257,10 @@ export default async function handler(req, res) {
   const shiftWindow = getCurrentShiftWindow(new Date())
   const shiftOperator = await findShiftOperator({ supabase, companyId, machineCode, shiftWindow })
   const receivedAt = nowIso()
+  let shouldResetCavitiesToMold = false
 
   if (activeOrder && String(activeOrder.status || '').toUpperCase() === 'AGUARDANDO') {
+    shouldResetCavitiesToMold = true
     const startPayload = {
       status: 'PRODUZINDO',
       started_at: receivedAt,
@@ -328,7 +330,7 @@ export default async function handler(req, res) {
       .eq('id', activeOrder.id)
   }
 
-  let cavitiesUsed = Number(machine.cavities || 0) > 0 ? Math.trunc(Number(machine.cavities)) : 1
+  let itemCavities = 0
   if (activeOrder?.product) {
     const productCode = parseProductCode(activeOrder.product)
     if (productCode) {
@@ -345,9 +347,13 @@ export default async function handler(req, res) {
       }
 
       const cavities = Number((itemRows || [])[0]?.cavities || 0)
-      if (!(Number(machine.cavities || 0) > 0) && Number.isFinite(cavities) && cavities > 0) cavitiesUsed = Math.trunc(cavities)
+      if (Number.isFinite(cavities) && cavities > 0) itemCavities = Math.trunc(cavities)
     }
   }
+  const machineCavities = Number(machine.cavities || 0) > 0 ? Math.trunc(Number(machine.cavities)) : 0
+  const cavitiesUsed = itemCavities > 0
+    ? (shouldResetCavitiesToMold ? itemCavities : Math.min(machineCavities || itemCavities, itemCavities))
+    : machineCavities || 1
 
   const ignoreCountLeft = Number(machine.sensor_ignore_pulse_count || 0)
   const operationMode = String(machine.sensor_operation_mode || 'automatic')
@@ -431,6 +437,7 @@ export default async function handler(req, res) {
   const sensorStatus = computeSensorStatus(lastPulseMs, lastHeartbeatMs)
 
   const machineUpdate = {
+    cavities: cavitiesUsed,
     sensor_status: sensorStatus,
     sensor_auto_stopped: isAutoStopped,
     sensor_auto_stop_at: autoStopAt,
